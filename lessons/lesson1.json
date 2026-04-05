@@ -8,7 +8,7 @@
       "id": "L1-B1",
       "type": "read",
       "title": "Setup: One Mass, One Spring",
-      "content_html": "<p>Imagine a mass <strong>m</strong> attached to a spring, which is fixed to a wall. The mass sits on a frictionless surface and can slide left and right.</p><p>When you pull the mass to the right and release it, the spring pulls it back. When it overshoots to the left, the spring pushes it right again. It oscillates forever (no friction).</p><p>The spring exerts a restoring force proportional to how far you stretch it:</p><div class=\"equation\">$$F = -kx$$</div><p>This is <strong>Hooke's Law</strong>. The constant <em>k</em> is the <strong>spring constant</strong> (units: N/m). The minus sign means the force always opposes the displacement — pull right, force pushes left.</p><p><em>x</em> is the displacement from the equilibrium (rest) position. When <em>x</em> = 0, the spring is relaxed and exerts no force.</p>"
+      "content_html": "<div class=\"interactive-spring\" data-interactive=\"spring\"></div><p>Drag the mass and release it. Watch it oscillate.</p><p>A mass <strong>m</strong> is attached to a spring, fixed to a wall. The mass sits on a frictionless surface and can slide left and right. When you pull it and let go, the spring pulls it back. When it overshoots, the spring pushes it the other way. With no friction, it oscillates forever.</p><p>The spring exerts a <strong>restoring force</strong> proportional to how far you stretch it:</p><div class=\"equation\">$$F = -kx$$</div><p>This is <strong>Hooke's Law</strong>. The constant $$k$$ is the <strong>spring constant</strong>, measured in <strong>N/m</strong> (newtons per meter). What does that mean physically? If $$k = 15$$ N/m, then stretching the spring by 1 meter requires a force of 15 newtons. A larger $$k$$ means the spring is <em>stiffer</em> — it takes more force to stretch it the same distance, and it pulls back harder.</p><p>The minus sign means the force always opposes the displacement — pull right, force pushes left.</p><p>$$x$$ is the displacement from the equilibrium (rest) position. When $$x = 0$$, the spring is relaxed and exerts no force.</p><p>Notice in the animation: the mass moves fastest through the center (where the spring is relaxed) and slowest at the extremes (where the spring force is strongest, decelerating it). The force doesn't make it go faster — it <em>reverses</em> it. This is the key to oscillation.</p>"
     },
     {
       "id": "L1-B2",
@@ -27,8 +27,8 @@
         {
           "id": "step1",
           "instruction": "Divide both sides by m to isolate the acceleration term.",
-          "result_equation": "\\ddot{x} = -\\frac{k}{m}x",
-          "explanation": "We isolate $$\\ddot{x}$$ to see the structure more clearly: the acceleration equals a negative constant times the displacement."
+          "result_equation": "\\ddot{x} = -\\frac{k}{m}\\,x",
+          "explanation": "We divide every term by $$m$$: the left side $$m\\ddot{x} \\div m = \\ddot{x}$$. The right side $$-kx \\div m = -\\frac{kx}{m}$$. Now, $$-\\frac{kx}{m}$$ and $$-\\frac{k}{m} \\cdot x$$ are the exact same expression — we're just grouping it to separate the <strong>constant</strong> $$(-k/m)$$ from the <strong>unknown function</strong> $$(x)$$. Why? Because our next move is to ask: what function, when differentiated twice, gives back itself times a constant? Writing it as (constant) × x makes that pattern visible."
         },
         {
           "id": "step2",
@@ -70,7 +70,7 @@
       "id": "L1-B4",
       "type": "calculate",
       "title": "Estimate ω",
-      "prompt": "For a spring with k = 15 N/m and a mass m = 0.3 kg, estimate the angular frequency ω in rad/s. Express your answer in scientific notation.",
+      "prompt": "Estimate this in your head — no calculator. For k = 15 N/m and m = 0.3 kg, what is ω? Hint: 15 / 0.3 = 50, and √50 is between √49 = 7 and √64 = 8.",
       "formula": "Math.sqrt(k / m)",
       "variables": { "k": 15, "m": 0.3 },
       "expected_value": 7.07,

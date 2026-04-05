@@ -129,7 +129,321 @@
     const div = document.createElement('div');
     div.className = 'content';
     div.innerHTML = block.content_html;
+
+    // Initialize interactive elements after DOM insertion
+    setTimeout(() => {
+      div.querySelectorAll('[data-interactive="spring"]').forEach(el => {
+        initSpringAnimation(el);
+      });
+    }, 0);
+
     return div;
+  }
+
+  // ── Spring Animation ──
+  function initSpringAnimation(container) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'spring-canvas';
+    canvas.width = 600;
+    canvas.height = 200;
+    container.appendChild(canvas);
+
+    // Controls bar
+    const controls = document.createElement('div');
+    controls.className = 'spring-controls';
+
+    // Play/pause
+    const playBtn = document.createElement('button');
+    playBtn.className = 'btn btn-secondary spring-ctrl-btn';
+    playBtn.textContent = '\u23f8 Pause';
+    controls.appendChild(playBtn);
+
+    // Restart
+    const restartBtn = document.createElement('button');
+    restartBtn.className = 'btn btn-secondary spring-ctrl-btn';
+    restartBtn.textContent = '\u21bb Reset';
+    controls.appendChild(restartBtn);
+
+    // k slider
+    const kGroup = document.createElement('div');
+    kGroup.className = 'spring-ctrl-group';
+    kGroup.innerHTML = '<label>k (N/m)</label>';
+    const kSlider = document.createElement('input');
+    kSlider.type = 'range';
+    kSlider.min = '2';
+    kSlider.max = '60';
+    kSlider.step = '1';
+    kSlider.value = '15';
+    const kVal = document.createElement('span');
+    kVal.className = 'spring-ctrl-val';
+    kVal.textContent = '15';
+    kGroup.appendChild(kSlider);
+    kGroup.appendChild(kVal);
+    controls.appendChild(kGroup);
+
+    // m slider
+    const mGroup = document.createElement('div');
+    mGroup.className = 'spring-ctrl-group';
+    mGroup.innerHTML = '<label>m (kg)</label>';
+    const mSlider = document.createElement('input');
+    mSlider.type = 'range';
+    mSlider.min = '0.1';
+    mSlider.max = '3';
+    mSlider.step = '0.1';
+    mSlider.value = '0.3';
+    const mVal = document.createElement('span');
+    mVal.className = 'spring-ctrl-val';
+    mVal.textContent = '0.3';
+    mGroup.appendChild(mSlider);
+    mGroup.appendChild(mVal);
+    controls.appendChild(mGroup);
+
+    // omega readout
+    const omegaReadout = document.createElement('div');
+    omegaReadout.className = 'spring-omega-readout';
+    controls.appendChild(omegaReadout);
+
+    container.appendChild(controls);
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = 200 * dpr;
+      canvas.style.height = '200px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const W = () => canvas.width / dpr;
+    const H = () => 200;
+    const wallX = 40;
+    const restX = () => W() * 0.5;
+    const massR = 20;
+    let k = 15, m = 0.3;
+    let omega = Math.sqrt(k / m);
+    let amplitude = 80;
+    let phase = 0;
+    let t = 0;
+    let paused = false;
+    let dragging = false;
+    let dragX = 0;
+
+    function updateOmega() {
+      omega = Math.sqrt(k / m);
+      omegaReadout.innerHTML = '\u03c9 = ' + omega.toFixed(2) + ' rad/s';
+    }
+    updateOmega();
+
+    function onParamChange() {
+      // Freeze at current visual position, restart with new params
+      const currentX = restX() + amplitude * Math.cos(omega * t + phase);
+      const newOmega = Math.sqrt(k / m);
+      amplitude = currentX - restX();
+      phase = 0;
+      t = 0;
+      omega = newOmega;
+      omegaReadout.innerHTML = '\u03c9 = ' + omega.toFixed(2) + ' rad/s';
+    }
+
+    kSlider.addEventListener('input', () => {
+      k = parseFloat(kSlider.value);
+      kVal.textContent = k;
+      onParamChange();
+    });
+    mSlider.addEventListener('input', () => {
+      m = parseFloat(mSlider.value);
+      mVal.textContent = m.toFixed(1);
+      onParamChange();
+    });
+    playBtn.addEventListener('click', () => {
+      paused = !paused;
+      playBtn.textContent = paused ? '\u25b6 Play' : '\u23f8 Pause';
+    });
+    restartBtn.addEventListener('click', () => {
+      amplitude = 80;
+      phase = 0;
+      t = 0;
+      paused = false;
+      playBtn.textContent = '\u23f8 Pause';
+    });
+
+    function springPath(startX, endX, y, coils) {
+      ctx.beginPath();
+      ctx.moveTo(startX, y);
+      const dx = endX - startX;
+      const coilW = dx / (coils * 2 + 2);
+      let cx = startX + coilW;
+      for (let i = 0; i < coils; i++) {
+        ctx.lineTo(cx, y - 12);
+        cx += coilW;
+        ctx.lineTo(cx, y + 12);
+        cx += coilW;
+      }
+      ctx.lineTo(endX, y);
+      ctx.strokeStyle = '#6b7280';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    function draw() {
+      const w = W(), h = H();
+      const cy = h / 2;
+      ctx.clearRect(0, 0, w, h);
+
+      let massX;
+      if (dragging) {
+        massX = dragX;
+      } else {
+        massX = restX() + amplitude * Math.cos(omega * t + phase);
+      }
+
+      // Wall
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillRect(0, cy - 50, wallX, 100);
+      ctx.strokeStyle = '#6b7280';
+      ctx.lineWidth = 1;
+      for (let i = -50; i < 100; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(wallX, cy + i);
+        ctx.lineTo(wallX - 10, cy + i + 10);
+        ctx.stroke();
+      }
+
+      // Spring
+      springPath(wallX, massX - massR, cy, 12);
+
+      // Mass
+      ctx.fillStyle = dragging ? '#2563eb' : '#3b82f6';
+      ctx.strokeStyle = '#1d4ed8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(massX - massR, cy - massR, massR * 2, massR * 2, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('m', massX, cy);
+
+      // Equilibrium line
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#d1d5db';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(restX(), cy - 40);
+      ctx.lineTo(restX(), cy + 40);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = '#9ca3af';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('x = 0', restX(), cy + 55);
+
+      // Displacement arrow
+      const disp = massX - restX();
+      if (Math.abs(disp) > 5) {
+        ctx.strokeStyle = '#dc2626';
+        ctx.fillStyle = '#dc2626';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(restX(), cy + 35);
+        ctx.lineTo(massX, cy + 35);
+        ctx.stroke();
+        const dir = disp > 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(massX, cy + 35);
+        ctx.lineTo(massX - dir * 8, cy + 30);
+        ctx.lineTo(massX - dir * 8, cy + 40);
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = 'italic 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('x', (restX() + massX) / 2, cy + 48);
+      }
+
+      // Force arrow
+      if (Math.abs(disp) > 5) {
+        const forceScale = -0.4;
+        const forceLen = disp * forceScale;
+        ctx.strokeStyle = '#16a34a';
+        ctx.fillStyle = '#16a34a';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(massX, cy - 30);
+        ctx.lineTo(massX + forceLen, cy - 30);
+        ctx.stroke();
+        const fdir = forceLen > 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(massX + forceLen, cy - 30);
+        ctx.lineTo(massX + forceLen - fdir * 8, cy - 35);
+        ctx.lineTo(massX + forceLen - fdir * 8, cy - 25);
+        ctx.closePath();
+        ctx.fill();
+        ctx.font = 'italic 13px sans-serif';
+        ctx.fillText('F', massX + forceLen / 2, cy - 40);
+      }
+
+      if (!dragging && !paused) {
+        t += 0.02;
+      }
+      requestAnimationFrame(draw);
+    }
+
+    // Drag interaction
+    function getCanvasX(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      return clientX - rect.left;
+    }
+
+    function isOnMass(cx) {
+      const massX = dragging ? dragX : restX() + amplitude * Math.cos(omega * t + phase);
+      return Math.abs(cx - massX) < massR + 10;
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      if (isOnMass(getCanvasX(e))) {
+        dragging = true;
+        dragX = getCanvasX(e);
+        canvas.style.cursor = 'grabbing';
+      }
+    });
+    canvas.addEventListener('touchstart', e => {
+      if (isOnMass(getCanvasX(e))) {
+        dragging = true;
+        dragX = getCanvasX(e);
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    function onMove(e) {
+      if (!dragging) return;
+      dragX = Math.max(wallX + massR + 20, Math.min(getCanvasX(e), W() - massR));
+      e.preventDefault();
+    }
+    canvas.addEventListener('mousemove', onMove);
+    canvas.addEventListener('touchmove', onMove, { passive: false });
+
+    function onRelease() {
+      if (!dragging) return;
+      amplitude = dragX - restX();
+      phase = 0;
+      t = 0;
+      dragging = false;
+      canvas.style.cursor = 'grab';
+    }
+    canvas.addEventListener('mouseup', onRelease);
+    canvas.addEventListener('mouseleave', onRelease);
+    canvas.addEventListener('touchend', onRelease);
+
+    canvas.style.cursor = 'grab';
+    draw();
   }
 
   // ── Derive Block ──
@@ -141,85 +455,121 @@
     prompt.textContent = block.prompt;
     div.appendChild(prompt);
 
-    // Current equation
-    const eqDiv = document.createElement('div');
-    eqDiv.className = 'derive-current-equation';
-    eqDiv.innerHTML = '$$' + block.starting_equation + '$$';
-    div.appendChild(eqDiv);
+    // Starting equation — always visible
+    const startLabel = document.createElement('div');
+    startLabel.className = 'derive-start-label';
+    startLabel.textContent = 'Starting equation:';
+    div.appendChild(startLabel);
 
-    // Steps
-    const stepsDiv = document.createElement('div');
-    stepsDiv.className = 'derive-steps';
+    const startEqDiv = document.createElement('div');
+    startEqDiv.className = 'derive-current-equation derive-start-equation';
+    startEqDiv.innerHTML = '$$' + block.starting_equation + '$$';
+    div.appendChild(startEqDiv);
 
-    let currentStep = 0;
+    // Steps history container — all revealed steps shown here
+    const historyDiv = document.createElement('div');
+    historyDiv.className = 'derive-history';
+    div.appendChild(historyDiv);
 
-    block.steps.forEach((step, i) => {
-      const stepEl = document.createElement('div');
-      stepEl.className = 'derive-step' + (i === 0 ? '' : ' locked');
-      stepEl.dataset.index = i;
+    // Navigation controls at the bottom
+    const navDiv = document.createElement('div');
+    navDiv.className = 'derive-nav';
 
-      const num = document.createElement('div');
-      num.className = 'derive-step-number';
-      num.textContent = i + 1;
+    const backBtn = document.createElement('button');
+    backBtn.className = 'btn btn-secondary derive-nav-btn';
+    backBtn.textContent = '\u2190 Back';
+    backBtn.disabled = true;
 
-      const content = document.createElement('div');
-      content.className = 'derive-step-content';
+    const stepIndicator = document.createElement('span');
+    stepIndicator.className = 'derive-step-indicator';
+    stepIndicator.textContent = 'Step 0 of ' + block.steps.length;
 
-      const instruction = document.createElement('div');
-      instruction.className = 'derive-step-instruction';
-      instruction.textContent = step.instruction;
-      content.appendChild(instruction);
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'btn btn-primary derive-nav-btn';
+    nextBtn.textContent = 'Next Step \u2192';
 
-      // Result & explanation (hidden until completed)
-      const resultDiv = document.createElement('div');
-      resultDiv.className = 'derive-step-result hidden';
-      resultDiv.innerHTML = '$$' + step.result_equation + '$$';
-      content.appendChild(resultDiv);
+    navDiv.appendChild(backBtn);
+    navDiv.appendChild(stepIndicator);
+    navDiv.appendChild(nextBtn);
+    div.appendChild(navDiv);
 
-      const explanationDiv = document.createElement('div');
-      explanationDiv.className = 'derive-step-explanation hidden';
-      explanationDiv.innerHTML = step.explanation;
-      content.appendChild(explanationDiv);
+    let currentStep = 0;  // next step to reveal (0 = none revealed yet)
 
-      stepEl.appendChild(num);
-      stepEl.appendChild(content);
+    function updateView() {
+      // Update indicator
+      stepIndicator.textContent = 'Step ' + currentStep + ' of ' + block.steps.length;
 
-      stepEl.addEventListener('click', () => {
-        if (i !== currentStep) return;
+      // Back is enabled if any steps are showing
+      backBtn.disabled = currentStep === 0;
 
-        stepEl.classList.add('completed');
-        stepEl.classList.remove('locked');
-        resultDiv.classList.remove('hidden');
-        explanationDiv.classList.remove('hidden');
+      // Next is enabled if there are more steps
+      if (currentStep >= block.steps.length) {
+        nextBtn.disabled = true;
+        nextBtn.textContent = 'Done';
+      } else {
+        nextBtn.disabled = false;
+        nextBtn.textContent = 'Next Step \u2192';
+      }
 
-        // Update equation display
-        eqDiv.innerHTML = '$$' + step.result_equation + '$$';
-        renderKaTeX(eqDiv);
-        renderKaTeX(resultDiv);
-        renderKaTeX(explanationDiv);
+      // Rebuild history: show steps 0..currentStep-1
+      historyDiv.innerHTML = '';
+      for (let i = 0; i < currentStep; i++) {
+        const step = block.steps[i];
+        const stepEl = document.createElement('div');
+        stepEl.className = 'derive-step completed';
 
-        currentStep++;
+        const num = document.createElement('div');
+        num.className = 'derive-step-number';
+        num.textContent = i + 1;
 
-        // Unlock next step
-        const nextStep = stepsDiv.querySelector('[data-index="' + currentStep + '"]');
-        if (nextStep) {
-          nextStep.classList.remove('locked');
-        }
+        const content = document.createElement('div');
+        content.className = 'derive-step-content';
 
-        // Check if derive is complete
-        if (currentStep >= block.steps.length) {
-          const complete = document.createElement('div');
-          complete.className = 'derive-complete';
-          complete.textContent = 'Derivation complete!';
-          div.appendChild(complete);
-          markComplete(block.id, div);
-        }
-      });
+        const instruction = document.createElement('div');
+        instruction.className = 'derive-step-instruction';
+        instruction.textContent = step.instruction;
+        content.appendChild(instruction);
 
-      stepsDiv.appendChild(stepEl);
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'derive-step-result';
+        resultDiv.innerHTML = '$$' + step.result_equation + '$$';
+        content.appendChild(resultDiv);
+
+        const explanationDiv = document.createElement('div');
+        explanationDiv.className = 'derive-step-explanation';
+        explanationDiv.innerHTML = step.explanation;
+        content.appendChild(explanationDiv);
+
+        stepEl.appendChild(num);
+        stepEl.appendChild(content);
+        historyDiv.appendChild(stepEl);
+      }
+      renderKaTeX(historyDiv);
+    }
+
+    nextBtn.addEventListener('click', () => {
+      if (currentStep >= block.steps.length) return;
+      currentStep++;
+      updateView();
+
+      // Check if derive is complete
+      if (currentStep >= block.steps.length && !blockState[block.id].completed) {
+        const complete = document.createElement('div');
+        complete.className = 'derive-complete';
+        complete.textContent = 'Derivation complete!';
+        div.appendChild(complete);
+        markComplete(block.id, div);
+      }
     });
 
-    div.appendChild(stepsDiv);
+    backBtn.addEventListener('click', () => {
+      if (currentStep > 0) {
+        currentStep--;
+        updateView();
+      }
+    });
+
+    updateView();
 
     // Hints
     if (block.hints && block.hints.length > 0) {

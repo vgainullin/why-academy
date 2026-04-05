@@ -1,0 +1,158 @@
+{
+  "lesson_id": "L1",
+  "title": "The Single Spring",
+  "description": "From Hooke's Law to harmonic motion",
+  "prerequisites": [],
+  "blocks": [
+    {
+      "id": "L1-B1",
+      "type": "read",
+      "title": "Setup: One Mass, One Spring",
+      "content_html": "<p>Imagine a mass <strong>m</strong> attached to a spring, which is fixed to a wall. The mass sits on a frictionless surface and can slide left and right.</p><p>When you pull the mass to the right and release it, the spring pulls it back. When it overshoots to the left, the spring pushes it right again. It oscillates forever (no friction).</p><p>The spring exerts a restoring force proportional to how far you stretch it:</p><div class=\"equation\">$$F = -kx$$</div><p>This is <strong>Hooke's Law</strong>. The constant <em>k</em> is the <strong>spring constant</strong> (units: N/m). The minus sign means the force always opposes the displacement — pull right, force pushes left.</p><p><em>x</em> is the displacement from the equilibrium (rest) position. When <em>x</em> = 0, the spring is relaxed and exerts no force.</p>"
+    },
+    {
+      "id": "L1-B2",
+      "type": "read",
+      "title": "The Equation of Motion",
+      "content_html": "<p>Newton's second law says the net force on the mass equals mass times acceleration:</p><div class=\"equation\">$$F = ma = m\\ddot{x}$$</div><p>where $$\\ddot{x}$$ is the second derivative of position with respect to time — the acceleration.</p><p>The only force acting is the spring force, so we combine Hooke's law with Newton's second law:</p><div class=\"equation\">$$m\\ddot{x} = -kx$$</div><p>This is a second-order ordinary differential equation (ODE). It says: <em>the acceleration of the mass is proportional to its displacement, but in the opposite direction</em>.</p><p>Our job now is to <strong>solve</strong> this equation — find a function $$x(t)$$ that satisfies it.</p>"
+    },
+    {
+      "id": "L1-B3",
+      "type": "derive",
+      "title": "Derive the Solution",
+      "prompt": "Starting from the equation of motion, derive the solution x(t) and identify the angular frequency ω.",
+      "starting_equation": "m\\ddot{x} = -kx",
+      "target_equation": "\\omega = \\sqrt{\\frac{k}{m}}",
+      "steps": [
+        {
+          "id": "step1",
+          "instruction": "Divide both sides by m to isolate the acceleration term.",
+          "result_equation": "\\ddot{x} = -\\frac{k}{m}x",
+          "explanation": "We isolate $$\\ddot{x}$$ to see the structure more clearly: the acceleration equals a negative constant times the displacement."
+        },
+        {
+          "id": "step2",
+          "instruction": "Assume a trial solution of the form x(t) = Ae^{iωt}.",
+          "result_equation": "x(t) = Ae^{i\\omega t}",
+          "explanation": "We guess that the solution is an exponential. Why? Because exponentials are eigenfunctions of the derivative operator — differentiating an exponential gives back the same exponential (times a constant). This is the standard technique for linear ODEs with constant coefficients."
+        },
+        {
+          "id": "step3",
+          "instruction": "Compute the second derivative of the trial solution.",
+          "result_equation": "\\ddot{x} = -\\omega^2 A e^{i\\omega t} = -\\omega^2 x",
+          "explanation": "Taking the first derivative: $$\\dot{x} = i\\omega A e^{i\\omega t}$$. Taking the second: $$\\ddot{x} = (i\\omega)^2 A e^{i\\omega t} = -\\omega^2 A e^{i\\omega t}$$. Since $$x = Ae^{i\\omega t}$$, we can write $$\\ddot{x} = -\\omega^2 x$$."
+        },
+        {
+          "id": "step4",
+          "instruction": "Substitute the second derivative into the equation of motion.",
+          "result_equation": "-\\omega^2 x = -\\frac{k}{m}x",
+          "explanation": "We replace $$\\ddot{x}$$ with $$-\\omega^2 x$$ in the equation $$\\ddot{x} = -\\frac{k}{m}x$$."
+        },
+        {
+          "id": "step5",
+          "instruction": "Cancel x from both sides (x ≠ 0) and solve for ω.",
+          "result_equation": "\\omega^2 = \\frac{k}{m}",
+          "explanation": "Since $$x(t)$$ is not identically zero (the mass is oscillating), we can divide both sides by $$x$$. The negative signs cancel too."
+        },
+        {
+          "id": "step6",
+          "instruction": "Take the square root to find ω.",
+          "result_equation": "\\omega = \\sqrt{\\frac{k}{m}}",
+          "explanation": "The angular frequency $$\\omega$$ (in rad/s) depends only on the spring constant and the mass. A stiffer spring or a lighter mass means faster oscillations. The real-valued solution is $$x(t) = A\\cos(\\omega t + \\phi)$$, where $$A$$ is the amplitude and $$\\phi$$ is the phase."
+        }
+      ],
+      "hints": [
+        "What kind of function gives back a negative of itself when differentiated twice?",
+        "Try assuming a solution of the form e^{iωt} — exponentials are the natural guess for constant-coefficient ODEs."
+      ]
+    },
+    {
+      "id": "L1-B4",
+      "type": "calculate",
+      "title": "Estimate ω",
+      "prompt": "For a spring with k = 15 N/m and a mass m = 0.3 kg, estimate the angular frequency ω in rad/s. Express your answer in scientific notation.",
+      "formula": "Math.sqrt(k / m)",
+      "variables": { "k": 15, "m": 0.3 },
+      "expected_value": 7.07,
+      "tolerance_mantissa": 0.5,
+      "tolerance_exponent": 0,
+      "units": "rad/s",
+      "solution_steps": [
+        "$$\\omega = \\sqrt{k/m} = \\sqrt{15 / 0.3}$$",
+        "$$= \\sqrt{50}$$",
+        "$$= 5\\sqrt{2} \\approx 7.07$$ rad/s"
+      ]
+    },
+    {
+      "id": "L1-B5",
+      "type": "code",
+      "title": "Implement and Verify",
+      "prompt": "Define k and m, compute ω, create a time array, compute x(t), and verify numerically that the second derivative of x(t) equals -(k/m)·x(t) at every time step using finite differences.",
+      "starter_code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Parameters\nk = 15.0   # N/m\nm = 0.3    # kg\nA = 1.0    # amplitude (m)\n\n# Compute angular frequency\nomega = # YOUR CODE HERE\n\n# Time array: 0 to 5 seconds, 1000 points\nt = np.linspace(0, 5, 1000)\n\n# Position: x(t) = A * cos(omega * t)\nx = # YOUR CODE HERE\n\n# Verify: compute x''(t) numerically using finite differences\ndt = t[1] - t[0]\nx_ddot_numerical = np.diff(x, 2) / dt**2\n\n# Compute x''(t) analytically: should equal -(k/m)*x\nx_ddot_analytical = -(k/m) * x[1:-1]\n\n# Check they match\nmax_error = np.max(np.abs(x_ddot_numerical - x_ddot_analytical))\nprint(f\"omega = {omega:.4f} rad/s\")\nprint(f\"Max error between numerical and analytical x'': {max_error:.6f}\")\n\n# Plot\nplt.figure(figsize=(10, 4))\nplt.plot(t, x)\nplt.xlabel('Time (s)')\nplt.ylabel('x (m)')\nplt.title('Simple Harmonic Motion: x(t) = A cos(ωt)')\nplt.grid(True)\nplt.show()\n",
+      "solution_code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Parameters\nk = 15.0   # N/m\nm = 0.3    # kg\nA = 1.0    # amplitude (m)\n\n# Compute angular frequency\nomega = np.sqrt(k / m)\n\n# Time array: 0 to 5 seconds, 1000 points\nt = np.linspace(0, 5, 1000)\n\n# Position: x(t) = A * cos(omega * t)\nx = A * np.cos(omega * t)\n\n# Verify: compute x''(t) numerically using finite differences\ndt = t[1] - t[0]\nx_ddot_numerical = np.diff(x, 2) / dt**2\n\n# Compute x''(t) analytically: should equal -(k/m)*x\nx_ddot_analytical = -(k/m) * x[1:-1]\n\n# Check they match\nmax_error = np.max(np.abs(x_ddot_numerical - x_ddot_analytical))\nprint(f\"omega = {omega:.4f} rad/s\")\nprint(f\"Max error between numerical and analytical x'': {max_error:.6f}\")\n\n# Plot\nplt.figure(figsize=(10, 4))\nplt.plot(t, x)\nplt.xlabel('Time (s)')\nplt.ylabel('x (m)')\nplt.title('Simple Harmonic Motion: x(t) = A cos(ωt)')\nplt.grid(True)\nplt.show()\n",
+      "checks": [
+        {
+          "variable": "omega",
+          "expected_expr": "np.sqrt(k/m)",
+          "tolerance": 1e-6,
+          "message": "omega should equal sqrt(k/m)"
+        },
+        {
+          "variable": "max_error",
+          "max_value": 0.5,
+          "message": "Numerical and analytical second derivatives should match (finite diff error is expected to be small but nonzero)"
+        }
+      ]
+    },
+    {
+      "id": "L1-B6",
+      "type": "practice",
+      "title": "Practice: Compute ω",
+      "template": "For k = {k} N/m and m = {m} kg, what is ω in rad/s?",
+      "parameter_ranges": { "k": [5, 50], "m": [0.1, 2.0] },
+      "answer_formula": "Math.sqrt(k / m)",
+      "format": "scientific_notation",
+      "tolerance_mantissa": 0.3,
+      "tolerance_exponent": 0,
+      "units": "rad/s",
+      "required_consecutive_correct": 3
+    },
+    {
+      "id": "L1-B7",
+      "type": "read",
+      "title": "Preview: The Matrix Formulation",
+      "content_html": "<p>Before we move on, let's rewrite our equation in a form that will generalize to multiple masses and springs.</p><p>Define the <strong>state vector</strong>:</p><div class=\"equation\">$$\\mathbf{z} = \\begin{pmatrix} x \\\\ v \\end{pmatrix}$$</div><p>where $$v = \\dot{x}$$ is the velocity. Then the equation of motion becomes a first-order system:</p><div class=\"equation\">$$\\dot{\\mathbf{z}} = \\begin{pmatrix} 0 & 1 \\\\ -k/m & 0 \\end{pmatrix} \\mathbf{z}$$</div><p>This is just our same equation $$\\ddot{x} = -(k/m)x$$, rewritten as two first-order equations:</p><ul><li>$$\\dot{x} = v$$ (velocity is the derivative of position)</li><li>$$\\dot{v} = -(k/m)x$$ (acceleration is the derivative of velocity)</li></ul><p>Why bother? Because in <strong>Lesson 2</strong>, we'll have two masses and three springs. That gives us a 4×4 matrix, and finding $$\\omega$$ becomes an <strong>eigenvalue problem</strong>. The matrix formulation scales — the single spring is just the 2×2 warm-up.</p>"
+    },
+    {
+      "id": "L1-B8",
+      "type": "explain",
+      "title": "Conceptual Check",
+      "prompt": "Why does a stiffer spring (larger k) produce faster oscillations?",
+      "options": [
+        {
+          "id": "a",
+          "text": "Greater restoring force accelerates the mass more at any given displacement, so it completes cycles faster.",
+          "correct": true
+        },
+        {
+          "id": "b",
+          "text": "The spring stores more energy, which makes the mass move faster.",
+          "correct": false,
+          "misconception": "Energy affects amplitude, not frequency. A stiffer spring with the same displacement stores more energy, but ω depends on k/m, not energy."
+        },
+        {
+          "id": "c",
+          "text": "Stiffer springs are lighter, reducing the effective mass of the system.",
+          "correct": false,
+          "misconception": "Spring stiffness and spring mass are independent properties. In our model, the spring is massless."
+        },
+        {
+          "id": "d",
+          "text": "The spring constant changes the wavelength of the oscillation.",
+          "correct": false,
+          "misconception": "Wavelength is a spatial concept for traveling waves. A single mass on a spring oscillates in time only — it has a frequency and period, not a wavelength."
+        }
+      ]
+    }
+  ]
+}

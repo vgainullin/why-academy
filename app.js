@@ -121,6 +121,9 @@
       wrapper.appendChild(content);
     }
 
+    // Feedback toolbar on every block
+    wrapper.appendChild(renderFeedbackToolbar(block.id, wrapper));
+
     return wrapper;
   }
 
@@ -1143,5 +1146,237 @@ plt.close('all')
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  // ── Feedback System ──
+  const FEEDBACK_KEY = 'why-academy-feedback';
+
+  function loadFeedback() {
+    try {
+      return JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '[]');
+    } catch { return []; }
+  }
+
+  function saveFeedbackEntry(entry) {
+    const all = loadFeedback();
+    all.push(entry);
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+  }
+
+  function renderFeedbackToolbar(blockId, wrapper) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'feedback-toolbar';
+
+    // Flag button
+    const flagBtn = document.createElement('button');
+    flagBtn.className = 'feedback-btn feedback-flag-btn';
+    flagBtn.innerHTML = '&#9873; Not clear';
+    flagBtn.title = 'Flag this block as unclear';
+
+    // Question button
+    const questionBtn = document.createElement('button');
+    questionBtn.className = 'feedback-btn feedback-question-btn';
+    questionBtn.innerHTML = '? Ask a question';
+    questionBtn.title = 'Ask a question about this block';
+
+    // Comment on selection button
+    const commentBtn = document.createElement('button');
+    commentBtn.className = 'feedback-btn feedback-comment-btn';
+    commentBtn.innerHTML = '&#9998; Comment on selection';
+    commentBtn.title = 'Highlight text, then click to comment';
+    commentBtn.disabled = true;
+
+    toolbar.appendChild(flagBtn);
+    toolbar.appendChild(questionBtn);
+    toolbar.appendChild(commentBtn);
+
+    // Feedback entries display
+    const entriesDiv = document.createElement('div');
+    entriesDiv.className = 'feedback-entries';
+    toolbar.appendChild(entriesDiv);
+
+    // Question input (hidden by default)
+    const questionForm = document.createElement('div');
+    questionForm.className = 'feedback-form hidden';
+    const questionInput = document.createElement('textarea');
+    questionInput.className = 'feedback-input';
+    questionInput.placeholder = 'What are you confused about?';
+    questionInput.rows = 2;
+    const questionSubmit = document.createElement('button');
+    questionSubmit.className = 'btn btn-primary';
+    questionSubmit.textContent = 'Submit';
+    const questionCancel = document.createElement('button');
+    questionCancel.className = 'btn btn-secondary';
+    questionCancel.textContent = 'Cancel';
+    const questionBtns = document.createElement('div');
+    questionBtns.className = 'feedback-form-btns';
+    questionBtns.appendChild(questionSubmit);
+    questionBtns.appendChild(questionCancel);
+    questionForm.appendChild(questionInput);
+    questionForm.appendChild(questionBtns);
+    toolbar.appendChild(questionForm);
+
+    // Comment form (hidden by default)
+    const commentForm = document.createElement('div');
+    commentForm.className = 'feedback-form hidden';
+    const commentSelection = document.createElement('div');
+    commentSelection.className = 'feedback-selection';
+    const commentInput = document.createElement('textarea');
+    commentInput.className = 'feedback-input';
+    commentInput.placeholder = 'Your comment on the selected text…';
+    commentInput.rows = 2;
+    const commentSubmit = document.createElement('button');
+    commentSubmit.className = 'btn btn-primary';
+    commentSubmit.textContent = 'Submit';
+    const commentCancel = document.createElement('button');
+    commentCancel.className = 'btn btn-secondary';
+    commentCancel.textContent = 'Cancel';
+    const commentBtns = document.createElement('div');
+    commentBtns.className = 'feedback-form-btns';
+    commentBtns.appendChild(commentSubmit);
+    commentBtns.appendChild(commentCancel);
+    commentForm.appendChild(commentSelection);
+    commentForm.appendChild(commentInput);
+    commentForm.appendChild(commentBtns);
+    toolbar.appendChild(commentForm);
+
+    let selectedText = '';
+
+    // Enable comment button when text is selected within this block
+    wrapper.addEventListener('mouseup', () => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().trim() : '';
+      if (text.length > 0 && wrapper.contains(sel.anchorNode)) {
+        selectedText = text;
+        commentBtn.disabled = false;
+        commentBtn.innerHTML = '&#9998; Comment on "' +
+          (text.length > 30 ? text.slice(0, 30) + '…' : text) + '"';
+      } else {
+        selectedText = '';
+        commentBtn.disabled = true;
+        commentBtn.innerHTML = '&#9998; Comment on selection';
+      }
+    });
+
+    // Flag
+    flagBtn.addEventListener('click', () => {
+      const entry = {
+        blockId: blockId,
+        lessonId: lesson.lesson_id,
+        type: 'flag',
+        content: 'Block flagged as unclear',
+        timestamp: new Date().toISOString()
+      };
+      saveFeedbackEntry(entry);
+      flagBtn.classList.add('feedback-btn-active');
+      flagBtn.innerHTML = '&#9873; Flagged';
+      flagBtn.disabled = true;
+      showFeedbackEntries(blockId, entriesDiv);
+    });
+
+    // Question
+    questionBtn.addEventListener('click', () => {
+      questionForm.classList.toggle('hidden');
+      commentForm.classList.add('hidden');
+      if (!questionForm.classList.contains('hidden')) questionInput.focus();
+    });
+    questionCancel.addEventListener('click', () => {
+      questionForm.classList.add('hidden');
+      questionInput.value = '';
+    });
+    questionSubmit.addEventListener('click', () => {
+      const text = questionInput.value.trim();
+      if (!text) return;
+      const entry = {
+        blockId: blockId,
+        lessonId: lesson.lesson_id,
+        type: 'question',
+        content: text,
+        timestamp: new Date().toISOString()
+      };
+      saveFeedbackEntry(entry);
+      questionForm.classList.add('hidden');
+      questionInput.value = '';
+      showFeedbackEntries(blockId, entriesDiv);
+    });
+    questionInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        questionSubmit.click();
+      }
+    });
+
+    // Comment on selection
+    commentBtn.addEventListener('click', () => {
+      if (!selectedText) return;
+      commentSelection.textContent = '"' + selectedText + '"';
+      commentForm.classList.toggle('hidden');
+      questionForm.classList.add('hidden');
+      if (!commentForm.classList.contains('hidden')) commentInput.focus();
+    });
+    commentCancel.addEventListener('click', () => {
+      commentForm.classList.add('hidden');
+      commentInput.value = '';
+    });
+    commentSubmit.addEventListener('click', () => {
+      const text = commentInput.value.trim();
+      if (!text) return;
+      const entry = {
+        blockId: blockId,
+        lessonId: lesson.lesson_id,
+        type: 'comment',
+        content: text,
+        selection: selectedText,
+        timestamp: new Date().toISOString()
+      };
+      saveFeedbackEntry(entry);
+      commentForm.classList.add('hidden');
+      commentInput.value = '';
+      selectedText = '';
+      commentBtn.disabled = true;
+      commentBtn.innerHTML = '&#9998; Comment on selection';
+      showFeedbackEntries(blockId, entriesDiv);
+    });
+    commentInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        commentSubmit.click();
+      }
+    });
+
+    // Show existing feedback for this block
+    showFeedbackEntries(blockId, entriesDiv);
+
+    return toolbar;
+  }
+
+  function showFeedbackEntries(blockId, container) {
+    const all = loadFeedback().filter(e => e.blockId === blockId);
+    container.innerHTML = '';
+    if (all.length === 0) return;
+
+    all.forEach(entry => {
+      const el = document.createElement('div');
+      el.className = 'feedback-entry feedback-entry-' + entry.type;
+      const icon = entry.type === 'flag' ? '&#9873;' : entry.type === 'question' ? '?' : '&#9998;';
+      let html = '<span class="feedback-entry-icon">' + icon + '</span> ';
+      if (entry.selection) {
+        html += '<span class="feedback-entry-selection">"' + esc(entry.selection) + '"</span> — ';
+      }
+      html += '<span class="feedback-entry-content">' + esc(entry.content) + '</span>';
+      html += '<span class="feedback-entry-time">' + timeAgo(entry.timestamp) + '</span>';
+      el.innerHTML = html;
+      container.appendChild(el);
+    });
+  }
+
+  function timeAgo(isoStr) {
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.floor(hrs / 24) + 'd ago';
   }
 })();

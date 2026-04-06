@@ -16,12 +16,22 @@
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/python/python.min.js"></script>
 
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async></script>
+
   <!-- App -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
     <h1>Why Academy</h1>
+    <div id="auth-area">
+      <button id="signin-btn" class="btn-signin hidden">Sign in</button>
+      <div id="user-info" class="hidden">
+        <span id="user-email"></span>
+        <button id="signout-btn" class="btn-signout">Sign out</button>
+      </div>
+    </div>
   </header>
 
   <main id="lesson-container">
@@ -33,6 +43,7 @@
     <span class="spinner"></span> Loading Python environment…
   </div>
 
+  <script src="lib/auth.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

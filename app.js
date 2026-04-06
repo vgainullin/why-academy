@@ -14,6 +14,14 @@
   // ── Boot ──
   document.addEventListener('DOMContentLoaded', async () => {
     startPyodidePreload();
+    if (window.WhyAuth) WhyAuth.init();
+
+    // Re-render feedback toolbars when auth state changes
+    document.addEventListener('whyauth:change', () => {
+      document.querySelectorAll('.feedback-toolbar').forEach(updateFeedbackToolbarVisibility);
+      updateSendButton();
+    });
+
     const params = new URLSearchParams(window.location.search);
     const lessonFile = params.get('lesson') || 'lessons/lesson1.json';
     try {
@@ -1157,15 +1165,124 @@ plt.close('all')
     } catch { return []; }
   }
 
+  function saveAllFeedback(all) {
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+  }
+
   function saveFeedbackEntry(entry) {
     const all = loadFeedback();
+    entry.sent = false;
     all.push(entry);
-    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+    saveAllFeedback(all);
+    updateSendButton();
+  }
+
+  // ── Send to teacher ──
+  async function sendUnsentFeedback() {
+    const auth = window.WhyAuth;
+    if (!auth || !auth.isAuthenticated() || !auth.isAllowlisted()) return;
+
+    const all = loadFeedback();
+    const unsent = all.filter(e => !e.sent);
+    if (unsent.length === 0) return;
+
+    const sendBtn = document.getElementById('send-feedback-btn');
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending…';
+    }
+
+    try {
+      const resp = await fetch('https://why-academy-feedback.gainullin.workers.dev/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idToken: auth.getIdToken(),
+          feedback: unsent.map(({ sent, ...e }) => e),
+        }),
+      });
+
+      const data = await resp.json();
+
+      if (resp.ok) {
+        // Mark all unsent as sent
+        const updated = all.map(e => e.sent ? e : { ...e, sent: true });
+        saveAllFeedback(updated);
+        if (sendBtn) {
+          sendBtn.textContent = '\u2713 Sent (issue #' + data.issueNumber + ')';
+          setTimeout(() => updateSendButton(), 3000);
+        }
+      } else {
+        if (sendBtn) {
+          sendBtn.textContent = 'Failed: ' + (data.error || resp.status);
+          sendBtn.disabled = false;
+          setTimeout(() => updateSendButton(), 4000);
+        }
+      }
+    } catch (e) {
+      if (sendBtn) {
+        sendBtn.textContent = 'Network error';
+        sendBtn.disabled = false;
+        setTimeout(() => updateSendButton(), 4000);
+      }
+    }
+  }
+
+  function updateSendButton() {
+    let sendBtn = document.getElementById('send-feedback-btn');
+    const auth = window.WhyAuth;
+    const unsent = loadFeedback().filter(e => !e.sent);
+    const shouldShow = auth && auth.isAuthenticated() && auth.isAllowlisted() && unsent.length > 0;
+
+    if (shouldShow) {
+      if (!sendBtn) {
+        sendBtn = document.createElement('button');
+        sendBtn.id = 'send-feedback-btn';
+        sendBtn.className = 'send-feedback-btn';
+        sendBtn.addEventListener('click', sendUnsentFeedback);
+        document.body.appendChild(sendBtn);
+      }
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send ' + unsent.length + ' feedback ' + (unsent.length === 1 ? 'item' : 'items') + ' to teacher';
+    } else if (sendBtn) {
+      sendBtn.remove();
+    }
+  }
+
+  function updateFeedbackToolbarVisibility(toolbar) {
+    const auth = window.WhyAuth;
+    const gate = toolbar.querySelector('.feedback-gate');
+    const actions = toolbar.querySelector('.feedback-actions');
+    if (!gate || !actions) return;
+
+    if (!auth || !auth.isAuthenticated()) {
+      gate.classList.remove('hidden');
+      gate.textContent = 'Sign in to leave feedback for the teacher.';
+      actions.classList.add('hidden');
+    } else if (!auth.isAllowlisted()) {
+      gate.classList.remove('hidden');
+      gate.textContent = 'Signed in as ' + auth.getUser().email + ' — your account is not on the trusted-tester list.';
+      actions.classList.add('hidden');
+    } else {
+      gate.classList.add('hidden');
+      actions.classList.remove('hidden');
+    }
   }
 
   function renderFeedbackToolbar(blockId, wrapper) {
     const toolbar = document.createElement('div');
     toolbar.className = 'feedback-toolbar';
+
+    // Gate message (shown when not signed in or not allowlisted)
+    const gate = document.createElement('div');
+    gate.className = 'feedback-gate';
+    gate.textContent = 'Sign in to leave feedback for the teacher.';
+    toolbar.appendChild(gate);
+
+    // Actions container (shown only when authenticated + allowlisted)
+    const actions = document.createElement('div');
+    actions.className = 'feedback-actions hidden';
+    toolbar.appendChild(actions);
 
     // Flag button
     const flagBtn = document.createElement('button');
@@ -1186,11 +1303,11 @@ plt.close('all')
     commentBtn.title = 'Highlight text, then click to comment';
     commentBtn.disabled = true;
 
-    toolbar.appendChild(flagBtn);
-    toolbar.appendChild(questionBtn);
-    toolbar.appendChild(commentBtn);
+    actions.appendChild(flagBtn);
+    actions.appendChild(questionBtn);
+    actions.appendChild(commentBtn);
 
-    // Feedback entries display
+    // Feedback entries display (always visible — shows existing entries even when signed out)
     const entriesDiv = document.createElement('div');
     entriesDiv.className = 'feedback-entries';
     toolbar.appendChild(entriesDiv);
@@ -1214,7 +1331,7 @@ plt.close('all')
     questionBtns.appendChild(questionCancel);
     questionForm.appendChild(questionInput);
     questionForm.appendChild(questionBtns);
-    toolbar.appendChild(questionForm);
+    actions.appendChild(questionForm);
 
     // Comment form (hidden by default)
     const commentForm = document.createElement('div');
@@ -1238,7 +1355,7 @@ plt.close('all')
     commentForm.appendChild(commentSelection);
     commentForm.appendChild(commentInput);
     commentForm.appendChild(commentBtns);
-    toolbar.appendChild(commentForm);
+    actions.appendChild(commentForm);
 
     let selectedText = '';
 
@@ -1346,6 +1463,9 @@ plt.close('all')
 
     // Show existing feedback for this block
     showFeedbackEntries(blockId, entriesDiv);
+
+    // Set initial visibility based on current auth state
+    updateFeedbackToolbarVisibility(toolbar);
 
     return toolbar;
   }

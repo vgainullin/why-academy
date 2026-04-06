@@ -1,0 +1,21 @@
+name = "why-academy-feedback"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# KV namespace for rate limiting (per-email counter with TTL)
+# Run: wrangler kv namespace create RATE_LIMIT
+# Then paste the id below
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "6efdec4d16244539924c2011532e8721"
+
+# Public vars (not secrets)
+[vars]
+OAUTH_CLIENT_ID = "685261821443-5gm88a2lkv98h3e24cpkged1np18fjhu.apps.googleusercontent.com"
+GITHUB_REPO = "vgainullin/why-academy"
+RATE_LIMIT_PER_HOUR = "20"
+
+# Secrets (set with `wrangler secret put NAME`):
+#   GITHUB_TOKEN     - fine-grained PAT scoped to vgainullin/why-academy
+#   ALLOWED_EMAILS   - comma-separated list of trusted emails
+

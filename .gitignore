@@ -7,3 +7,15 @@ node_modules/
 
 # Internal docs — not for public repo
 why-academy-brief.md
+
+# Secrets — must NEVER be committed
+*client_secret*.json
+*credentials*.json
+*.pem
+*.key
+.secrets/
+secrets/
+
+# Wrangler local state
+.wrangler/
+.dev.vars

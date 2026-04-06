@@ -19,3 +19,7 @@ secrets/
 # Wrangler local state
 .wrangler/
 .dev.vars
+
+# Evolution agent local state
+meta/.evolve.lock
+meta/.evolve-last-run.log

@@ -23,3 +23,6 @@ secrets/
 # Evolution agent local state
 meta/.evolve.lock
 meta/.evolve-last-run.log
+
+# Lesson planning notes (not yet published as lessons)
+lesson_plans/

@@ -4,3 +4,6 @@ node_modules/
 *.swo
 *~
 .env
+
+# Internal docs — not for public repo
+why-academy-brief.md

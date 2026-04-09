@@ -268,7 +268,10 @@
   const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const DEFAULT_LMSTUDIO_ENDPOINT = 'http://localhost:1234/v1/chat/completions';
   const DEFAULT_LMSTUDIO_MODEL = 'qwen2-vl-7b-instruct';
-  const DEFAULT_OPENROUTER_MODEL = 'qwen/qwen2.5-vl-72b-instruct';
+  // Gemini 2.0 Flash handles handwritten math notably better than Qwen2.5-VL-72B
+  // in our testing — and it's also cheaper. Override in Settings if you prefer
+  // qwen/qwen2-vl-72b-instruct or anthropic/claude-sonnet-4-5.
+  const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.0-flash-001';
 
   function handwriteBackend() {
     const stored = localStorage.getItem('handwriteBackend');

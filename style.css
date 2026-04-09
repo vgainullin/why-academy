@@ -992,6 +992,29 @@ main {
   align-items: center;
   flex-wrap: wrap;
 }
+.stroke-width-slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.82rem;
+  color: #4b5563;
+  cursor: pointer;
+}
+.stroke-width-slider input[type="range"] {
+  width: 100px;
+  cursor: pointer;
+}
+.stroke-width-preview {
+  display: inline-block;
+  background: #1f2937;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: width 0.1s, height 0.1s;
+}
 .handwrite-status {
   margin-top: 8px;
   font-size: 0.88rem;

@@ -420,6 +420,54 @@
     return { raw: raw, lines: parseMultiLineLatex(raw) };
   }
 
+  // Stroke thickness preference (shared between canvas-derive and handwrite).
+  // Persisted in localStorage so the student picks it once and it sticks.
+  const STROKE_WIDTH_DEFAULT = 7;
+  const STROKE_WIDTH_MIN = 3;
+  const STROKE_WIDTH_MAX = 18;
+  function getStrokeWidth() {
+    const v = parseFloat(localStorage.getItem('handwriteStrokeWidth'));
+    if (!Number.isFinite(v) || v <= 0) return STROKE_WIDTH_DEFAULT;
+    return Math.max(STROKE_WIDTH_MIN, Math.min(STROKE_WIDTH_MAX, v));
+  }
+  function setStrokeWidth(v) {
+    localStorage.setItem('handwriteStrokeWidth', String(v));
+  }
+
+  // Build a thickness slider widget. Each canvas reads getStrokeWidth() at
+  // pointerdown time, so a single shared localStorage value drives all open
+  // canvases live without explicit cross-block wiring.
+  function makeStrokeWidthSlider() {
+    const wrap = document.createElement('label');
+    wrap.className = 'stroke-width-slider';
+    const labelText = document.createElement('span');
+    labelText.className = 'stroke-width-label';
+    labelText.textContent = 'Thickness';
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(STROKE_WIDTH_MIN);
+    slider.max = String(STROKE_WIDTH_MAX);
+    slider.step = '0.5';
+    slider.value = String(getStrokeWidth());
+    slider.setAttribute('aria-label', 'Marker thickness');
+    const preview = document.createElement('span');
+    preview.className = 'stroke-width-preview';
+    function syncPreview() {
+      const v = parseFloat(slider.value);
+      preview.style.width = v + 'px';
+      preview.style.height = v + 'px';
+    }
+    syncPreview();
+    slider.addEventListener('input', () => {
+      setStrokeWidth(parseFloat(slider.value));
+      syncPreview();
+    });
+    wrap.appendChild(labelText);
+    wrap.appendChild(slider);
+    wrap.appendChild(preview);
+    return wrap;
+  }
+
   async function transcribeHandwriting(pngDataUrl, vars) {
     const raw = await callVisionBackend(buildTranscribePrompt(vars), pngDataUrl, 200);
     return { raw: raw, latex: cleanLatex(raw) };
@@ -1653,11 +1701,25 @@ plt.close('all')
           pressure: e.pressure || 0.5
         };
       }
+      // iOS Safari fix: intercept raw touch events BEFORE iOS interprets them
+      // as the start of a text selection on nearby elements. Pointer events
+      // alone are not enough on iPadOS — we have to grab touchstart/touchmove
+      // with passive:false to call preventDefault successfully.
+      canvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        if (window.getSelection) window.getSelection().removeAllRanges();
+      }, { passive: false });
+      canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+      }, { passive: false });
+
       canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
+        if (window.getSelection) window.getSelection().removeAllRanges();
         canvas.setPointerCapture(e.pointerId);
         const p = pointFromEvent(e);
-        const w = e.pointerType === 'pen' ? 3 + p.pressure * 5 : 5;
+        const baseW = getStrokeWidth();
+        const w = e.pointerType === 'pen' ? baseW * (0.65 + (p.pressure || 0.5) * 0.7) : baseW;
         active = { points: [p], width: w };
         paint();
       });
@@ -1692,8 +1754,11 @@ plt.close('all')
       submitBtn.className = 'btn btn-primary';
       submitBtn.textContent = 'Transcribe';
 
+      const widthSlider = makeStrokeWidthSlider();
+
       controls.appendChild(undoBtn);
       controls.appendChild(clearBtn);
+      controls.appendChild(widthSlider);
       const spacer = document.createElement('span');
       spacer.style.flex = '1';
       controls.appendChild(spacer);
@@ -2043,11 +2108,25 @@ plt.close('all')
     let busy = false;
     const RECOGNITION_DEBOUNCE_MS = 1200;
 
+    // iOS Safari fix: intercept raw touch events BEFORE iOS interprets them
+    // as the start of a text selection on nearby elements. Pointer events
+    // alone are not enough on iPadOS — we have to grab touchstart/touchmove
+    // with passive:false to call preventDefault successfully.
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (window.getSelection) window.getSelection().removeAllRanges();
+    }, { passive: false });
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+    }, { passive: false });
+
     canvas.addEventListener('pointerdown', e => {
       e.preventDefault();
+      if (window.getSelection) window.getSelection().removeAllRanges();
       canvas.setPointerCapture(e.pointerId);
       const p = pointFromEvent(e);
-      const w = e.pointerType === 'pen' ? 3 + p.pressure * 5 : 5;
+      const baseW = getStrokeWidth();
+      const w = e.pointerType === 'pen' ? baseW * (0.65 + (p.pressure || 0.5) * 0.7) : baseW;
       active = { points: [p], width: w };
       paint();
       // Cancel any pending recognition while the student is actively drawing.
@@ -2115,9 +2194,12 @@ plt.close('all')
       canvasCol.appendChild(banner);
     });
 
+    const widthSlider = makeStrokeWidthSlider();
+
     controls.appendChild(undoBtn);
     controls.appendChild(clearBtn);
     controls.appendChild(recognizeNowBtn);
+    controls.appendChild(widthSlider);
     const sp = document.createElement('span');
     sp.style.flex = '1';
     controls.appendChild(sp);

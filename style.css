@@ -1258,7 +1258,8 @@ main {
   margin-bottom: 0;
 }
 .settings-group input[type="text"],
-.settings-group input[type="password"] {
+.settings-group input[type="password"],
+.settings-group select {
   display: block;
   width: 100%;
   margin-top: 4px;
@@ -1267,6 +1268,7 @@ main {
   border: 1px solid var(--border);
   border-radius: 4px;
   font-family: inherit;
+  background: #fff;
 }
 .settings-hint {
   font-size: 0.8rem;

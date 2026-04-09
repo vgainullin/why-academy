@@ -268,15 +268,18 @@
   const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const DEFAULT_LMSTUDIO_ENDPOINT = 'http://localhost:1234/v1/chat/completions';
   const DEFAULT_LMSTUDIO_MODEL = 'qwen2-vl-7b-instruct';
-  // Gemma 4 31B (dense, multimodal, with built-in reasoning) handles
-  // handwritten math better than the alternatives we tested. Other strong
-  // options to override in Settings:
-  //   google/gemma-4-26b-a4b-it       — cheaper MoE variant, near-31B quality
-  //   google/gemma-4-31b-it:free      — same model, free tier (rate-limited)
-  //   google/gemini-2.0-flash-001     — cheapest, decent on clean handwriting
-  //   anthropic/claude-sonnet-4-5     — most expensive, very reliable
-  //   qwen/qwen2-vl-72b-instruct      — apples-to-apples upscale of local 7B
-  const DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-31b-it';
+  // Curated OpenRouter vision models for handwritten math OCR. The first entry
+  // is the default. The Settings dropdown is populated from this list (plus a
+  // "Custom…" escape hatch for anything not in here).
+  const OPENROUTER_MODEL_PRESETS = [
+    { id: 'google/gemma-4-31b-it',           label: 'Gemma 4 31B (dense, default)' },
+    { id: 'google/gemma-4-26b-a4b-it',       label: 'Gemma 4 26B MoE (cheaper)' },
+    { id: 'google/gemma-4-31b-it:free',      label: 'Gemma 4 31B — Free tier (rate-limited)' },
+    { id: 'google/gemini-2.0-flash-001',     label: 'Gemini 2.0 Flash (cheapest)' },
+    { id: 'anthropic/claude-sonnet-4-5',     label: 'Claude Sonnet 4.5 (most reliable)' },
+    { id: 'qwen/qwen2-vl-72b-instruct',      label: 'Qwen2-VL 72B (matches local 7B)' }
+  ];
+  const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODEL_PRESETS[0].id;
 
   function handwriteBackend() {
     const stored = localStorage.getItem('handwriteBackend');
@@ -435,7 +438,31 @@
     const lmEndpointEl = document.getElementById('settings-lmstudio-endpoint');
     const lmModelEl = document.getElementById('settings-lmstudio-model');
     const orKeyEl = document.getElementById('settings-openrouter-key');
+    const orModelSelect = document.getElementById('settings-openrouter-model-select');
+    const orModelCustomLabel = document.getElementById('settings-openrouter-model-custom-label');
     const orModelEl = document.getElementById('settings-openrouter-model');
+    const CUSTOM_VALUE = '__custom__';
+
+    // Populate the OpenRouter dropdown from the preset list (plus Custom…).
+    function populateOrDropdown() {
+      orModelSelect.innerHTML = '';
+      OPENROUTER_MODEL_PRESETS.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label;
+        orModelSelect.appendChild(opt);
+      });
+      const customOpt = document.createElement('option');
+      customOpt.value = CUSTOM_VALUE;
+      customOpt.textContent = 'Custom…';
+      orModelSelect.appendChild(customOpt);
+    }
+    populateOrDropdown();
+
+    function syncOrCustomVisibility() {
+      const isCustom = orModelSelect.value === CUSTOM_VALUE;
+      orModelCustomLabel.classList.toggle('hidden', !isCustom);
+    }
 
     function syncGroups() {
       const v = (modal.querySelector('input[name="handwrite-backend"]:checked') || {}).value;
@@ -449,7 +476,17 @@
       lmEndpointEl.value = lmstudioEndpoint();
       lmModelEl.value = lmstudioModel();
       orKeyEl.value = openrouterApiKey();
-      orModelEl.value = openrouterModel();
+
+      const currentOrModel = openrouterModel();
+      const isPreset = OPENROUTER_MODEL_PRESETS.some(p => p.id === currentOrModel);
+      if (isPreset) {
+        orModelSelect.value = currentOrModel;
+        orModelEl.value = '';
+      } else {
+        orModelSelect.value = CUSTOM_VALUE;
+        orModelEl.value = currentOrModel;
+      }
+      syncOrCustomVisibility();
       syncGroups();
     }
 
@@ -465,6 +502,7 @@
     cancelBtn.addEventListener('click', close);
     backdrop.addEventListener('click', close);
     radios.forEach(r => r.addEventListener('change', syncGroups));
+    orModelSelect.addEventListener('change', syncOrCustomVisibility);
 
     saveBtn.addEventListener('click', () => {
       const backend = (modal.querySelector('input[name="handwrite-backend"]:checked') || {}).value || 'lmstudio';
@@ -480,7 +518,15 @@
       const orKey = orKeyEl.value.trim();
       if (orKey) localStorage.setItem('openrouterApiKey', orKey);
       else localStorage.removeItem('openrouterApiKey');
-      const orModel = orModelEl.value.trim();
+
+      // Resolve model: if dropdown is on "Custom…" use the text field, else
+      // use the dropdown value directly.
+      let orModel;
+      if (orModelSelect.value === CUSTOM_VALUE) {
+        orModel = orModelEl.value.trim();
+      } else {
+        orModel = orModelSelect.value;
+      }
       if (orModel) localStorage.setItem('openrouterModel', orModel);
       else localStorage.removeItem('openrouterModel');
 

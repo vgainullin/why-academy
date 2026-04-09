@@ -15,7 +15,7 @@ This is the AI-proposes-SymPy-disposes safety gate. Run it before any commit.
 
 Usage:
   python3 meta/validate.py                    # validate all lessons
-  python3 meta/validate.py lessons/lesson1.json   # validate one
+  python3 meta/validate.py lessons/physics/oscillations/01-single-spring.json   # validate one
 """
 
 from __future__ import annotations
@@ -425,7 +425,7 @@ def main():
     if len(sys.argv) > 1:
         files = [Path(p) for p in sys.argv[1:]]
     else:
-        files = sorted((project_root / "lessons").glob("*.json"))
+        files = sorted((project_root / "lessons").rglob("*.json"))
 
     if not files:
         print("No lesson files to validate.")

@@ -31,7 +31,7 @@
     });
 
     const params = new URLSearchParams(window.location.search);
-    const lessonFile = params.get('lesson') || 'lessons/lesson1.json';
+    const lessonFile = params.get('lesson') || 'lessons/physics/oscillations/01-single-spring.json';
     try {
       const resp = await fetch(lessonFile);
       lesson = await resp.json();

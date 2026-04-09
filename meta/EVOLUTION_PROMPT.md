@@ -19,7 +19,7 @@ This is non-negotiable. The validator is in `meta/validate.py`. Before you commi
 In this order:
 
 1. **`why-academy-brief.md`** (gitignored, server-local) — the full project vision, pedagogical philosophy (the four engagement drives), the adaptive authoring loop concept. This is your charter.
-2. **`lessons/*.json`** — every existing lesson. Read them all so you understand the established style, voice, difficulty progression, and where this lesson fits in the arc.
+2. **`lessons/**/*.json`** — every existing lesson. Lessons are organized by subject and topic (e.g. `lessons/physics/oscillations/01-single-spring.json`). Read them all so you understand the established style, voice, difficulty progression, and where this lesson fits in the arc.
 3. **`meta/EVOLUTION_LOG.md`** — your past actions. Don't repeat work. Don't undo previous fixes.
 4. **`/tmp/feedback-issues.json`** — the open feedback issues from students you must respond to in this run. These are your input signal.
 

@@ -142,7 +142,7 @@ USER_MESSAGE="You are running as the Why Academy evolution agent.
 Read these files in this order, then act:
   1. \`meta/EVOLUTION_PROMPT.md\` — your full instructions and constraints
   2. \`why-academy-brief.md\` — the project vision (gitignored, server-local)
-  3. \`lessons/*.json\` — every existing lesson
+  3. \`lessons/**/*.json\` — every existing lesson (organized by subject/topic, e.g. \`lessons/physics/oscillations/01-single-spring.json\`)
   4. \`meta/EVOLUTION_LOG.md\` — your past actions
   5. \`$FEEDBACK_DUMP\` — the open student feedback issues you must respond to
 

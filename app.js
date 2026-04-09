@@ -15,6 +15,7 @@
   document.addEventListener('DOMContentLoaded', async () => {
     startPyodidePreload();
     if (window.WhyAuth) WhyAuth.init();
+    initSettingsModal();
 
     // Re-render feedback toolbars when auth state changes
     document.addEventListener('whyauth:change', () => {
@@ -34,42 +35,442 @@
     }
   });
 
+  // ── Loading bar driver ──
+  // Visible top sticky bar showing phase + determinate progress + streamed
+  // sub-messages from Pyodide's messageCallback. The bar is the *only* thing
+  // that fights perceived freeze — the actual main-thread jank during wasm
+  // decode is intrinsic to running CPython on the main thread; only a Web
+  // Worker can fix that, and that's a separate refactor.
+  function loaderEl() { return document.getElementById('pyodide-status'); }
+
+  function setLoadProgress(pct, label) {
+    const el = loaderEl();
+    if (!el) return;
+    el.classList.remove('hidden');
+    const fill = el.querySelector('.loader-bar-fill');
+    const labelEl = el.querySelector('.loader-label');
+    const pctEl = el.querySelector('.loader-pct');
+    if (fill) fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (labelEl && label) labelEl.textContent = label;
+    if (pctEl) pctEl.textContent = Math.round(pct) + '%';
+  }
+
+  function setLoadSub(msg) {
+    const el = loaderEl();
+    if (!el) return;
+    const sub = el.querySelector('.loader-sub');
+    if (sub) sub.textContent = msg || '';
+  }
+
+  function setLoadDone() {
+    const el = loaderEl();
+    if (!el) return;
+    setLoadProgress(100, 'Ready');
+    setLoadSub('');
+    el.classList.add('ready');
+    setTimeout(() => el.classList.add('hidden'), 1500);
+  }
+
+  function setLoadError(msg) {
+    const el = loaderEl();
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.classList.add('error');
+    const labelEl = el.querySelector('.loader-label');
+    if (labelEl) labelEl.textContent = 'Failed: ' + msg;
+    const pctEl = el.querySelector('.loader-pct');
+    if (pctEl) pctEl.textContent = '';
+  }
+
+  // Yield to the event loop so the DOM can repaint between heavy phases.
+  // Won't unjank the wasm decode itself, but flushes our progress updates.
+  function yieldToUI() { return new Promise(r => setTimeout(r, 0)); }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('failed to load ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
   // ── Pyodide Lazy Load ──
-  function startPyodidePreload() {
+  // Phase weights (must sum to <= 60 so SymPy install gets the remaining 40):
+  //   inject pyodide.js   :  2 -> 12   (10pt)
+  //   init runtime        : 12 -> 35   (23pt)
+  //   numpy               : 35 -> 50   (15pt)
+  //   matplotlib          : 50 -> 60   (10pt)
+  // ensureSympy() picks up at 60% and runs to 100%.
+  async function startPyodidePreload() {
     if (pyodideLoading) return;
     pyodideLoading = true;
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js';
-    script.onload = async () => {
-      try {
-        pyodide = await loadPyodide({
-          indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/'
-        });
-        await pyodide.loadPackage(['numpy', 'matplotlib']);
-        pyodideReady = true;
-        const status = document.getElementById('pyodide-status');
-        status.innerHTML = '&#10003; Python ready';
-        status.classList.add('ready');
-        setTimeout(() => status.classList.add('hidden'), 2000);
-        pyodideReadyCallbacks.forEach(cb => cb());
-        pyodideReadyCallbacks = [];
-      } catch (e) {
-        console.error('Pyodide load failed:', e);
-        const status = document.getElementById('pyodide-status');
-        status.innerHTML = 'Python load failed';
-        status.style.background = '#dc2626';
-        status.style.color = 'white';
+    setLoadProgress(2, 'Fetching Python runtime…');
+    try {
+      await loadScript('https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js');
+      setLoadProgress(12, 'Initializing Python runtime…');
+      await yieldToUI();
+
+      pyodide = await loadPyodide({
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/',
+        stdout: () => {},
+        stderr: () => {}
+      });
+      setLoadProgress(35, 'Loading NumPy…');
+      await yieldToUI();
+
+      await pyodide.loadPackage('numpy', { messageCallback: setLoadSub });
+      setLoadProgress(50, 'Loading Matplotlib…');
+      await yieldToUI();
+
+      await pyodide.loadPackage('matplotlib', { messageCallback: setLoadSub });
+      setLoadProgress(60, 'Python ready');
+      setLoadSub('');
+
+      pyodideReady = true;
+      pyodideReadyCallbacks.forEach(cb => cb());
+      pyodideReadyCallbacks = [];
+
+      // If no handwrite/canvas-derive blocks need SymPy, we're done.
+      // ensureSympy() drives the bar from 60% to 100% if it gets called.
+      if (!sympyNeeded()) {
+        setLoadDone();
       }
-    };
-    document.head.appendChild(script);
+    } catch (e) {
+      console.error('Pyodide load failed:', e);
+      setLoadError(e.message || String(e));
+    }
   }
 
   function waitForPyodide() {
     return new Promise(resolve => {
       if (pyodideReady) return resolve();
-      const status = document.getElementById('pyodide-status');
-      status.classList.remove('hidden');
+      const el = loaderEl();
+      if (el) el.classList.remove('hidden');
       pyodideReadyCallbacks.push(resolve);
+    });
+  }
+
+  // True if the loaded lesson has at least one block that needs SymPy.
+  function sympyNeeded() {
+    if (!lesson || !lesson.blocks) return false;
+    return lesson.blocks.some(b => b.type === 'handwrite' || b.type === 'canvas-derive');
+  }
+
+  // ── SymPy lazy load (for handwrite verification) ──
+  // Sympy + antlr4 add ~10MB so we only load them if a handwrite block exists.
+  // Resolves to the same shared `pyodide` instance with parse_latex available.
+  let sympyReady = false;
+  let sympyLoadingPromise = null;
+  async function ensureSympy() {
+    if (sympyReady) return;
+    if (sympyLoadingPromise) return sympyLoadingPromise;
+    sympyLoadingPromise = (async () => {
+      await waitForPyodide();
+      // Phase weights for the SymPy half of the bar:
+      //   sympy + micropip  : 60 -> 85   (25pt) — biggest single download
+      //   antlr4 install    : 85 -> 95   (10pt)
+      //   helper definitions: 95 -> 100  (5pt)
+      setLoadProgress(62, 'Loading SymPy (~10MB)…');
+      await yieldToUI();
+      await pyodide.loadPackage(['sympy', 'micropip'], { messageCallback: setLoadSub });
+      setLoadProgress(85, 'Installing LaTeX parser…');
+      setLoadSub('');
+      await yieldToUI();
+      await pyodide.runPythonAsync(
+        'import micropip\n' +
+        'try:\n' +
+        '    await micropip.install("antlr4-python3-runtime==4.11")\n' +
+        'except Exception as e:\n' +
+        '    print("antlr install warning:", e)\n'
+      );
+      setLoadProgress(95, 'Configuring symbolic engine…');
+      await yieldToUI();
+      // Define a single equiv() helper reused for every check.
+      // parse_latex doesn't understand \ddot/\dot — it parses them as opaque
+      // symbols (ddot, dot). That's fine as long as we apply the same parse to
+      // both sides; the canonicalizer below also rewrites \frac{d^2 X}{dt^2}
+      // and \frac{dX}{dt} into \ddot{X} / \dot{X} so students who use Leibniz
+      // notation get matched against textbook Newton notation.
+      await pyodide.runPythonAsync(
+        'from sympy import simplify, Eq\n' +
+        'from sympy.parsing.latex import parse_latex\n' +
+        '\n' +
+        'def _eq(a, b):\n' +
+        '    if isinstance(a, Eq) and isinstance(b, Eq):\n' +
+        '        d1 = simplify((a.lhs - a.rhs) - (b.lhs - b.rhs))\n' +
+        '        d2 = simplify((a.lhs - a.rhs) + (b.lhs - b.rhs))\n' +
+        '        return (d1 == 0) or (d2 == 0)\n' +
+        '    if isinstance(a, Eq) or isinstance(b, Eq):\n' +
+        '        return False\n' +
+        '    return simplify(a - b) == 0\n' +
+        '\n' +
+        'def equiv(student_latex, target_latex):\n' +
+        '    try:\n' +
+        '        a = parse_latex(student_latex)\n' +
+        '        b = parse_latex(target_latex)\n' +
+        '    except Exception as e:\n' +
+        '        return ("parse_error", str(e))\n' +
+        '    try:\n' +
+        '        return ("ok" if _eq(a, b) else "mismatch", "")\n' +
+        '    except Exception as e:\n' +
+        '        return ("simplify_error", str(e))\n' +
+        '\n' +
+        'def find_matching_form(student_latex, target_latexes):\n' +
+        '    """Return index of first equivalent target, or -1 if no match."""\n' +
+        '    try:\n' +
+        '        a = parse_latex(student_latex)\n' +
+        '    except Exception:\n' +
+        '        return -1\n' +
+        '    for i, t in enumerate(target_latexes):\n' +
+        '        try:\n' +
+        '            b = parse_latex(t)\n' +
+        '            if _eq(a, b):\n' +
+        '                return i\n' +
+        '        except Exception:\n' +
+        '            continue\n' +
+        '    return -1\n'
+      );
+      sympyReady = true;
+      setLoadDone();
+    })().catch(e => {
+      console.error('SymPy load failed:', e);
+      setLoadError(e.message || String(e));
+      throw e;
+    });
+    return sympyLoadingPromise;
+  }
+
+  // Rewrite \frac{d^2 X}{dt^2} -> \ddot{X} and \frac{dX}{dt} -> \dot{X}
+  // so Leibniz notation matches Newton notation. Also strips Mathpix-style
+  // \left/\right and thin spaces \, \! that aren't meaningful for parsing.
+  function canonicalizeLatex(s) {
+    if (!s) return '';
+    s = s.replace(/\\left\s*([(\[|])/g, '$1').replace(/\\right\s*([)\]|])/g, '$1');
+    s = s.replace(/\\,|\\!|\\;|\\:|\\>/g, '');
+    // \frac{d^2 x}{dt^2}  -> \ddot{x}     (variable must be a single letter or \greek)
+    s = s.replace(/\\frac\s*\{\s*d\s*\^\s*\{?2\}?\s*([a-zA-Z]|\\[a-zA-Z]+)\s*\}\s*\{\s*dt\s*\^\s*\{?2\}?\s*\}/g, '\\ddot{$1}');
+    // \frac{dx}{dt}       -> \dot{x}
+    s = s.replace(/\\frac\s*\{\s*d\s*([a-zA-Z]|\\[a-zA-Z]+)\s*\}\s*\{\s*dt\s*\}/g, '\\dot{$1}');
+    return s.trim();
+  }
+
+  // ── Handwrite transcription backend ──
+  // Two backends are supported, selectable via the Settings modal:
+  //   - 'lmstudio'   : POST directly to LM Studio's OpenAI-compatible endpoint
+  //                    (local dev, no key required, default).
+  //   - 'openrouter' : POST to OpenRouter's OpenAI-compatible endpoint with the
+  //                    user's own API key. Key is stored in localStorage and
+  //                    sent directly from the browser to openrouter.ai.
+  // Backwards-compat: legacy localStorage keys handwriteEndpoint /
+  // handwriteModel still override the LM Studio defaults.
+  const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+  const DEFAULT_LMSTUDIO_ENDPOINT = 'http://localhost:1234/v1/chat/completions';
+  const DEFAULT_LMSTUDIO_MODEL = 'qwen2-vl-7b-instruct';
+  const DEFAULT_OPENROUTER_MODEL = 'qwen/qwen2.5-vl-72b-instruct';
+
+  function handwriteBackend() {
+    return localStorage.getItem('handwriteBackend') || 'lmstudio';
+  }
+  function lmstudioEndpoint() {
+    return localStorage.getItem('handwriteEndpoint') || DEFAULT_LMSTUDIO_ENDPOINT;
+  }
+  function lmstudioModel() {
+    return localStorage.getItem('handwriteModel') || DEFAULT_LMSTUDIO_MODEL;
+  }
+  function openrouterApiKey() {
+    return localStorage.getItem('openrouterApiKey') || '';
+  }
+  function openrouterModel() {
+    return localStorage.getItem('openrouterModel') || DEFAULT_OPENROUTER_MODEL;
+  }
+
+  function buildTranscribePrompt(vars) {
+    const varsLine = vars && vars.length
+      ? '\nThe ONLY variables that may appear in this equation are: ' + vars.join(', ') +
+        '. If you see a character that looks like an ASCII letter but a Greek letter is in the allowed list ' +
+        '(e.g. w vs \\omega, a vs \\alpha), prefer the Greek letter. ' +
+        'Do not introduce any variables outside this list.'
+      : '';
+    return (
+      'Transcribe the handwritten mathematical equation in this image to LaTeX. ' +
+      'Output ONLY the raw LaTeX expression. ' +
+      'Absolutely NO dollar signs ($, $$). ' +
+      'No \\[ \\] or \\( \\) delimiters. ' +
+      'No prose. No code fences. No explanation. ' +
+      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc.' +
+      varsLine
+    );
+  }
+
+  function cleanLatex(s) {
+    if (!s) return '';
+    s = s.trim();
+    s = s.replace(/^```(?:latex|tex)?\s*/i, '').replace(/\s*```$/, '');
+    s = s.replace(/^\$+/, '').replace(/\$+$/, '');
+    s = s.replace(/^\\\[\s*/, '').replace(/\s*\\\]$/, '');
+    s = s.replace(/^\\\(\s*/, '').replace(/\s*\\\)$/, '');
+    return s.trim();
+  }
+
+  // Multi-line variant for the freeform canvas: ask the model to return one
+  // LaTeX expression per line of handwriting, separated by newlines. Returns
+  // an array of cleaned LaTeX strings (one per detected line).
+  function buildMultiLinePrompt(vars) {
+    const varsLine = vars && vars.length
+      ? '\nThe ONLY variables that may appear are: ' + vars.join(', ') +
+        '. Prefer Greek letters from this list over ASCII look-alikes ' +
+        '(e.g. \\omega over w). Do not introduce variables outside this list.'
+      : '';
+    return (
+      'The image contains handwritten mathematics, possibly multiple lines stacked vertically. ' +
+      'Transcribe each physical line of handwriting as ONE LaTeX expression. ' +
+      'Output one LaTeX expression per line, separated by newlines. ' +
+      'Output ONLY the raw LaTeX. ' +
+      'NO dollar signs ($, $$). NO \\[ \\] or \\( \\) delimiters. ' +
+      'NO \\begin{aligned} or other environments. ' +
+      'NO prose. NO code fences. NO explanation. ' +
+      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc.' +
+      varsLine
+    );
+  }
+
+  function parseMultiLineLatex(raw) {
+    if (!raw) return [];
+    let s = raw.trim();
+    // Strip code fences
+    s = s.replace(/^```(?:latex|tex)?\s*/i, '').replace(/\s*```$/, '');
+    // Strip aligned wrapper if model added one despite the prompt
+    s = s.replace(/\\begin\{(aligned|align\*?|gathered|equation\*?)\}/g, '');
+    s = s.replace(/\\end\{(aligned|align\*?|gathered|equation\*?)\}/g, '');
+    // Split on actual newlines OR LaTeX line breaks (\\)
+    const parts = s.split(/\r?\n|\\\\/);
+    return parts
+      .map(p => cleanLatex(p))
+      .filter(p => p.length > 0);
+  }
+
+  // Shared backend caller for any vision-LM transcription request. Handles the
+  // LM Studio vs OpenRouter switch in one place so single-line, multi-line, and
+  // any future variants automatically support both backends.
+  async function callVisionBackend(promptText, pngDataUrl, maxTokens) {
+    const backend = handwriteBackend();
+    let url, headers, model;
+    if (backend === 'openrouter') {
+      const key = openrouterApiKey();
+      if (!key) {
+        throw new Error('OpenRouter API key not set. Open Settings to add one.');
+      }
+      url = OPENROUTER_URL;
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + key,
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'Why Academy'
+      };
+      model = openrouterModel();
+    } else {
+      url = lmstudioEndpoint();
+      headers = { 'Content-Type': 'application/json' };
+      model = lmstudioModel();
+    }
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        model: model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: promptText },
+            { type: 'image_url', image_url: { url: pngDataUrl } }
+          ]
+        }],
+        temperature: 0,
+        max_tokens: maxTokens
+      })
+    });
+    if (!resp.ok) {
+      throw new Error('transcription HTTP ' + resp.status + ': ' + (await resp.text()));
+    }
+    const json = await resp.json();
+    return json.choices[0].message.content;
+  }
+
+  async function transcribeMultiLine(pngDataUrl, vars) {
+    const raw = await callVisionBackend(buildMultiLinePrompt(vars), pngDataUrl, 400);
+    return { raw: raw, lines: parseMultiLineLatex(raw) };
+  }
+
+  async function transcribeHandwriting(pngDataUrl, vars) {
+    const raw = await callVisionBackend(buildTranscribePrompt(vars), pngDataUrl, 200);
+    return { raw: raw, latex: cleanLatex(raw) };
+  }
+
+  // ── Settings modal ──
+  function initSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    const openBtn = document.getElementById('settings-btn');
+    const cancelBtn = document.getElementById('settings-cancel');
+    const saveBtn = document.getElementById('settings-save');
+    const backdrop = modal.querySelector('.settings-modal-backdrop');
+    const radios = modal.querySelectorAll('input[name="handwrite-backend"]');
+    const lmGroup = document.getElementById('settings-lmstudio');
+    const orGroup = document.getElementById('settings-openrouter');
+    const lmEndpointEl = document.getElementById('settings-lmstudio-endpoint');
+    const lmModelEl = document.getElementById('settings-lmstudio-model');
+    const orKeyEl = document.getElementById('settings-openrouter-key');
+    const orModelEl = document.getElementById('settings-openrouter-model');
+
+    function syncGroups() {
+      const v = (modal.querySelector('input[name="handwrite-backend"]:checked') || {}).value;
+      lmGroup.classList.toggle('hidden', v !== 'lmstudio');
+      orGroup.classList.toggle('hidden', v !== 'openrouter');
+    }
+
+    function loadIntoForm() {
+      const backend = handwriteBackend();
+      radios.forEach(r => { r.checked = (r.value === backend); });
+      lmEndpointEl.value = lmstudioEndpoint();
+      lmModelEl.value = lmstudioModel();
+      orKeyEl.value = openrouterApiKey();
+      orModelEl.value = openrouterModel();
+      syncGroups();
+    }
+
+    function open() {
+      loadIntoForm();
+      modal.classList.remove('hidden');
+    }
+    function close() {
+      modal.classList.add('hidden');
+    }
+
+    openBtn.addEventListener('click', open);
+    cancelBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', close);
+    radios.forEach(r => r.addEventListener('change', syncGroups));
+
+    saveBtn.addEventListener('click', () => {
+      const backend = (modal.querySelector('input[name="handwrite-backend"]:checked') || {}).value || 'lmstudio';
+      localStorage.setItem('handwriteBackend', backend);
+
+      const lmEndpoint = lmEndpointEl.value.trim();
+      if (lmEndpoint) localStorage.setItem('handwriteEndpoint', lmEndpoint);
+      else localStorage.removeItem('handwriteEndpoint');
+      const lmModel = lmModelEl.value.trim();
+      if (lmModel) localStorage.setItem('handwriteModel', lmModel);
+      else localStorage.removeItem('handwriteModel');
+
+      const orKey = orKeyEl.value.trim();
+      if (orKey) localStorage.setItem('openrouterApiKey', orKey);
+      else localStorage.removeItem('openrouterApiKey');
+      const orModel = orModelEl.value.trim();
+      if (orModel) localStorage.setItem('openrouterModel', orModel);
+      else localStorage.removeItem('openrouterModel');
+
+      close();
     });
   }
 
@@ -120,7 +521,9 @@
       calculate: renderCalculate,
       code: renderCode,
       practice: renderPractice,
-      explain: renderExplain
+      explain: renderExplain,
+      handwrite: renderHandwrite,
+      'canvas-derive': renderCanvasDerive
     };
 
     const renderer = renderers[block.type];
@@ -1065,6 +1468,796 @@ plt.close('all')
     });
 
     div.appendChild(optionsDiv);
+    return div;
+  }
+
+  // ── Handwrite Block ──
+  // Step-by-step handwritten derivation. Each step:
+  //   1. Student draws on a canvas with stylus/finger.
+  //   2. Submit -> rasterize -> POST image to vision model -> get LaTeX back.
+  //   3. Student previews the transcription and confirms ("looks right") or
+  //      rejects ("wrong, fix it"). This is critical: OCR mistakes feel like
+  //      math mistakes if the student doesn't get to see what was read.
+  //   4. On confirm, SymPy checks symbolic equivalence to the target.
+  //   5. Pass: lock the step, reveal the next one. Fail: increment attempts,
+  //      retry. After max_attempts the target is revealed and the step unlocks.
+  function renderHandwrite(block) {
+    const div = document.createElement('div');
+
+    // Kick off SymPy install in the background as soon as the block renders so
+    // it's ready (or close to ready) by the time the student finishes drawing.
+    ensureSympy().catch(e => console.warn('sympy preload failed:', e));
+
+    if (block.prompt) {
+      const prompt = document.createElement('p');
+      prompt.textContent = block.prompt;
+      div.appendChild(prompt);
+    }
+
+    if (block.context_note) {
+      const note = document.createElement('div');
+      note.className = 'handwrite-context-note';
+      note.innerHTML = block.context_note;
+      div.appendChild(note);
+    }
+
+    if (block.starting_equation) {
+      const startLabel = document.createElement('div');
+      startLabel.className = 'derive-start-label';
+      startLabel.textContent = 'Starting equation:';
+      div.appendChild(startLabel);
+
+      const startEq = document.createElement('div');
+      startEq.className = 'derive-current-equation derive-start-equation';
+      startEq.innerHTML = '$$' + block.starting_equation + '$$';
+      div.appendChild(startEq);
+    }
+
+    const stepsContainer = document.createElement('div');
+    stepsContainer.className = 'handwrite-steps';
+    div.appendChild(stepsContainer);
+
+    const maxAttempts = block.max_attempts_per_step || 5;
+    let currentStepIdx = 0;
+
+    function renderStep(stepIdx) {
+      const step = block.steps[stepIdx];
+      const stepEl = document.createElement('div');
+      stepEl.className = 'handwrite-step';
+
+      const num = document.createElement('div');
+      num.className = 'derive-step-number';
+      num.textContent = stepIdx + 1;
+      stepEl.appendChild(num);
+
+      const content = document.createElement('div');
+      content.className = 'handwrite-step-content';
+      stepEl.appendChild(content);
+
+      const instr = document.createElement('div');
+      instr.className = 'derive-step-instruction';
+      instr.innerHTML = step.instruction;
+      content.appendChild(instr);
+
+      // Canvas
+      const padWrap = document.createElement('div');
+      padWrap.className = 'handwrite-pad-wrap';
+      const canvas = document.createElement('canvas');
+      canvas.className = 'handwrite-pad';
+      canvas.width = 800;
+      canvas.height = 220;
+      padWrap.appendChild(canvas);
+      content.appendChild(padWrap);
+
+      const ctx = canvas.getContext('2d');
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = '#000';
+      let strokes = [];
+      let active = null;
+
+      function paint() {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (const s of strokes) drawStroke(s);
+        if (active) drawStroke(active);
+      }
+      function drawStroke(stroke) {
+        if (stroke.points.length < 2) {
+          if (stroke.points.length === 1) {
+            const p = stroke.points[0];
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, stroke.width / 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+          }
+          return;
+        }
+        ctx.lineWidth = stroke.width;
+        ctx.beginPath();
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        for (let i = 1; i < stroke.points.length - 1; i++) {
+          const p0 = stroke.points[i];
+          const p1 = stroke.points[i + 1];
+          ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+        }
+        const last = stroke.points[stroke.points.length - 1];
+        ctx.lineTo(last.x, last.y);
+        ctx.stroke();
+      }
+      function pointFromEvent(e) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: (e.clientX - rect.left) * (canvas.width / rect.width),
+          y: (e.clientY - rect.top) * (canvas.height / rect.height),
+          pressure: e.pressure || 0.5
+        };
+      }
+      canvas.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        const p = pointFromEvent(e);
+        const w = e.pointerType === 'pen' ? 1 + p.pressure * 4 : 2.5;
+        active = { points: [p], width: w };
+        paint();
+      });
+      canvas.addEventListener('pointermove', e => {
+        if (!active) return;
+        active.points.push(pointFromEvent(e));
+        paint();
+      });
+      canvas.addEventListener('pointerup', () => {
+        if (!active) return;
+        strokes.push(active);
+        active = null;
+        paint();
+      });
+      paint();
+
+      // Controls
+      const controls = document.createElement('div');
+      controls.className = 'handwrite-controls';
+
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'btn btn-secondary';
+      undoBtn.textContent = 'Undo';
+      undoBtn.addEventListener('click', () => { strokes.pop(); paint(); });
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn btn-secondary';
+      clearBtn.textContent = 'Clear';
+      clearBtn.addEventListener('click', () => { strokes = []; paint(); });
+
+      const submitBtn = document.createElement('button');
+      submitBtn.className = 'btn btn-primary';
+      submitBtn.textContent = 'Transcribe';
+
+      controls.appendChild(undoBtn);
+      controls.appendChild(clearBtn);
+      const spacer = document.createElement('span');
+      spacer.style.flex = '1';
+      controls.appendChild(spacer);
+      controls.appendChild(submitBtn);
+      content.appendChild(controls);
+
+      // Status / preview / verification area
+      const statusEl = document.createElement('div');
+      statusEl.className = 'handwrite-status';
+      content.appendChild(statusEl);
+
+      const previewWrap = document.createElement('div');
+      previewWrap.className = 'handwrite-preview';
+      previewWrap.style.display = 'none';
+      content.appendChild(previewWrap);
+
+      const feedbackEl = document.createElement('div');
+      content.appendChild(feedbackEl);
+
+      let attempts = 0;
+      let busy = false;
+
+      // Crop the canvas to a tight bbox of ink with white margin -- smaller
+      // payload, dramatically better OCR than feeding a mostly-empty canvas.
+      function rasterize() {
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+        let found = false;
+        for (let y = 0; y < canvas.height; y++) {
+          for (let x = 0; x < canvas.width; x++) {
+            const i = (y * canvas.width + x) * 4;
+            if (img.data[i] < 200) {
+              if (x < minX) minX = x;
+              if (y < minY) minY = y;
+              if (x > maxX) maxX = x;
+              if (y > maxY) maxY = y;
+              found = true;
+            }
+          }
+        }
+        if (!found) return null;
+        const pad = 20;
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(canvas.width, maxX + pad);
+        maxY = Math.min(canvas.height, maxY + pad);
+        const w = maxX - minX, h = maxY - minY;
+        const out = document.createElement('canvas');
+        out.width = w;
+        out.height = h;
+        const octx = out.getContext('2d');
+        octx.fillStyle = '#fff';
+        octx.fillRect(0, 0, w, h);
+        octx.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+        return out.toDataURL('image/png');
+      }
+
+      submitBtn.addEventListener('click', async () => {
+        if (busy) return;
+        if (strokes.length < 1) {
+          statusEl.textContent = 'Draw something first.';
+          return;
+        }
+        const dataUrl = rasterize();
+        if (!dataUrl) {
+          statusEl.textContent = 'Canvas appears empty.';
+          return;
+        }
+        busy = true;
+        submitBtn.disabled = true;
+        statusEl.textContent = 'Reading your handwriting...';
+        previewWrap.style.display = 'none';
+        feedbackEl.innerHTML = '';
+        try {
+          const { latex, raw } = await transcribeHandwriting(dataUrl, step.vars || []);
+          statusEl.textContent = '';
+          showPreview(latex, raw);
+        } catch (e) {
+          const hint = handwriteBackend() === 'openrouter'
+            ? 'Check your OpenRouter API key and model in Settings. The key must have credits and the model must support vision.'
+            : 'Make sure LM Studio is running on localhost:1234 with a vision model loaded and CORS enabled.';
+          statusEl.innerHTML =
+            '<span class="handwrite-error">Transcription failed: ' + esc(e.message) + '</span>' +
+            '<br><span class="handwrite-status-detail">' + hint + '</span>';
+        } finally {
+          busy = false;
+          submitBtn.disabled = false;
+        }
+      });
+
+      function showPreview(latex, raw) {
+        previewWrap.innerHTML = '';
+        previewWrap.style.display = 'block';
+
+        const label = document.createElement('div');
+        label.className = 'handwrite-preview-label';
+        label.textContent = 'I read this. Is it right?';
+        previewWrap.appendChild(label);
+
+        const renderEl = document.createElement('div');
+        renderEl.className = 'handwrite-preview-render';
+        renderEl.innerHTML = '$$' + latex + '$$';
+        previewWrap.appendChild(renderEl);
+
+        const rawEl = document.createElement('div');
+        rawEl.className = 'handwrite-preview-raw';
+        rawEl.textContent = latex;
+        previewWrap.appendChild(rawEl);
+
+        const previewControls = document.createElement('div');
+        previewControls.className = 'handwrite-controls';
+
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'btn btn-primary';
+        yesBtn.textContent = 'Yes — check it';
+
+        const noBtn = document.createElement('button');
+        noBtn.className = 'btn btn-secondary';
+        noBtn.textContent = 'No — let me redraw';
+
+        previewControls.appendChild(noBtn);
+        const sp = document.createElement('span');
+        sp.style.flex = '1';
+        previewControls.appendChild(sp);
+        previewControls.appendChild(yesBtn);
+        previewWrap.appendChild(previewControls);
+
+        renderKaTeX(previewWrap);
+
+        noBtn.addEventListener('click', () => {
+          previewWrap.style.display = 'none';
+          // Don't burn an attempt for an OCR fix; the math wasn't graded yet.
+        });
+
+        yesBtn.addEventListener('click', () => {
+          previewWrap.style.display = 'none';
+          verify(latex);
+        });
+      }
+
+      async function verify(studentLatex) {
+        statusEl.textContent = 'Loading math engine...';
+        try {
+          await ensureSympy();
+        } catch (e) {
+          statusEl.innerHTML =
+            '<span class="handwrite-error">Math engine failed to load: ' + esc(e.message) + '</span>';
+          return;
+        }
+        statusEl.textContent = 'Checking...';
+        const studentCanon = canonicalizeLatex(studentLatex);
+        const targetCanon = canonicalizeLatex(step.target_latex);
+        let verdict, detail;
+        try {
+          pyodide.globals.set('_s', studentCanon);
+          pyodide.globals.set('_t', targetCanon);
+          const out = await pyodide.runPythonAsync('equiv(_s, _t)');
+          [verdict, detail] = out.toJs();
+        } catch (e) {
+          statusEl.innerHTML =
+            '<span class="handwrite-error">Verification crashed: ' + esc(e.message) + '</span>';
+          return;
+        }
+        statusEl.textContent = '';
+
+        if (verdict === 'ok') {
+          feedbackEl.innerHTML =
+            '<div class="feedback feedback-correct">Correct &mdash; matches the target symbolically.</div>';
+          lockStep(stepEl, studentLatex);
+          advance();
+          return;
+        }
+
+        attempts++;
+        const remaining = maxAttempts - attempts;
+        let msg;
+        if (verdict === 'parse_error') {
+          msg = 'I couldn\'t parse what you wrote as a valid equation. Try writing it more clearly, or check the transcription.';
+        } else if (verdict === 'simplify_error') {
+          msg = 'Math engine couldn\'t simplify your answer.';
+        } else {
+          msg = 'Not equivalent to the target.';
+        }
+        if (remaining > 0) {
+          feedbackEl.innerHTML =
+            '<div class="feedback feedback-incorrect">' + esc(msg) +
+            ' (' + remaining + ' attempt' + (remaining === 1 ? '' : 's') + ' left)</div>';
+        } else {
+          // Reveal target and unlock progression -- mirrors derive-block fallback.
+          feedbackEl.innerHTML =
+            '<div class="feedback feedback-incorrect">' + esc(msg) + '</div>' +
+            '<div class="handwrite-reveal">The target was: $$' + step.target_latex + '$$' +
+            (step.hint ? '<div class="handwrite-hint-text">' + step.hint + '</div>' : '') +
+            '</div>';
+          renderKaTeX(feedbackEl);
+          lockStep(stepEl, null);
+          advance();
+        }
+      }
+
+      function lockStep(stepElement, studentLatex) {
+        stepElement.classList.add('completed');
+        canvas.style.pointerEvents = 'none';
+        undoBtn.disabled = true;
+        clearBtn.disabled = true;
+        submitBtn.disabled = true;
+        if (studentLatex) {
+          const final = document.createElement('div');
+          final.className = 'handwrite-final';
+          final.innerHTML = 'Your answer: $$' + studentLatex + '$$';
+          content.appendChild(final);
+          renderKaTeX(final);
+        }
+      }
+
+      // Hint
+      if (step.hint) {
+        const hintsDiv = renderHints([step.hint]);
+        content.appendChild(hintsDiv);
+      }
+
+      stepsContainer.appendChild(stepEl);
+      renderKaTeX(stepEl);
+    }
+
+    function advance() {
+      currentStepIdx++;
+      if (currentStepIdx < block.steps.length) {
+        renderStep(currentStepIdx);
+      } else if (!blockState[block.id].completed) {
+        const complete = document.createElement('div');
+        complete.className = 'derive-complete';
+        complete.textContent = 'Handwritten derivation complete!';
+        div.appendChild(complete);
+        markComplete(block.id, div);
+      }
+    }
+
+    renderStep(0);
+    return div;
+  }
+
+  // ── Canvas-Derive Block (freeform single canvas) ──
+  // Pedagogical primary: one continuous graph-paper canvas, multi-line freeform
+  // derivation, debounced auto-recognition, line-level dots from operation-tree
+  // matching against block.valid_forms. Productive failure is fine — wandering
+  // and dead ends are not punished. The structured `handwrite` block is the
+  // fallback path for students who get stuck.
+  function renderCanvasDerive(block) {
+    const div = document.createElement('div');
+
+    // Trigger SymPy install in the background as soon as the block renders.
+    ensureSympy().catch(e => console.warn('sympy preload failed:', e));
+
+    if (block.prompt) {
+      const prompt = document.createElement('p');
+      prompt.textContent = block.prompt;
+      div.appendChild(prompt);
+    }
+
+    if (block.context_note) {
+      const note = document.createElement('div');
+      note.className = 'handwrite-context-note';
+      note.innerHTML = block.context_note;
+      div.appendChild(note);
+    }
+
+    if (block.starting_equation) {
+      const startLabel = document.createElement('div');
+      startLabel.className = 'derive-start-label';
+      startLabel.textContent = 'Starting equation:';
+      div.appendChild(startLabel);
+
+      const startEq = document.createElement('div');
+      startEq.className = 'derive-current-equation derive-start-equation';
+      startEq.innerHTML = '$$' + block.starting_equation + '$$';
+      div.appendChild(startEq);
+    }
+
+    // Two-column layout: canvas left, recognized lines panel right.
+    const layout = document.createElement('div');
+    layout.className = 'cderive-layout';
+    div.appendChild(layout);
+
+    // Canvas column
+    const canvasCol = document.createElement('div');
+    canvasCol.className = 'cderive-canvas-col';
+    layout.appendChild(canvasCol);
+
+    const padWrap = document.createElement('div');
+    padWrap.className = 'cderive-pad-wrap';
+    canvasCol.appendChild(padWrap);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'cderive-pad';
+    canvas.width = 900;
+    canvas.height = 540;
+    padWrap.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1f2937';
+
+    let strokes = [];
+    let active = null;
+
+    function paint() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const s of strokes) drawStroke(s);
+      if (active) drawStroke(active);
+    }
+    function drawStroke(stroke) {
+      if (stroke.points.length < 2) {
+        if (stroke.points.length === 1) {
+          const p = stroke.points[0];
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, stroke.width / 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#1f2937';
+          ctx.fill();
+        }
+        return;
+      }
+      ctx.lineWidth = stroke.width;
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length - 1; i++) {
+        const p0 = stroke.points[i];
+        const p1 = stroke.points[i + 1];
+        ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+      }
+      const last = stroke.points[stroke.points.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
+    function pointFromEvent(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) * (canvas.width / rect.width),
+        y: (e.clientY - rect.top) * (canvas.height / rect.height),
+        pressure: e.pressure || 0.5
+      };
+    }
+
+    let recognitionTimer = null;
+    let lastRecognizedStrokeCount = 0;
+    let busy = false;
+    const RECOGNITION_DEBOUNCE_MS = 1200;
+
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      const p = pointFromEvent(e);
+      const w = e.pointerType === 'pen' ? 1 + p.pressure * 4 : 2.5;
+      active = { points: [p], width: w };
+      paint();
+      // Cancel any pending recognition while the student is actively drawing.
+      if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
+    });
+    canvas.addEventListener('pointermove', e => {
+      if (!active) return;
+      active.points.push(pointFromEvent(e));
+      paint();
+    });
+    canvas.addEventListener('pointerup', () => {
+      if (!active) return;
+      strokes.push(active);
+      active = null;
+      paint();
+      scheduleRecognition();
+    });
+    paint();
+
+    // Controls row beneath the canvas.
+    const controls = document.createElement('div');
+    controls.className = 'cderive-controls';
+    canvasCol.appendChild(controls);
+
+    const undoBtn = document.createElement('button');
+    undoBtn.className = 'btn btn-secondary';
+    undoBtn.textContent = 'Undo';
+    undoBtn.addEventListener('click', () => {
+      strokes.pop();
+      paint();
+      scheduleRecognition();
+    });
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn btn-secondary';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', () => {
+      strokes = [];
+      lastRecognizedStrokeCount = 0;
+      paint();
+      recognizedLines = [];
+      renderLinesPanel();
+    });
+
+    const recognizeNowBtn = document.createElement('button');
+    recognizeNowBtn.className = 'btn btn-secondary';
+    recognizeNowBtn.textContent = 'Read now';
+    recognizeNowBtn.title = 'Force a re-read instead of waiting for the pause timer';
+    recognizeNowBtn.addEventListener('click', () => {
+      if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
+      runRecognition();
+    });
+
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn-primary';
+    doneBtn.textContent = 'I\u2019m done';
+    doneBtn.disabled = true;
+    doneBtn.title = 'Enabled once one of your lines reaches the target equation';
+    doneBtn.addEventListener('click', () => {
+      if (!targetReached || blockState[block.id].completed) return;
+      markComplete(block.id, div);
+      const banner = document.createElement('div');
+      banner.className = 'derive-complete';
+      banner.textContent = 'Derivation complete \u2014 nice work.';
+      canvasCol.appendChild(banner);
+    });
+
+    controls.appendChild(undoBtn);
+    controls.appendChild(clearBtn);
+    controls.appendChild(recognizeNowBtn);
+    const sp = document.createElement('span');
+    sp.style.flex = '1';
+    controls.appendChild(sp);
+    controls.appendChild(doneBtn);
+
+    // Side panel: recognized lines + status.
+    const panel = document.createElement('div');
+    panel.className = 'cderive-panel';
+    layout.appendChild(panel);
+
+    const panelTitle = document.createElement('div');
+    panelTitle.className = 'cderive-panel-title';
+    panelTitle.textContent = 'What I read';
+    panel.appendChild(panelTitle);
+
+    const linesEl = document.createElement('div');
+    linesEl.className = 'cderive-lines';
+    panel.appendChild(linesEl);
+
+    const panelStatus = document.createElement('div');
+    panelStatus.className = 'cderive-panel-status';
+    panelStatus.textContent = 'Draw something on the canvas. I\u2019ll read it after you pause.';
+    panel.appendChild(panelStatus);
+
+    // recognizedLines: array of { latex, status, matchedFormIdx }
+    //   status: 'ok'  | 'unmatched' | 'parse_error'
+    let recognizedLines = [];
+    let targetReached = false;
+
+    // Pre-canonicalize valid forms once for fast SymPy lookup.
+    const validForms = (block.valid_forms || []).map(canonicalizeLatex);
+    const targetCanon = canonicalizeLatex(block.target_equation || '');
+    // Index of the target inside validForms (or -1 if not present); used to
+    // detect "the student wrote the target" purely by index match.
+    const targetIdx = validForms.indexOf(targetCanon);
+
+    function renderLinesPanel() {
+      linesEl.innerHTML = '';
+      if (recognizedLines.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'cderive-line-empty';
+        empty.textContent = '(no lines yet)';
+        linesEl.appendChild(empty);
+        return;
+      }
+      recognizedLines.forEach((line, i) => {
+        const row = document.createElement('div');
+        row.className = 'cderive-line cderive-line-' + line.status;
+
+        const dot = document.createElement('span');
+        dot.className = 'cderive-dot';
+        if (line.status === 'ok') dot.title = 'Matches a valid form';
+        else if (line.status === 'unmatched') dot.title = 'Not equivalent to any valid form (yet)';
+        else dot.title = 'Couldn\u2019t parse this line';
+        row.appendChild(dot);
+
+        const renderBox = document.createElement('div');
+        renderBox.className = 'cderive-line-render';
+        renderBox.innerHTML = '$$' + line.latex + '$$';
+        row.appendChild(renderBox);
+
+        const rawBox = document.createElement('div');
+        rawBox.className = 'cderive-line-raw';
+        rawBox.textContent = line.latex;
+        row.appendChild(rawBox);
+
+        linesEl.appendChild(row);
+      });
+      renderKaTeX(linesEl);
+    }
+    renderLinesPanel();
+
+    function scheduleRecognition() {
+      if (busy) return;
+      if (recognitionTimer) clearTimeout(recognitionTimer);
+      if (strokes.length === 0) {
+        // Canvas was cleared; nothing to do.
+        return;
+      }
+      recognitionTimer = setTimeout(runRecognition, RECOGNITION_DEBOUNCE_MS);
+    }
+
+    function rasterizeCanvas() {
+      // Find bbox of black ink so we send a tightly cropped image.
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+      let found = false;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const i = (y * canvas.width + x) * 4;
+          // Ink is opaque dark; transparent grid background has alpha 0.
+          if (img.data[i + 3] > 0 && img.data[i] < 200) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+            found = true;
+          }
+        }
+      }
+      if (!found) return null;
+      const pad = 24;
+      minX = Math.max(0, minX - pad);
+      minY = Math.max(0, minY - pad);
+      maxX = Math.min(canvas.width, maxX + pad);
+      maxY = Math.min(canvas.height, maxY + pad);
+      const w = maxX - minX, h = maxY - minY;
+      const out = document.createElement('canvas');
+      out.width = w;
+      out.height = h;
+      const octx = out.getContext('2d');
+      octx.fillStyle = '#fff';
+      octx.fillRect(0, 0, w, h);
+      octx.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+      return out.toDataURL('image/png');
+    }
+
+    async function runRecognition() {
+      if (busy) return;
+      if (strokes.length === lastRecognizedStrokeCount) return;
+      const dataUrl = rasterizeCanvas();
+      if (!dataUrl) return;
+      busy = true;
+      lastRecognizedStrokeCount = strokes.length;
+      panelStatus.textContent = 'Reading...';
+      try {
+        const { lines } = await transcribeMultiLine(dataUrl, block.vars || []);
+        if (lines.length === 0) {
+          panelStatus.textContent = 'Couldn\u2019t read anything yet. Try writing more clearly.';
+          recognizedLines = [];
+          renderLinesPanel();
+          return;
+        }
+        recognizedLines = lines.map(l => ({ latex: l, status: 'pending', matchedFormIdx: -1 }));
+        renderLinesPanel();
+
+        await ensureSympy();
+        // Verify each line against the operation tree (valid_forms).
+        let anyMatchedTarget = false;
+        for (const line of recognizedLines) {
+          const canon = canonicalizeLatex(line.latex);
+          let matchIdx = -1;
+          try {
+            pyodide.globals.set('_s', canon);
+            pyodide.globals.set('_forms', pyodide.toPy(validForms));
+            matchIdx = await pyodide.runPythonAsync('find_matching_form(_s, _forms)');
+          } catch (e) {
+            console.warn('find_matching_form failed:', e);
+            line.status = 'parse_error';
+            continue;
+          }
+          if (matchIdx >= 0) {
+            line.status = 'ok';
+            line.matchedFormIdx = matchIdx;
+            if (targetIdx >= 0 && matchIdx === targetIdx) anyMatchedTarget = true;
+          } else {
+            line.status = 'unmatched';
+          }
+        }
+        renderLinesPanel();
+
+        const okCount = recognizedLines.filter(l => l.status === 'ok').length;
+        if (anyMatchedTarget) {
+          targetReached = true;
+          doneBtn.disabled = false;
+          panelStatus.innerHTML = '<span class="cderive-target-hit">You reached the target. Click <strong>I\u2019m done</strong> when you\u2019re ready.</span>';
+        } else if (okCount > 0) {
+          panelStatus.textContent = okCount + ' valid line' + (okCount === 1 ? '' : 's') +
+            ' so far. Keep going.';
+        } else {
+          panelStatus.textContent = 'No valid lines yet. The dots show what passed.';
+        }
+      } catch (e) {
+        panelStatus.innerHTML =
+          '<span class="handwrite-error">Read failed: ' + esc(e.message) + '</span><br>' +
+          '<span class="handwrite-status-detail">Open Settings to switch backend. LM Studio: needs to be running on localhost:1234 with a vision model loaded and CORS enabled. OpenRouter: needs an API key.</span>';
+        // Reset so the next pause re-tries.
+        lastRecognizedStrokeCount = 0;
+      } finally {
+        busy = false;
+      }
+    }
+
+    // Progressive hints (question -> direction -> worked first step).
+    if (block.hints && block.hints.length > 0) {
+      const hintsDiv = renderHints(block.hints);
+      div.appendChild(hintsDiv);
+    }
+
+    // "Stuck? Use the guided version below" — points to the structured
+    // handwrite block, which is the explicit fallback. The lesson author wires
+    // the relationship by ordering the blocks; we just provide the visual cue.
+    if (block.fallback_block_id) {
+      const fallback = document.createElement('div');
+      fallback.className = 'cderive-fallback-link';
+      fallback.innerHTML =
+        'Stuck? <a href="#block-' + esc(block.fallback_block_id) + '">Try the step-by-step guided version below \u2192</a>';
+      div.appendChild(fallback);
+    }
+
     return div;
   }
 

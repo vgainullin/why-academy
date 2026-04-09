@@ -67,6 +67,74 @@
       ]
     },
     {
+      "id": "L1-B3F",
+      "type": "canvas-derive",
+      "title": "Derive ω = √(k/m) by Hand",
+      "prompt": "Work the whole derivation on the canvas — your stylus or finger, your order, your handwriting. Start from m·ẍ = -kx and end at ω = √(k/m). After you pause for a moment, the system reads each line and shows a dot: green if the line matches a valid form in the chain, gray if not. Wandering and dead ends are fine — only the dots that go green count toward finishing. Click \"I'm done\" once one of your lines reaches the target.",
+      "starting_equation": "m\\ddot{x} = -kx",
+      "target_equation": "\\omega = \\sqrt{\\frac{k}{m}}",
+      "context_note": "When you're ready, you can substitute $$\\ddot{x} = -\\omega^2 x$$ — that came from differentiating the trial solution $$x = A e^{i\\omega t}$$ in the previous block.",
+      "vars": ["x", "k", "m", "\\omega", "A", "t", "i"],
+      "valid_forms": [
+        "m\\ddot{x} = -kx",
+        "m\\ddot{x} + kx = 0",
+        "\\ddot{x} = -\\frac{k}{m} x",
+        "\\ddot{x} + \\frac{k}{m} x = 0",
+        "-m\\omega^2 x = -kx",
+        "m\\omega^2 x = kx",
+        "m\\omega^2 = k",
+        "-\\omega^2 x = -\\frac{k}{m} x",
+        "\\omega^2 x = \\frac{k}{m} x",
+        "\\omega^2 = \\frac{k}{m}",
+        "\\omega = \\sqrt{\\frac{k}{m}}"
+      ],
+      "hints": [
+        "What kind of function gives back a negative of itself when differentiated twice? Cosine and sine — that's where ẍ = -ω²x comes from.",
+        "After you substitute ẍ = -ω²x into the equation of motion, both sides have a factor of -x. Cancel it.",
+        "Once you have ω² = k/m, take the (positive) square root to get ω."
+      ],
+      "fallback_block_id": "L1-B3H"
+    },
+    {
+      "id": "L1-B3H",
+      "type": "handwrite",
+      "title": "Guided Version (Fallback)",
+      "prompt": "If the freeform canvas above felt overwhelming, work through the same derivation here in guided steps. Each step tells you what to do; you draw the result on the pad and the system checks it before moving to the next.",
+      "starting_equation": "m\\ddot{x} = -kx",
+      "context_note": "Use the substitution $$\\ddot{x} = -\\omega^2 x$$ when the time comes — that came from differentiating the trial solution $$x = A e^{i\\omega t}$$ in the previous block.",
+      "max_attempts_per_step": 5,
+      "steps": [
+        {
+          "id": "h1",
+          "instruction": "Divide both sides of $$m\\ddot{x} = -kx$$ by $$m$$.",
+          "target_latex": "\\ddot{x} = -\\frac{k}{m} x",
+          "vars": ["x", "k", "m"],
+          "hint": "Same operation on both sides. The $$m$$ on the left cancels."
+        },
+        {
+          "id": "h2",
+          "instruction": "Substitute $$\\ddot{x} = -\\omega^2 x$$ into the left-hand side.",
+          "target_latex": "-\\omega^2 x = -\\frac{k}{m} x",
+          "vars": ["x", "k", "m", "\\omega"],
+          "hint": "Just replace $$\\ddot{x}$$ with $$-\\omega^2 x$$."
+        },
+        {
+          "id": "h3",
+          "instruction": "Cancel $$x$$ from both sides and the negative sign too.",
+          "target_latex": "\\omega^2 = \\frac{k}{m}",
+          "vars": ["k", "m", "\\omega"],
+          "hint": "Both sides have a factor of $$-x$$. Divide it out."
+        },
+        {
+          "id": "h4",
+          "instruction": "Take the square root to solve for $$\\omega$$.",
+          "target_latex": "\\omega = \\sqrt{\\frac{k}{m}}",
+          "vars": ["k", "m", "\\omega"],
+          "hint": "Only the positive root has physical meaning here."
+        }
+      ]
+    },
+    {
       "id": "L1-B4",
       "type": "calculate",
       "title": "Estimate ω",

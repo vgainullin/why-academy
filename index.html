@@ -26,6 +26,7 @@
   <header>
     <h1>Why Academy</h1>
     <div id="auth-area">
+      <button id="settings-btn" class="btn-settings" title="Settings">Settings</button>
       <button id="signin-btn" class="btn-signin hidden">Sign in</button>
       <div id="user-info" class="hidden">
         <span id="user-email"></span>
@@ -39,8 +40,58 @@
     <div id="blocks-container"></div>
   </main>
 
-  <div id="pyodide-status" class="hidden">
-    <span class="spinner"></span> Loading Python environment…
+  <div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-modal-backdrop"></div>
+    <div class="settings-modal-panel" role="dialog" aria-labelledby="settings-title">
+      <h3 id="settings-title">Settings</h3>
+      <p class="settings-section-label">Handwriting transcription backend</p>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="lmstudio">
+        <span>LM Studio (local)</span>
+      </label>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="openrouter">
+        <span>OpenRouter (cloud, requires API key)</span>
+      </label>
+
+      <div id="settings-lmstudio" class="settings-group">
+        <label>
+          Endpoint
+          <input type="text" id="settings-lmstudio-endpoint" placeholder="http://localhost:1234/v1/chat/completions">
+        </label>
+        <label>
+          Model
+          <input type="text" id="settings-lmstudio-model" placeholder="qwen2-vl-7b-instruct">
+        </label>
+      </div>
+
+      <div id="settings-openrouter" class="settings-group">
+        <label>
+          API key
+          <input type="password" id="settings-openrouter-key" placeholder="sk-or-...">
+        </label>
+        <label>
+          Model
+          <input type="text" id="settings-openrouter-model" placeholder="qwen/qwen2.5-vl-72b-instruct">
+        </label>
+        <p class="settings-hint">Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. The key is stored only in your browser's localStorage and sent directly to OpenRouter.</p>
+      </div>
+
+      <div class="settings-actions">
+        <button id="settings-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="settings-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pyodide-status" class="hidden" role="status" aria-live="polite">
+    <div class="loader-row">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="loader-label">Loading Python environment…</span>
+      <span class="loader-pct">0%</span>
+    </div>
+    <div class="loader-bar"><div class="loader-bar-fill"></div></div>
+    <div class="loader-sub"></div>
   </div>
 
   <script src="lib/auth.js"></script>

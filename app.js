@@ -268,10 +268,15 @@
   const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const DEFAULT_LMSTUDIO_ENDPOINT = 'http://localhost:1234/v1/chat/completions';
   const DEFAULT_LMSTUDIO_MODEL = 'qwen2-vl-7b-instruct';
-  // Gemini 2.0 Flash handles handwritten math notably better than Qwen2.5-VL-72B
-  // in our testing — and it's also cheaper. Override in Settings if you prefer
-  // qwen/qwen2-vl-72b-instruct or anthropic/claude-sonnet-4-5.
-  const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.0-flash-001';
+  // Gemma 4 31B (dense, multimodal, with built-in reasoning) handles
+  // handwritten math better than the alternatives we tested. Other strong
+  // options to override in Settings:
+  //   google/gemma-4-26b-a4b-it       — cheaper MoE variant, near-31B quality
+  //   google/gemma-4-31b-it:free      — same model, free tier (rate-limited)
+  //   google/gemini-2.0-flash-001     — cheapest, decent on clean handwriting
+  //   anthropic/claude-sonnet-4-5     — most expensive, very reliable
+  //   qwen/qwen2-vl-72b-instruct      — apples-to-apples upscale of local 7B
+  const DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-31b-it';
 
   function handwriteBackend() {
     const stored = localStorage.getItem('handwriteBackend');

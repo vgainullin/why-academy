@@ -434,6 +434,54 @@
     localStorage.setItem('handwriteStrokeWidth', String(v));
   }
 
+  // Hit-test: find the topmost (newest) stroke whose path passes within
+  // `radius` of `point`. Returns the index in the strokes array, or -1.
+  // The effective radius scales with stroke width so thicker strokes are
+  // easier to hit. Brute force; fine for tens-to-hundreds of strokes.
+  function findStrokeHitByPoint(strokes, point, radius) {
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const s = strokes[i];
+      const r = Math.max(radius, (s.width || 4) + 4);
+      const r2 = r * r;
+      for (const pp of s.points) {
+        const dx = pp.x - point.x;
+        const dy = pp.y - point.y;
+        if (dx * dx + dy * dy < r2) return i;
+      }
+    }
+    return -1;
+  }
+
+  // True if the pointer event represents an eraser interaction either via
+  // a stylus hardware eraser end (W3C button 5 / buttons bit 32) or because
+  // the explicit eraser-mode toggle is on. Apple Pencil 2 / Pro do NOT fire
+  // these — Apple keeps double-tap and squeeze gestures inside native APIs.
+  function isEraserPointerEvent(e, eraserModeOn) {
+    if (eraserModeOn) return true;
+    if (e.button === 5) return true;
+    if (typeof e.buttons === 'number' && (e.buttons & 32) !== 0) return true;
+    return false;
+  }
+
+  // Build an Eraser toggle button. Caller passes get/set/onChange so the
+  // button stays in sync with the surrounding closure's state.
+  function makeEraserToggle(getMode, setMode) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary stroke-eraser-btn';
+    btn.type = 'button';
+    btn.innerHTML = '<span class="eraser-icon" aria-hidden="true"></span>Eraser';
+    btn.title = 'Tap a stroke to remove it (keyboard: E)';
+    function sync() {
+      btn.classList.toggle('btn-active', !!getMode());
+    }
+    btn.addEventListener('click', () => {
+      setMode(!getMode());
+      sync();
+    });
+    sync();
+    return { btn: btn, sync: sync };
+  }
+
   // Build a thickness slider widget. Each canvas reads getStrokeWidth() at
   // pointerdown time, so a single shared localStorage value drives all open
   // canvases live without explicit cross-block wiring.
@@ -1713,22 +1761,44 @@ plt.close('all')
         e.preventDefault();
       }, { passive: false });
 
+      let eraserMode = false;
+      let activeErasing = false;
+      function eraseAtPoint(p) {
+        const idx = findStrokeHitByPoint(strokes, p, 12);
+        if (idx >= 0) {
+          strokes.splice(idx, 1);
+          paint();
+        }
+      }
       canvas.addEventListener('pointerdown', e => {
         e.preventDefault();
         if (window.getSelection) window.getSelection().removeAllRanges();
         canvas.setPointerCapture(e.pointerId);
         const p = pointFromEvent(e);
+        if (isEraserPointerEvent(e, eraserMode)) {
+          activeErasing = true;
+          eraseAtPoint(p);
+          return;
+        }
         const baseW = getStrokeWidth();
         const w = e.pointerType === 'pen' ? baseW * (0.65 + (p.pressure || 0.5) * 0.7) : baseW;
         active = { points: [p], width: w };
         paint();
       });
       canvas.addEventListener('pointermove', e => {
+        if (activeErasing) {
+          eraseAtPoint(pointFromEvent(e));
+          return;
+        }
         if (!active) return;
         active.points.push(pointFromEvent(e));
         paint();
       });
       canvas.addEventListener('pointerup', () => {
+        if (activeErasing) {
+          activeErasing = false;
+          return;
+        }
         if (!active) return;
         strokes.push(active);
         active = null;
@@ -1756,8 +1826,17 @@ plt.close('all')
 
       const widthSlider = makeStrokeWidthSlider();
 
+      const eraserToggle = makeEraserToggle(
+        () => eraserMode,
+        v => {
+          eraserMode = v;
+          canvas.classList.toggle('eraser-active', eraserMode);
+        }
+      );
+
       controls.appendChild(undoBtn);
       controls.appendChild(clearBtn);
+      controls.appendChild(eraserToggle.btn);
       controls.appendChild(widthSlider);
       const spacer = document.createElement('span');
       spacer.style.flex = '1';
@@ -2120,24 +2199,56 @@ plt.close('all')
       e.preventDefault();
     }, { passive: false });
 
+    let eraserMode = false;
+    let activeErasing = false;
+    let erasedSinceDown = false;
+
+    function eraseAtPoint(p) {
+      const idx = findStrokeHitByPoint(strokes, p, 12);
+      if (idx >= 0) {
+        strokes.splice(idx, 1);
+        erasedSinceDown = true;
+        paint();
+      }
+    }
+
     canvas.addEventListener('pointerdown', e => {
       e.preventDefault();
       if (window.getSelection) window.getSelection().removeAllRanges();
       canvas.setPointerCapture(e.pointerId);
       const p = pointFromEvent(e);
+      // Cancel any pending recognition while the user is interacting.
+      if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
+      if (isEraserPointerEvent(e, eraserMode)) {
+        activeErasing = true;
+        erasedSinceDown = false;
+        eraseAtPoint(p);
+        return;
+      }
       const baseW = getStrokeWidth();
       const w = e.pointerType === 'pen' ? baseW * (0.65 + (p.pressure || 0.5) * 0.7) : baseW;
       active = { points: [p], width: w };
       paint();
-      // Cancel any pending recognition while the student is actively drawing.
-      if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
     });
     canvas.addEventListener('pointermove', e => {
+      if (activeErasing) {
+        eraseAtPoint(pointFromEvent(e));
+        return;
+      }
       if (!active) return;
       active.points.push(pointFromEvent(e));
       paint();
     });
     canvas.addEventListener('pointerup', () => {
+      if (activeErasing) {
+        activeErasing = false;
+        if (erasedSinceDown) {
+          // Force a fresh recognition pass since the line set may have changed.
+          lastRecognizedStrokeCount = -1;
+          scheduleRecognition();
+        }
+        return;
+      }
       if (!active) return;
       strokes.push(active);
       active = null;
@@ -2196,8 +2307,28 @@ plt.close('all')
 
     const widthSlider = makeStrokeWidthSlider();
 
+    const eraserToggle = makeEraserToggle(
+      () => eraserMode,
+      v => {
+        eraserMode = v;
+        canvas.classList.toggle('eraser-active', eraserMode);
+      }
+    );
+
+    // Keyboard shortcut: E toggles eraser mode (ignored when typing in inputs).
+    function onKey(e) {
+      if (e.key !== 'e' && e.key !== 'E') return;
+      const tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      eraserMode = !eraserMode;
+      canvas.classList.toggle('eraser-active', eraserMode);
+      eraserToggle.sync();
+    }
+    document.addEventListener('keydown', onKey);
+
     controls.appendChild(undoBtn);
     controls.appendChild(clearBtn);
+    controls.appendChild(eraserToggle.btn);
     controls.appendChild(recognizeNowBtn);
     controls.appendChild(widthSlider);
     const sp = document.createElement('span');

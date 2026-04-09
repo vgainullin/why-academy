@@ -1014,6 +1014,36 @@ main {
   flex-shrink: 0;
   transition: width 0.1s, height 0.1s;
 }
+
+/* Eraser toggle button — flips to "active" state when on. */
+.stroke-eraser-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stroke-eraser-btn.btn-active {
+  background: #fde68a;
+  border-color: #f59e0b;
+  color: #78350f;
+}
+.eraser-icon {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  background: #f59e0b;
+  border: 1px solid #b45309;
+  border-radius: 2px;
+  position: relative;
+}
+.stroke-eraser-btn.btn-active .eraser-icon {
+  background: #78350f;
+  border-color: #78350f;
+}
+/* Cursor changes when eraser mode is active on a canvas. */
+.cderive-pad.eraser-active,
+.handwrite-pad.eraser-active {
+  cursor: cell;
+}
 .handwrite-status {
   margin-top: 8px;
   font-size: 0.88rem;

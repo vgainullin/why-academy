@@ -18,7 +18,7 @@
   --block-bg: #ffffff;
   --code-bg: #282c34;
   --radius: 8px;
-  --max-width: 720px;
+  --max-width: 1800px;
 }
 
 body {
@@ -745,7 +745,7 @@ main {
 /* === Responsive === */
 @media (min-width: 640px) {
   main {
-    padding: 24px;
+    padding: 24px 32px;
   }
 
   .block {
@@ -973,7 +973,6 @@ main {
 }
 .handwrite-pad {
   width: 100%;
-  max-width: 800px;
   height: auto;
   border: 1px solid #9ca3af;
   border-radius: 4px;
@@ -1079,8 +1078,10 @@ main {
 /* === Canvas-Derive (freeform single canvas) === */
 .cderive-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr);
-  gap: 16px;
+  /* Canvas takes the rest of the row; the recognized-lines panel is fixed
+     width so it doesn't bloat absurdly on wide displays. */
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
   margin-top: 12px;
 }
 @media (max-width: 900px) {

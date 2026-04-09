@@ -1652,8 +1652,8 @@ plt.close('all')
       padWrap.className = 'handwrite-pad-wrap';
       const canvas = document.createElement('canvas');
       canvas.className = 'handwrite-pad';
-      canvas.width = 800;
-      canvas.height = 220;
+      canvas.width = 1200;
+      canvas.height = 360;
       padWrap.appendChild(canvas);
       content.appendChild(padWrap);
 
@@ -2054,8 +2054,8 @@ plt.close('all')
 
     const canvas = document.createElement('canvas');
     canvas.className = 'cderive-pad';
-    canvas.width = 900;
-    canvas.height = 540;
+    canvas.width = 1400;
+    canvas.height = 900;
     padWrap.appendChild(canvas);
 
     const ctx = canvas.getContext('2d');

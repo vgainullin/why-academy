@@ -1657,7 +1657,7 @@ plt.close('all')
         e.preventDefault();
         canvas.setPointerCapture(e.pointerId);
         const p = pointFromEvent(e);
-        const w = e.pointerType === 'pen' ? 1 + p.pressure * 4 : 2.5;
+        const w = e.pointerType === 'pen' ? 3 + p.pressure * 5 : 5;
         active = { points: [p], width: w };
         paint();
       });
@@ -2047,7 +2047,7 @@ plt.close('all')
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
       const p = pointFromEvent(e);
-      const w = e.pointerType === 'pen' ? 1 + p.pressure * 4 : 2.5;
+      const w = e.pointerType === 'pen' ? 3 + p.pressure * 5 : 5;
       active = { points: [p], width: w };
       paint();
       // Cancel any pending recognition while the student is actively drawing.

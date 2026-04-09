@@ -271,7 +271,13 @@
   const DEFAULT_OPENROUTER_MODEL = 'qwen/qwen2.5-vl-72b-instruct';
 
   function handwriteBackend() {
-    return localStorage.getItem('handwriteBackend') || 'lmstudio';
+    const stored = localStorage.getItem('handwriteBackend');
+    if (stored) return stored;
+    // No explicit choice yet: LM Studio is the dev default on localhost,
+    // OpenRouter is the default everywhere else (production / GitHub Pages).
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    return isLocal ? 'lmstudio' : 'openrouter';
   }
   function lmstudioEndpoint() {
     return localStorage.getItem('handwriteEndpoint') || DEFAULT_LMSTUDIO_ENDPOINT;

@@ -13,9 +13,16 @@
 
   // ── Boot ──
   document.addEventListener('DOMContentLoaded', async () => {
-    startPyodidePreload();
     if (window.WhyAuth) WhyAuth.init();
     initSettingsModal();
+
+    // The landing page (index.html) has no #blocks-container; only the lesson
+    // view does. Skip Pyodide preload and lesson fetch on the landing so it
+    // stays lightweight and loads instantly.
+    const blocksContainer = document.getElementById('blocks-container');
+    if (!blocksContainer) return;
+
+    startPyodidePreload();
 
     // Re-render feedback toolbars when auth state changes
     document.addEventListener('whyauth:change', () => {

@@ -3,15 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Why Academy — Free, Open-Source STEM Learning</title>
-  <meta name="description" content="A free, open-source platform that teaches STEM through a derive-it-yourself methodology. No AI grading, no paywall.">
+  <title>Why Academy</title>
 
-  <!-- Google Identity Services (for the shared sign-in button in the header) -->
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- CodeMirror -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/theme/monokai.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/python/python.min.js"></script>
+
+  <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async></script>
 
+  <!-- App -->
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="landing-body">
+<body>
   <header>
     <h1>Why Academy</h1>
     <div id="auth-area">
@@ -24,55 +35,11 @@
     </div>
   </header>
 
-  <main class="landing-main">
-    <section class="landing-hero">
-      <h2>Learn STEM by deriving it yourself.</h2>
-      <p class="landing-tagline">
-        A free, open-source platform that teaches physics and math through a derive-it-yourself
-        methodology. Explore interactive simulations, predict outcomes, derive equations by hand
-        on a freeform canvas, implement them in code, and explain them in your own words —
-        every step verified deterministically by SymPy. No AI grading. No paywall.
-      </p>
-    </section>
-
-    <section class="landing-lessons">
-      <h3 class="landing-section-heading">Lessons</h3>
-      <div class="lesson-grid">
-        <a class="lesson-card" href="lesson.html?lesson=lessons/lesson1.json">
-          <span class="lesson-card-num">L1</span>
-          <h4 class="lesson-card-title">The Single Spring</h4>
-          <p class="lesson-card-desc">
-            From Hooke&rsquo;s Law to harmonic motion. Derive &omega; = &radic;(k/m) from
-            Newton&rsquo;s second law, verify it numerically in NumPy, then re-derive it on a
-            freeform handwriting canvas with line-level SymPy verification.
-          </p>
-          <span class="lesson-card-cta">Start lesson &rarr;</span>
-        </a>
-
-        <div class="lesson-card lesson-card-coming">
-          <span class="lesson-card-num">L2</span>
-          <h4 class="lesson-card-title">Coupled Springs</h4>
-          <p class="lesson-card-desc">
-            Two masses, three springs. Discover normal modes via the eigenvalue problem.
-            Bridge to coupled oscillators and the wave equation.
-          </p>
-          <span class="lesson-card-cta">Coming soon</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="landing-meta">
-      <p>
-        Open source on
-        <a href="https://github.com/vgainullin/why-academy" target="_blank" rel="noopener">GitHub</a>.
-        Read the
-        <a href="https://github.com/vgainullin/why-academy/blob/main/why-academy-brief.md" target="_blank" rel="noopener">project brief</a>
-        for the full pedagogical plan.
-      </p>
-    </section>
+  <main id="lesson-container">
+    <div id="lesson-header"></div>
+    <div id="blocks-container"></div>
   </main>
 
-  <!-- Settings modal (shared with lesson page) -->
   <div id="settings-modal" class="settings-modal hidden">
     <div class="settings-modal-backdrop"></div>
     <div class="settings-modal-panel" role="dialog" aria-labelledby="settings-title">
@@ -119,6 +86,16 @@
         <button id="settings-save" class="btn btn-primary">Save</button>
       </div>
     </div>
+  </div>
+
+  <div id="pyodide-status" class="hidden" role="status" aria-live="polite">
+    <div class="loader-row">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="loader-label">Loading Python environment…</span>
+      <span class="loader-pct">0%</span>
+    </div>
+    <div class="loader-bar"><div class="loader-bar-fill"></div></div>
+    <div class="loader-sub"></div>
   </div>
 
   <script src="lib/auth.js"></script>

@@ -1246,6 +1246,113 @@ main {
   font-weight: 600;
 }
 
+/* === Landing page === */
+.landing-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+.landing-hero {
+  text-align: left;
+  margin: 24px 0 48px;
+}
+.landing-hero h2 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 16px;
+  color: #0f172a;
+}
+.landing-tagline {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: #475569;
+  max-width: 760px;
+}
+.landing-section-heading {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #64748b;
+  margin: 0 0 16px;
+}
+.lesson-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+}
+.lesson-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--block-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+.lesson-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  border-color: var(--accent);
+}
+.lesson-card-num {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 3px 9px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.lesson-card-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 12px 0 8px;
+  color: #0f172a;
+}
+.lesson-card-desc {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #475569;
+  margin: 0 0 14px;
+}
+.lesson-card-cta {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.lesson-card-coming {
+  opacity: 0.55;
+  cursor: default;
+}
+.lesson-card-coming:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--border);
+}
+.lesson-card-coming .lesson-card-num {
+  background: #f1f5f9;
+  color: #64748b;
+}
+.lesson-card-coming .lesson-card-cta {
+  color: #94a3b8;
+}
+.landing-meta {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: #64748b;
+}
+.landing-meta a {
+  color: var(--accent);
+}
+
 /* === Utility === */
 .hidden {
   display: none !important;

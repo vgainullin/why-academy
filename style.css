@@ -965,6 +965,12 @@ main {
 .handwrite-pad-wrap {
   margin: 10px 0;
 }
+.handwrite-pad-wrap {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
 .handwrite-pad {
   width: 100%;
   max-width: 800px;
@@ -975,6 +981,10 @@ main {
   touch-action: none;
   cursor: crosshair;
   display: block;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .handwrite-controls {
   display: flex;
@@ -1072,6 +1082,12 @@ main {
   background-size: 28px 28px;
   background-position: 0 0;
   overflow: hidden;
+  /* iOS Safari: prevent the touch loupe / text selection from grabbing
+     text above the canvas when the user starts drawing. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .cderive-pad {
   width: 100%;
@@ -1080,6 +1096,10 @@ main {
   background: transparent;
   touch-action: none;
   cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .cderive-controls {
   display: flex;

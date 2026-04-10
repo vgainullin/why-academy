@@ -1,0 +1,180 @@
+{
+  "lesson_id": "C0-1",
+  "title": "Functions as Machines",
+  "description": "Functions as input/output processes, composition, decomposition, and inverses — the conceptual ground floor for the chain rule.",
+  "prerequisites": [],
+  "blocks": [
+    {
+      "id": "C0-1-B1",
+      "type": "read",
+      "title": "A Function Is a Process, Not a Picture",
+      "content_html": "<p>A spring's position depends on time. A room's temperature depends on altitude. The pressure in a tire depends on how hard you pump it. Each of these is a <strong>function</strong>: a rule that takes one number in and gives one number back.</p><p>Forget the y-vs-x graph for a moment. A function is a <em>machine</em>. You feed in a number, the machine does something to it, a number comes out the other side.</p><div class=\"equation\">$$f(x) = x^2 + 1$$</div><p>Read this aloud as: \"f of x equals x squared plus one.\" The letter $$f$$ is the machine's name. The thing in parentheses, $$x$$, is the input slot — it's a placeholder, not a fixed number. The right-hand side describes what the machine does to whatever you drop into the slot.</p><p>So if you feed in $$3$$, you get $$f(3) = 3^2 + 1 = 10$$. If you feed in $$-2$$, you get $$f(-2) = (-2)^2 + 1 = 5$$. If you feed in $$x + h$$, you get $$f(x+h) = (x+h)^2 + 1$$ — the machine doesn't care that the input is a tiny algebraic expression instead of a single number. Whatever lands in the slot, gets squared and has one added.</p><p>The set of inputs the machine accepts is the <strong>domain</strong>. The set of outputs it can produce is the <strong>range</strong>. For $$f(x) = x^2 + 1$$, the domain is all real numbers (you can square anything), and the range is $$[1, \\infty)$$ — squaring is never negative, so the smallest possible output is $$0 + 1 = 1$$.</p><p>Why bother with this perspective? Because almost every important idea in calculus — derivatives, integrals, the chain rule — is about <em>what a machine does to nearby inputs</em>. Holding onto the picture of a fixed graph hides the action. Holding onto the picture of a process makes the action visible.</p>"
+    },
+    {
+      "id": "C0-1-B2",
+      "type": "read",
+      "title": "Composition: Plugging One Machine Into Another",
+      "content_html": "<p>If you have two machines, you can chain them: take the output of the first and feed it into the second. This is called <strong>composition</strong>, and it is written</p><div class=\"equation\">$$(f \\circ g)(x) = f(g(x))$$</div><p>Read the right-hand side from the inside out. First $$g$$ acts on $$x$$, producing $$g(x)$$. Then $$f$$ acts on <em>that</em>, producing $$f(g(x))$$. The little circle $$\\circ$$ is just shorthand for \"then.\"</p><p>Concretely, let $$f(x) = x^2$$ and $$g(x) = x + 3$$. Watch what happens to the input $$2$$ as it flows through $$g$$ first, then $$f$$:</p><ul><li>$$g(2) = 2 + 3 = 5$$</li><li>$$f(5) = 5^2 = 25$$</li><li>So $$(f \\circ g)(2) = f(g(2)) = 25$$.</li></ul><p>Now run the same number through the machines in the <em>other</em> order:</p><ul><li>$$f(2) = 2^2 = 4$$</li><li>$$g(4) = 4 + 3 = 7$$</li><li>So $$(g \\circ f)(2) = g(f(2)) = 7$$.</li></ul><p>$$25 \\neq 7$$. <strong>Composition is not commutative.</strong> The order matters, because each machine reshapes the input differently before passing it on. \"Square then add three\" is a different operation from \"add three then square.\"</p><p>That asymmetry is the whole reason the <em>chain rule</em> exists in calculus. When you eventually differentiate $$\\sin(x^2)$$, you have to know which machine ran first. We're laying that groundwork now.</p>"
+    },
+    {
+      "id": "C0-1-B3",
+      "type": "calculate",
+      "title": "Predict: Inside-Out",
+      "prompt": "Let f(x) = x^2 and g(x) = x + 3. Compute f(g(5)) — that is, run 5 through g first, then send the result through f.",
+      "formula": "Math.pow(x + 3, 2)",
+      "variables": { "x": 5 },
+      "expected_value": 64,
+      "tolerance_mantissa": 0.1,
+      "tolerance_exponent": 0,
+      "units": "",
+      "solution_steps": [
+        "$$g(5) = 5 + 3 = 8$$",
+        "$$f(8) = 8^2 = 64$$",
+        "$$(f \\circ g)(5) = 64$$"
+      ]
+    },
+    {
+      "id": "C0-1-B4",
+      "type": "calculate",
+      "title": "Predict: The Other Order",
+      "prompt": "Same f(x) = x^2 and g(x) = x + 3. Now compute g(f(5)). Notice this is the SAME two machines and the SAME starting number — only the order changes.",
+      "formula": "Math.pow(x, 2) + 3",
+      "variables": { "x": 5 },
+      "expected_value": 28,
+      "tolerance_mantissa": 0.1,
+      "tolerance_exponent": 0,
+      "units": "",
+      "solution_steps": [
+        "$$f(5) = 5^2 = 25$$",
+        "$$g(25) = 25 + 3 = 28$$",
+        "$$(g \\circ f)(5) = 28$$"
+      ]
+    },
+    {
+      "id": "C0-1-B5",
+      "type": "read",
+      "title": "Decomposition: Reading a Machine Backwards",
+      "content_html": "<p>Composition lets you build complicated machines out of simple ones. <strong>Decomposition</strong> is the reverse skill: given a complicated machine, identify the simple ones inside it.</p><p>Take $$h(x) = \\sin(x^2)$$. To compute $$h$$ at a number, what do you actually do, in what order?</p><ol><li>Take the input $$x$$.</li><li>Square it, getting $$x^2$$. (This is the <strong>inner</strong> machine.)</li><li>Take the sine of that, getting $$\\sin(x^2)$$. (This is the <strong>outer</strong> machine.)</li></ol><p>So $$h(x) = f(g(x))$$ where $$g(x) = x^2$$ is the inner function and $$f(u) = \\sin(u)$$ is the outer function. Notice the new variable name $$u$$ — when describing the outer machine in isolation, the input slot doesn't have to be called $$x$$. It's just a slot.</p><p>A few more, to build the reflex:</p><ul><li>$$h(x) = (3x + 1)^5$$. Inner: $$g(x) = 3x + 1$$. Outer: $$f(u) = u^5$$.</li><li>$$h(x) = e^{-x^2}$$. Inner: $$g(x) = -x^2$$. Outer: $$f(u) = e^u$$.</li><li>$$h(x) = \\sqrt{1 + \\cos(x)}$$. Inner: $$g(x) = 1 + \\cos(x)$$. Outer: $$f(u) = \\sqrt{u}$$.</li></ul><p>The trick: ask <em>what's the very last thing I do</em> when computing $$h$$ for a specific number? That last operation is the outer function. Everything that happened before is the inner.</p><p>You will use this skill on every chain-rule problem you ever see. Practice it now while it's free of derivatives.</p>"
+    },
+    {
+      "id": "C0-1-B6",
+      "type": "derive",
+      "title": "Derive: Compose Symbolically",
+      "prompt": "Let f(x) = x^2 and g(x) = x + 3. Derive an explicit polynomial formula for h(x) = (f ∘ g)(x). Each step should be a single, justifiable algebraic move.",
+      "starting_equation": "h(x) = (x + 3)^2",
+      "target_equation": "h(x) = x^2 + 6x + 9",
+      "steps": [
+        {
+          "id": "step1",
+          "instruction": "Rewrite the square as the product of the expression with itself. This is just the definition of squaring.",
+          "result_equation": "h(x) = (x + 3)(x + 3)",
+          "explanation": "Squaring something means multiplying it by itself. We're not changing the value — we're rewriting it in a form that lets us use the distributive law next."
+        },
+        {
+          "id": "step2",
+          "instruction": "Distribute the multiplication: every term in the first factor multiplies every term in the second factor. (FOIL is just a name for this.)",
+          "result_equation": "h(x) = x \\cdot x + x \\cdot 3 + 3 \\cdot x + 3 \\cdot 3",
+          "explanation": "$$(a + b)(c + d) = ac + ad + bc + bd$$. Here $$a = x$$, $$b = 3$$, $$c = x$$, $$d = 3$$, so we get four products. Nothing has been simplified yet — we're just unpacking the distribution."
+        },
+        {
+          "id": "step3",
+          "instruction": "Evaluate each product: x · x is x², the two cross-terms become 3x each, and 3 · 3 is 9.",
+          "result_equation": "h(x) = x^2 + 3x + 3x + 9",
+          "explanation": "Each individual product collapses to its simplest form. The two middle terms are both $$3x$$ — they look identical because multiplication is commutative ($$x \\cdot 3 = 3 \\cdot x$$)."
+        },
+        {
+          "id": "step4",
+          "instruction": "Combine the two like terms 3x + 3x into 6x.",
+          "result_equation": "h(x) = x^2 + 6x + 9",
+          "explanation": "Adding like terms: $$3x + 3x = 6x$$. We now have the expanded polynomial form of $$(x+3)^2$$. This is the same machine as before — same inputs, same outputs — just written so its polynomial structure is visible. You can verify by plugging in $$x = 5$$: $$25 + 30 + 9 = 64$$, matching $$f(g(5))$$ from earlier."
+        }
+      ],
+      "hints": [
+        "Squaring an expression means multiplying it by itself. Write (x+3)² as (x+3)(x+3) before doing anything else.",
+        "Use the distributive law (FOIL) to expand (x+3)(x+3) into four products.",
+        "After distributing, look for like terms — any two terms with the same variable part can be added together."
+      ]
+    },
+    {
+      "id": "C0-1-B7",
+      "type": "code",
+      "title": "Implement and Verify: Composition Doesn't Commute",
+      "prompt": "Implement a tiny compose() helper, build f∘g and g∘f for f(x)=x² and g(x)=x+3, evaluate both at 100 random inputs, and confirm numerically that they almost never agree.",
+      "starter_code": "import numpy as np\n\n# The two simple machines\ndef f(x):\n    return x ** 2\n\ndef g(x):\n    return x + 3\n\n# A composer: given two functions outer and inner,\n# return a NEW function that does inner first, then outer.\ndef compose(outer, inner):\n    # YOUR CODE HERE: return a function of x that computes outer(inner(x))\n    pass\n\nf_of_g = compose(f, g)   # x -> (x + 3)**2\ng_of_f = compose(g, f)   # x -> x**2 + 3\n\n# Sample 100 random inputs in [-10, 10] (deterministic seed so the validator is reproducible)\nrng = np.random.default_rng(0)\nxs = rng.uniform(-10.0, 10.0, size=100)\n\n# YOUR CODE HERE: evaluate both compositions on xs\nfg_values = None\ngf_values = None\n\n# Count how many of the 100 inputs make the two compositions agree (to within 1e-9)\nnum_agree = int(np.sum(np.isclose(fg_values, gf_values, atol=1e-9)))\n\n# Also check our derived closed-forms match the lambda-based composition\nfg_closed = (xs + 3.0) ** 2\ngf_closed = xs ** 2 + 3.0\nfg_residual = float(np.max(np.abs(fg_values - fg_closed)))\ngf_residual = float(np.max(np.abs(gf_values - gf_closed)))\n\nprint(f\"f(g(x)) and g(f(x)) agree on {num_agree} of 100 sample points\")\nprint(f\"Max |f(g(x)) - (x+3)^2| over the sample: {fg_residual:.2e}\")\nprint(f\"Max |g(f(x)) - (x^2+3)| over the sample: {gf_residual:.2e}\")\n",
+      "solution_code": "import numpy as np\n\ndef f(x):\n    return x ** 2\n\ndef g(x):\n    return x + 3\n\ndef compose(outer, inner):\n    return lambda x: outer(inner(x))\n\nf_of_g = compose(f, g)\ng_of_f = compose(g, f)\n\nrng = np.random.default_rng(0)\nxs = rng.uniform(-10.0, 10.0, size=100)\n\nfg_values = f_of_g(xs)\ngf_values = g_of_f(xs)\n\nnum_agree = int(np.sum(np.isclose(fg_values, gf_values, atol=1e-9)))\n\nfg_closed = (xs + 3.0) ** 2\ngf_closed = xs ** 2 + 3.0\nfg_residual = float(np.max(np.abs(fg_values - fg_closed)))\ngf_residual = float(np.max(np.abs(gf_values - gf_closed)))\n\nprint(f\"f(g(x)) and g(f(x)) agree on {num_agree} of 100 sample points\")\nprint(f\"Max |f(g(x)) - (x+3)^2| over the sample: {fg_residual:.2e}\")\nprint(f\"Max |g(f(x)) - (x^2+3)| over the sample: {gf_residual:.2e}\")\n",
+      "checks": [
+        {
+          "variable": "num_agree",
+          "max_value": 1,
+          "message": "f(g(x)) and g(f(x)) should disagree on essentially every random sample. Algebraically they coincide only at x = -1, which a random uniform sample on [-10, 10] will almost certainly miss."
+        },
+        {
+          "variable": "fg_residual",
+          "max_value": 1e-9,
+          "message": "Your compose() should reproduce (x+3)^2 exactly (up to floating-point noise)."
+        },
+        {
+          "variable": "gf_residual",
+          "max_value": 1e-9,
+          "message": "Your compose() should reproduce x^2 + 3 exactly (up to floating-point noise)."
+        }
+      ]
+    },
+    {
+      "id": "C0-1-B8",
+      "type": "read",
+      "title": "Inverse Functions: Running the Machine Backwards",
+      "content_html": "<p>If a function $$f$$ takes an input $$x$$ and produces an output $$y$$, the <strong>inverse</strong> function $$f^{-1}$$ takes that $$y$$ and gives back the original $$x$$. It undoes whatever $$f$$ did.</p><div class=\"equation\">$$f^{-1}(f(x)) = x \\quad \\text{and} \\quad f(f^{-1}(y)) = y$$</div><p>The little $$-1$$ here is <em>not</em> an exponent — $$f^{-1}$$ does <strong>not</strong> mean $$1/f$$. It's a separate piece of notation that means \"the inverse machine.\" Confusing, but standard. (When mathematicians want the reciprocal $$1/f(x)$$, they write exactly that.)</p><p>Example. Let $$f(x) = 2x + 3$$. To run the machine, you double the input and then add three. To run it backwards, you do the reverse operations <em>in reverse order</em>: first subtract three, then divide by two.</p><div class=\"equation\">$$f^{-1}(y) = \\frac{y - 3}{2}$$</div><p>Sanity check at $$x = 4$$: $$f(4) = 2(4) + 3 = 11$$, and $$f^{-1}(11) = (11 - 3)/2 = 4$$. The original input is recovered.</p><p>Notice the deep connection to composition: <strong>an inverse function is the thing that, when composed with the original, gives back the input unchanged.</strong> The composition $$f^{-1} \\circ f$$ is the \"do nothing\" machine, also called the identity function $$\\text{id}(x) = x$$.</p><p>Not every function has an inverse. $$f(x) = x^2$$ doesn't, on its own — both $$x = 3$$ and $$x = -3$$ produce the output $$9$$, so given the output $$9$$ alone you can't tell which input to send back. (You have to restrict the domain to fix this. We'll come back to it.)</p>"
+    },
+    {
+      "id": "C0-1-B9",
+      "type": "practice",
+      "title": "Practice: Composition Drill",
+      "template": "Let f(x) = x^2 and g(x) = x + {a}. Compute (f ∘ g)({b}) — that is, f(g({b})).",
+      "parameter_ranges": { "a": [1, 9], "b": [1, 9] },
+      "answer_formula": "Math.pow(b + a, 2)",
+      "format": "scientific_notation",
+      "tolerance_mantissa": 0.5,
+      "tolerance_exponent": 0,
+      "units": "",
+      "required_consecutive_correct": 3
+    },
+    {
+      "id": "C0-1-B10",
+      "type": "explain",
+      "title": "Conceptual Check",
+      "prompt": "For most pairs of functions f and g, the compositions f(g(x)) and g(f(x)) are NOT equal. Which statement best explains why?",
+      "options": [
+        {
+          "id": "a",
+          "text": "Because the order in which the machines act on the input matters: the inner machine reshapes x before the outer machine ever sees it, so swapping the order generally changes what the outer machine receives.",
+          "correct": true
+        },
+        {
+          "id": "b",
+          "text": "Because f(g(x)) means f times g of x, while g(f(x)) means g times f of x, and multiplication of unequal functions is not commutative.",
+          "correct": false,
+          "misconception": "Composition is not multiplication. The notation $$f(g(x))$$ means \"plug $$g(x)$$ into the input slot of $$f$$,\" not $$f \\cdot g(x)$$. If you treat composition as multiplication you will get the wrong answer on every chain-rule problem."
+        },
+        {
+          "id": "c",
+          "text": "Because f and g have different domains, so f(g(x)) and g(f(x)) are evaluated at different inputs.",
+          "correct": false,
+          "misconception": "Even when both compositions are perfectly well-defined at the same input — as in our example with $$f(x) = x^2$$ and $$g(x) = x + 3$$, both defined on all real numbers — the two compositions produce different outputs. Domain mismatches are a separate issue."
+        },
+        {
+          "id": "d",
+          "text": "They actually are equal — f(g(x)) = g(f(x)) for any two functions, just like a + b = b + a.",
+          "correct": false,
+          "misconception": "You just computed $$f(g(5)) = 64$$ and $$g(f(5)) = 28$$ for $$f(x) = x^2$$, $$g(x) = x + 3$$. One counterexample is enough to kill the claim. Composition is not commutative; addition is."
+        }
+      ]
+    },
+    {
+      "id": "C0-1-B11",
+      "type": "read",
+      "title": "Where This Goes: The Chain Rule, Already in Sight",
+      "content_html": "<p>You now have the three moves that make calculus possible to <em>do</em>, not just memorize:</p><ul><li><strong>Compose</strong> — chain simple machines into a complicated one.</li><li><strong>Decompose</strong> — read a complicated machine and identify the simple machines inside it, in order.</li><li><strong>Invert</strong> — when possible, build the machine that runs the original backwards.</li></ul><p>Here's the punchline you don't get to see proven yet, but should believe. The hardest single rule in differential calculus is the <strong>chain rule</strong>, which says:</p><div class=\"equation\">$$\\frac{d}{dx}\\,f(g(x)) \\;=\\; f'(g(x)) \\cdot g'(x)$$</div><p>Look closely. The chain rule is doing exactly what you just practiced: it sees the outer function $$f$$, the inner function $$g$$, and treats them as a composition. The derivative of a composition is the derivative of the outer machine (evaluated at the inner machine's output) <em>times</em> the derivative of the inner machine. Two pieces. Two factors. One for each machine in the chain.</p><p>If you can decompose $$\\sin(x^2)$$ into outer = $$\\sin$$ and inner = $$x^2$$, you can do the chain rule on it the moment you know that the derivative of $$\\sin$$ is $$\\cos$$ and the derivative of $$x^2$$ is $$2x$$. Decomposition is the hard part. We'll formalize the rest in Lesson 1.3.</p><p>One more place this idea will reappear, much later: every time a neural network is trained, the algorithm called <em>backpropagation</em> applies the chain rule millions of times across composed layers of functions. The skill you just practiced — \"what's the inner machine, what's the outer machine\" — is literally the same skill that trains GPT. Calculus pays compound interest.</p><p>Next lesson: <strong>Rates of Change</strong>. You're driving a car. The speedometer reads 60 mph at this very instant. What does that number actually mean, when \"this very instant\" has zero duration? The answer is the conceptual seed of the derivative.</p>"
+    }
+  ]
+}

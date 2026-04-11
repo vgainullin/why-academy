@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Derivation Playground — Why Academy</title>
+  <meta name="description" content="Practice deriving equations by hand. A freeform canvas with SymPy verification.">
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+
+  <!-- App -->
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .playground-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .playground-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .playground-header h2 {
+      margin: 0 0 8px 0;
+      font-size: 1.5rem;
+    }
+
+    .playground-header p {
+      margin: 0;
+      color: #6b7280;
+    }
+
+    .equation-selector {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 12px;
+    }
+
+    .equation-card {
+      padding: 12px 16px;
+      background: white;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-width: 200px;
+      text-align: center;
+    }
+
+    .equation-card:hover {
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+    }
+
+    .equation-card.active {
+      border-color: #3b82f6;
+      background: #eff6ff;
+    }
+
+    .equation-card .category {
+      font-size: 0.75rem;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .equation-card .name {
+      font-weight: 600;
+      color: #111827;
+    }
+
+    .equation-card .hint {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
+
+    .playground-canvas-area {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .target-display {
+      text-align: center;
+      padding: 16px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .target-display .label {
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+
+    .target-display .equation {
+      font-size: 1.25rem;
+    }
+
+    .category-filter {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      padding: 6px 12px;
+      border: 1px solid #e5e7eb;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .filter-btn:hover {
+      background: #f9fafb;
+    }
+
+    .filter-btn.active {
+      background: #3b82f6;
+      color: white;
+      border-color: #3b82f6;
+    }
+
+    .stats-bar {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      padding: 12px;
+      background: #f9fafb;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 0.875rem;
+    }
+
+    .stats-bar .stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stats-bar .stat-value {
+      font-weight: 600;
+      color: #3b82f6;
+    }
+
+    .completion-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: #10b981;
+      color: white;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    .random-pick-btn {
+      padding: 10px 20px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .random-pick-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .selector-controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="back-to-lessons" href="index.html" title="Back to all lessons">&larr; Lessons</a>
+    <h1><a href="index.html" class="header-home-link">Why Academy</a></h1>
+    <div id="auth-area">
+      <button id="settings-btn" class="btn-settings" title="Settings">Settings</button>
+      <button id="signin-btn" class="btn-signin hidden">Sign in</button>
+      <div id="user-info" class="hidden">
+        <span id="user-email"></span>
+        <button id="signout-btn" class="btn-signout">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="playground-container">
+    <div class="playground-header">
+      <h2>Hand Derivation Playground</h2>
+      <p>Practice deriving equations by hand. Write on the canvas, and SymPy will verify your work.</p>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat">
+        <span>Equations mastered:</span>
+        <span class="stat-value" id="mastered-count">0</span>
+        <span>/</span>
+        <span id="total-count">0</span>
+      </div>
+      <div class="stat">
+        <span>Current streak:</span>
+        <span class="stat-value" id="streak-count">0</span>
+      </div>
+    </div>
+
+    <div class="category-filter" id="category-filters">
+      <button class="filter-btn active" data-category="all">All</button>
+      <button class="filter-btn" data-category="physics">Physics</button>
+      <button class="filter-btn" data-category="calculus">Calculus</button>
+      <button class="filter-btn" data-category="algebra">Algebra</button>
+    </div>
+
+    <div class="selector-controls">
+      <button class="random-pick-btn" id="random-pick">Pick Random Equation</button>
+    </div>
+
+    <div class="equation-selector" id="equation-selector">
+      <!-- Populated by JS -->
+    </div>
+
+    <div class="playground-canvas-area" id="canvas-area">
+      <div class="target-display">
+        <div class="label">Select an equation above to begin, or click "Pick Random Equation"</div>
+        <div class="equation" id="target-equation">$$\text{Derive } \omega = \sqrt{\frac{k}{m}}$$</div>
+      </div>
+      <div id="canvas-container">
+        <!-- Canvas will be rendered here -->
+      </div>
+    </div>
+  </main>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-modal-backdrop"></div>
+    <div class="settings-modal-panel" role="dialog" aria-labelledby="settings-title">
+      <h3 id="settings-title">Settings</h3>
+      <p class="settings-section-label">Handwriting transcription backend</p>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="lmstudio">
+        <span>LM Studio (local)</span>
+      </label>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="openrouter">
+        <span>OpenRouter (cloud, requires API key)</span>
+      </label>
+
+      <div id="settings-lmstudio" class="settings-group">
+        <label>
+          Endpoint
+          <input type="text" id="settings-lmstudio-endpoint" placeholder="http://localhost:1234/v1/chat/completions">
+        </label>
+        <label>
+          Model
+          <input type="text" id="settings-lmstudio-model" placeholder="qwen2-vl-7b-instruct">
+        </label>
+      </div>
+
+      <div id="settings-openrouter" class="settings-group">
+        <label>
+          API key
+          <input type="password" id="settings-openrouter-key" placeholder="sk-or-...">
+        </label>
+        <label>
+          Model
+          <select id="settings-openrouter-model-select"></select>
+        </label>
+        <label id="settings-openrouter-model-custom-label" class="hidden">
+          Custom model id
+          <input type="text" id="settings-openrouter-model" placeholder="provider/model-id">
+        </label>
+        <p class="settings-hint">Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. The key is stored only in your browser's localStorage.</p>
+      </div>
+
+      <div class="settings-actions">
+        <button id="settings-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="settings-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pyodide-status" class="hidden" role="status" aria-live="polite">
+    <div class="loader-row">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="loader-label">Loading Python environment…</span>
+      <span class="loader-pct">0%</span>
+    </div>
+    <div class="loader-bar"><div class="loader-bar-fill"></div></div>
+    <div class="loader-sub"></div>
+  </div>
+
+  <script src="lib/auth.js"></script>
+  <script src="playground.js"></script>
+</body>
+</html>

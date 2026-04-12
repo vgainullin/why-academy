@@ -26,3 +26,9 @@ meta/.evolve-last-run.log
 
 # Lesson planning notes (not yet published as lessons)
 lesson_plans/
+.kilo/
+*.backup
+extract_func.cjs
+fix_derive_type.cjs
+func_dump.js
+test-lesson.html

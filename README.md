@@ -22,7 +22,7 @@ Vanilla JS, no frameworks. KaTeX for equations, CodeMirror for the code editor, 
 ## Run locally
 
 ```bash
-python3 -m http.server 8000
+python3 -m http.server 8765
 ```
 
 Then open http://localhost:8000

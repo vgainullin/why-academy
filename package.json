@@ -1,0 +1,28 @@
+{
+  "name": "why-academy",
+  "version": "1.0.0",
+  "description": "A free, open-source interactive learning platform that teaches STEM through a derive-it-yourself methodology. Students perform stepwise algebraic derivations, estimate answers in scientific notation, implement solutions in code, and explain concepts — all verified deterministically. No AI grading, no paywall.",
+  "main": "app.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vgainullin/why-academy.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/vgainullin/why-academy/issues"
+  },
+  "homepage": "https://github.com/vgainullin/why-academy#readme",
+  "dependencies": {
+    "pyodide": "^0.29.3",
+    "zod": "^4.3.6"
+  }
+}

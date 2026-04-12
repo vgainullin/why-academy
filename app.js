@@ -685,15 +685,20 @@
       code: renderCode,
       practice: renderPractice,
       explain: renderExplain,
+      explore: renderExplore,
+      predict: renderPredict,
+      discover: renderDiscover,
+      compare: renderCompare,
+      reconcile: renderReconcile,
+      vary: renderVary,
+      connect: renderConnect,
       handwrite: renderHandwrite,
       'canvas-derive': renderCanvasDerive
     };
 
     const renderer = renderers[block.type];
-    if (renderer) {
-      const content = renderer(block, wrapper);
-      wrapper.appendChild(content);
-    }
+    const content = renderer ? renderer(block, wrapper) : renderUnsupportedBlock(block);
+    wrapper.appendChild(content);
 
     // Feedback toolbar on every block
     wrapper.appendChild(renderFeedbackToolbar(block.id, wrapper));
@@ -714,6 +719,1120 @@
       });
     }, 0);
 
+    return div;
+  }
+
+  function makeScientificNotationInput(placeholderMantissa, placeholderExponent) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sci-notation-input';
+
+    const mantissa = document.createElement('input');
+    mantissa.type = 'number';
+    mantissa.step = '0.01';
+    mantissa.placeholder = placeholderMantissa || '1.00';
+    mantissa.setAttribute('aria-label', 'Mantissa');
+
+    const timesTen = document.createElement('span');
+    timesTen.className = 'times-ten';
+    timesTen.innerHTML = '&times; 10';
+
+    const exponent = document.createElement('input');
+    exponent.type = 'number';
+    exponent.step = '1';
+    exponent.placeholder = placeholderExponent || '0';
+    exponent.style.width = '50px';
+    exponent.setAttribute('aria-label', 'Exponent');
+
+    wrap.appendChild(mantissa);
+    wrap.appendChild(timesTen);
+    wrap.appendChild(exponent);
+
+    return { wrap, mantissa, exponent };
+  }
+
+  function parseScientificNotation(mantissaEl, exponentEl) {
+    const m = parseFloat(mantissaEl.value);
+    const e = parseInt(exponentEl.value, 10);
+    if (!Number.isFinite(m) || !Number.isFinite(e)) return null;
+    return m * Math.pow(10, e);
+  }
+
+  function renderFunctionMachineSimulation(block) {
+    const cfg = block.simulation_config || {};
+    const root = document.createElement('div');
+    root.className = 'function-machine mt-12';
+
+    const header = document.createElement('div');
+    header.className = 'function-machine-header';
+    header.innerHTML = '<strong>Interactive Function Machine</strong><span>Change machines and observe outputs instantly.</span>';
+    root.appendChild(header);
+
+    const controls = document.createElement('div');
+    controls.className = 'function-machine-controls';
+    root.appendChild(controls);
+
+    function makeLabeledControl(labelText, inputEl) {
+      const item = document.createElement('label');
+      item.className = 'fm-control';
+      const text = document.createElement('span');
+      text.className = 'fm-label';
+      text.textContent = labelText;
+      item.appendChild(text);
+      item.appendChild(inputEl);
+      return item;
+    }
+
+    const functionOptions = Array.isArray(cfg.function_options) && cfg.function_options.length
+      ? cfg.function_options
+      : ['square', 'add_3', 'multiply_by_2', 'inverse'];
+
+    const inputX = document.createElement('input');
+    inputX.type = 'number';
+    inputX.step = '0.1';
+    inputX.value = '5';
+    inputX.className = 'fm-input';
+    controls.appendChild(makeLabeledControl(cfg.input_slot || 'x', inputX));
+
+    function makeFnSelect(defaultValue) {
+      const select = document.createElement('select');
+      select.className = 'fm-select';
+      functionOptions.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      });
+      if (defaultValue && functionOptions.includes(defaultValue)) select.value = defaultValue;
+      return select;
+    }
+
+    const fSelect = makeFnSelect(functionOptions[0]);
+    const gSelect = makeFnSelect(functionOptions[1] || functionOptions[0]);
+    controls.appendChild(makeLabeledControl('f machine', fSelect));
+    controls.appendChild(makeLabeledControl('g machine', gSelect));
+
+    const stretchInput = document.createElement('input');
+    stretchInput.type = 'range';
+    stretchInput.min = '0.5';
+    stretchInput.max = '3';
+    stretchInput.step = '0.1';
+    stretchInput.value = '1';
+    stretchInput.className = 'fm-range';
+    const stretchWrap = makeLabeledControl('stretch', stretchInput);
+    controls.appendChild(stretchWrap);
+
+    const shiftInput = document.createElement('input');
+    shiftInput.type = 'range';
+    shiftInput.min = '-10';
+    shiftInput.max = '10';
+    shiftInput.step = '0.5';
+    shiftInput.value = '0';
+    shiftInput.className = 'fm-range';
+    const shiftWrap = makeLabeledControl('shift', shiftInput);
+    controls.appendChild(shiftWrap);
+
+    const outputGrid = document.createElement('div');
+    outputGrid.className = 'function-machine-output-grid';
+    root.appendChild(outputGrid);
+
+    function makeOutputTile(label) {
+      const tile = document.createElement('div');
+      tile.className = 'fm-output-tile';
+      const k = document.createElement('div');
+      k.className = 'fm-output-key';
+      k.textContent = label;
+      const v = document.createElement('div');
+      v.className = 'fm-output-value';
+      v.textContent = '-';
+      tile.appendChild(k);
+      tile.appendChild(v);
+      outputGrid.appendChild(tile);
+      return v;
+    }
+
+    const outFx = makeOutputTile('f(x)');
+    const outGx = makeOutputTile('g(x)');
+    const outFog = makeOutputTile('f(g(x))');
+    const outGof = makeOutputTile('g(f(x))');
+
+    const formula = document.createElement('div');
+    formula.className = 'fm-formula';
+    root.appendChild(formula);
+
+    const dataTable = document.createElement('table');
+    dataTable.className = 'data-table mt-12';
+    root.appendChild(dataTable);
+
+    function applyMachine(kind, x) {
+      if (!Number.isFinite(x)) return NaN;
+      let y;
+      if (kind === 'square') y = x * x;
+      else if (kind === 'add_3') y = x + 3;
+      else if (kind === 'multiply_by_2') y = 2 * x;
+      else if (kind === 'inverse') y = Math.abs(x) < 1e-9 ? NaN : 1 / x;
+      else y = x;
+
+      const stretch = parseFloat(stretchInput.value) || 1;
+      const shift = parseFloat(shiftInput.value) || 0;
+      return stretch * y + shift;
+    }
+
+    function fmt(n) {
+      if (!Number.isFinite(n)) return 'undefined';
+      const rounded = Math.round(n * 10000) / 10000;
+      return String(rounded);
+    }
+
+    function renderDataRows(baseX) {
+      const columns = ['x', 'f(x)', 'g(x)', 'f(g(x))', 'g(f(x))'];
+      const head = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      columns.forEach(c => {
+        const th = document.createElement('th');
+        th.textContent = c;
+        headRow.appendChild(th);
+      });
+      head.appendChild(headRow);
+
+      const body = document.createElement('tbody');
+      const rows = [];
+      for (let delta = -2; delta <= 2; delta++) {
+        const x = baseX + delta;
+        const fx = applyMachine(fSelect.value, x);
+        const gx = applyMachine(gSelect.value, x);
+        const fog = applyMachine(fSelect.value, gx);
+        const gof = applyMachine(gSelect.value, fx);
+        rows.push({ x, 'f(x)': fx, 'g(x)': gx, 'f(g(x))': fog, 'g(f(x))': gof });
+
+        const tr = document.createElement('tr');
+        columns.forEach(c => {
+          const td = document.createElement('td');
+          td.textContent = fmt(rows[rows.length - 1][c]);
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      }
+
+      dataTable.innerHTML = '';
+      dataTable.appendChild(head);
+      dataTable.appendChild(body);
+      blockState[block.id].exploration_data = rows;
+    }
+
+    function refresh() {
+      const x = parseFloat(inputX.value);
+      const fx = applyMachine(fSelect.value, x);
+      const gx = applyMachine(gSelect.value, x);
+      const fog = applyMachine(fSelect.value, gx);
+      const gof = applyMachine(gSelect.value, fx);
+
+      outFx.textContent = fmt(fx);
+      outGx.textContent = fmt(gx);
+      outFog.textContent = fmt(fog);
+      outGof.textContent = fmt(gof);
+
+      formula.textContent = 'Current chain: f=' + fSelect.value + ', g=' + gSelect.value +
+        ' | stretch=' + (parseFloat(stretchInput.value) || 1).toFixed(1) +
+        ', shift=' + (parseFloat(shiftInput.value) || 0).toFixed(1);
+
+      if (Number.isFinite(x)) renderDataRows(x);
+    }
+
+    [inputX, fSelect, gSelect, stretchInput, shiftInput].forEach(el => {
+      el.addEventListener('input', refresh);
+      el.addEventListener('change', refresh);
+    });
+
+    refresh();
+    return root;
+  }
+
+  function renderExplore(block) {
+    const div = document.createElement('div');
+
+    if (block.content_html) {
+      const content = document.createElement('div');
+      content.className = 'content';
+      content.innerHTML = block.content_html;
+      div.appendChild(content);
+    }
+
+    if (block.instructions) {
+      const instructions = document.createElement('div');
+      instructions.className = 'mt-12';
+      instructions.innerHTML = '<strong>Try this:</strong><br>' + block.instructions;
+      div.appendChild(instructions);
+    }
+
+    if (block.simulation_config && block.simulation_config.type === 'physical_function_machine') {
+      div.appendChild(renderPhysicalFunctionMachineSimulation(block));
+    } else if (block.simulation_config && block.simulation_config.type === 'function_machine') {
+      div.appendChild(renderFunctionMachineSimulation(block));
+    } else if (block.simulation_config) {
+      const sim = document.createElement('div');
+      sim.className = 'mt-12';
+      const simType = block.simulation_config.type ? 'Simulation: ' + esc(block.simulation_config.type) : 'Simulation configured';
+      sim.innerHTML = '<strong>' + simType + '</strong>';
+      div.appendChild(sim);
+    }
+
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn-primary mt-12';
+    doneBtn.textContent = 'I explored this';
+    doneBtn.addEventListener('click', () => {
+      doneBtn.disabled = true;
+      markComplete(block.id, div);
+    });
+    div.appendChild(doneBtn);
+
+    return div;
+  }
+
+  
+  function renderPhysicalFunctionMachineSimulation(block) {
+    const cfg = block.simulation_config || {};
+    const root = document.createElement('div');
+    root.className = 'function-machine mt-12 bg-white p-6 rounded-xl shadow-lg border border-blue-100';
+
+    const header = document.createElement('div');
+    header.className = 'mb-6 text-center';
+    header.innerHTML = '<h3 class="text-2xl font-extrabold text-gray-800 mb-2">Physical Function Machine</h3><p class="text-gray-500">Chain altitude and temperature transformations to see how they interact.</p>';
+    root.appendChild(header);
+
+    // --- CANVAS VISUALIZATION ---
+    const canvasContainer = document.createElement('div');
+    canvasContainer.className = 'flex justify-center my-6 relative rounded-xl overflow-hidden shadow-inner border border-gray-200';
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 400;
+    canvas.className = 'block max-w-full';
+    canvasContainer.appendChild(canvas);
+    root.appendChild(canvasContainer);
+    const ctx = canvas.getContext('2d');
+
+    const controls = document.createElement('div');
+    controls.className = 'function-machine-controls grid grid-cols-1 md:grid-cols-2 gap-6 mt-8';
+    root.appendChild(controls);
+
+    function makeLabeledControl(labelText, inputEl, colorClass) {
+      const item = document.createElement('div');
+      item.className = `flex flex-col bg-gray-50 p-4 rounded-lg border-l-4 ${colorClass}`;
+      const text = document.createElement('span');
+      text.className = 'font-bold text-gray-700 mb-3';
+      text.textContent = labelText;
+      item.appendChild(text);
+      
+      const row = document.createElement('div');
+      row.className = 'flex items-center w-full';
+      inputEl.className = 'flex-1 cursor-pointer accent-blue-600';
+      row.appendChild(inputEl);
+      item.appendChild(row);
+      
+      return { item, row };
+    }
+
+    // Time input for machine g
+    const inputT = document.createElement('input');
+    inputT.type = 'range';
+    inputT.min = '0';
+    inputT.max = '1000';
+    inputT.step = '10';
+    inputT.value = '0';
+    
+    const valT = document.createElement('span');
+    valT.className = 'ml-4 min-w-[60px] text-right font-mono font-bold text-blue-600 bg-blue-100 py-1 px-2 rounded';
+    valT.textContent = '0 s';
+    
+    const wrapT = makeLabeledControl('Machine g: Time (t)', inputT, 'border-blue-500');
+    wrapT.row.appendChild(valT);
+    controls.appendChild(wrapT.item);
+
+    // Altitude input for machine f
+    const inputH = document.createElement('input');
+    inputH.type = 'range';
+    inputH.min = '0';
+    inputH.max = '10000';
+    inputH.step = '100';
+    inputH.value = '1000';
+
+    const valH = document.createElement('span');
+    valH.className = 'ml-4 min-w-[80px] text-right font-mono font-bold text-red-600 bg-red-100 py-1 px-2 rounded';
+    valH.textContent = '1000 m';
+
+    const wrapH = makeLabeledControl('Machine f: Altitude (h)', inputH, 'border-red-500');
+    wrapH.row.appendChild(valH);
+    controls.appendChild(wrapH.item);
+
+    // Compose toggle
+    const toggleContainer = document.createElement('div');
+    toggleContainer.className = 'col-span-1 md:col-span-2 flex justify-center mt-2 mb-4';
+    
+    const wrapLink = document.createElement('label');
+    wrapLink.className = 'flex items-center p-4 bg-gradient-to-r from-blue-50 to-red-50 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 transition-colors shadow-sm';
+    
+    const checkLink = document.createElement('input');
+    checkLink.type = 'checkbox';
+    checkLink.className = 'hidden'; // Hide default checkbox
+    
+    const customToggle = document.createElement('div');
+    customToggle.className = 'w-12 h-6 bg-gray-300 rounded-full mr-4 relative transition-colors duration-300';
+    const customToggleDot = document.createElement('div');
+    customToggleDot.className = 'w-4 h-4 bg-white rounded-full absolute top-1 left-1 transition-transform duration-300 shadow';
+    customToggle.appendChild(customToggleDot);
+
+    const toggleText = document.createElement('span');
+    toggleText.className = 'font-extrabold text-gray-700 text-lg tracking-wide';
+    toggleText.innerHTML = 'COMPOSE MACHINES <span class="text-sm font-normal text-gray-500 ml-2">(Link Altitude to Balloon: h = g(t))</span>';
+
+    wrapLink.appendChild(checkLink);
+    wrapLink.appendChild(customToggle);
+    wrapLink.appendChild(toggleText);
+    toggleContainer.appendChild(wrapLink);
+    
+    // Insert toggle between header/canvas and controls
+    root.insertBefore(toggleContainer, controls);
+
+    // Update toggle visual state
+    checkLink.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        customToggle.classList.replace('bg-gray-300', 'bg-purple-600');
+        customToggleDot.classList.add('translate-x-6');
+        wrapLink.classList.replace('border-gray-300', 'border-purple-400');
+      } else {
+        customToggle.classList.replace('bg-purple-600', 'bg-gray-300');
+        customToggleDot.classList.remove('translate-x-6');
+        wrapLink.classList.replace('border-purple-400', 'border-gray-300');
+      }
+    });
+
+    // Output Grid
+    const outputGrid = document.createElement('div');
+    outputGrid.className = 'mt-6 grid grid-cols-1 md:grid-cols-2 gap-4';
+    root.appendChild(outputGrid);
+
+    function makeOutputTile(label, initialValue, colorTheme) {
+      const tile = document.createElement('div');
+      tile.className = `bg-white p-4 rounded-xl shadow-sm border border-${colorTheme}-200 flex flex-col items-center justify-center`;
+      const k = document.createElement('div');
+      k.className = `text-xs font-bold text-${colorTheme}-600 uppercase tracking-wider mb-2 text-center`;
+      k.innerHTML = label;
+      const v = document.createElement('div');
+      v.className = 'text-3xl font-mono text-gray-800 font-black';
+      v.textContent = initialValue;
+      tile.appendChild(k);
+      tile.appendChild(v);
+      outputGrid.appendChild(tile);
+      return { container: tile, label: k, value: v };
+    }
+
+    const outGt = makeOutputTile('g(t)<br><span class="text-gray-400 text-[10px]">Balloon Alt</span>', '1000 m', 'blue');
+    const outFh = makeOutputTile('f(h)<br><span class="text-gray-400 text-[10px]">Sensor Temp</span>', '14.0 °C', 'red');
+
+    // Drawing helper functions
+    function drawBalloon(x, y, scale = 1) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      
+      // Basket lines
+      ctx.beginPath();
+      ctx.moveTo(-8, 20); ctx.lineTo(-12, 35);
+      ctx.moveTo(8, 20); ctx.lineTo(12, 35);
+      ctx.strokeStyle = '#8B4513';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Basket
+      ctx.fillStyle = '#D2691E';
+      ctx.fillRect(-15, 35, 30, 15);
+      
+      // Envelope (balloon)
+      ctx.beginPath();
+      ctx.moveTo(0, 25);
+      ctx.bezierCurveTo(30, 25, 40, -10, 0, -40);
+      ctx.bezierCurveTo(-40, -10, -30, 25, 0, 25);
+      
+      // Stripes
+      const gradient = ctx.createLinearGradient(-30, 0, 30, 0);
+      gradient.addColorStop(0, '#FF4500');
+      gradient.addColorStop(0.3, '#FFD700');
+      gradient.addColorStop(0.7, '#FF4500');
+      gradient.addColorStop(1, '#FF8C00');
+      ctx.fillStyle = gradient;
+      ctx.fill();
+      
+      // Envelope outline
+      ctx.strokeStyle = '#B22222';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawThermometer(x, y, height, tempPercent) {
+      ctx.save();
+      ctx.translate(x, y);
+
+      const bulbRadius = 16;
+      const tubeWidth = 14;
+      const tubeHeight = height;
+
+      // Glass tube background
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath();
+      ctx.arc(0, -tubeHeight, tubeWidth/2, Math.PI, 0); // top curve
+      ctx.lineTo(tubeWidth/2, 0);
+      ctx.arc(0, 0, bulbRadius, Math.asin(tubeWidth/2/bulbRadius), Math.PI - Math.asin(tubeWidth/2/bulbRadius)); // bulb
+      ctx.lineTo(-tubeWidth/2, -tubeHeight);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ccc';
+      ctx.stroke();
+
+      // Fluid (Red)
+      const fluidHeight = 10 + (tubeHeight - 20) * tempPercent;
+      ctx.fillStyle = '#E53935';
+      ctx.beginPath();
+      ctx.arc(0, 0, bulbRadius - 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillRect(-tubeWidth/2 + 3, -fluidHeight, tubeWidth - 6, fluidHeight);
+
+      // Highlight/Gloss
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillRect(-tubeWidth/2 + 2, -tubeHeight, tubeWidth/3, tubeHeight + 10);
+
+      // Tick marks
+      ctx.fillStyle = '#666';
+      ctx.font = '12px font-mono font-bold';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      for(let i=0; i<=4; i++) {
+        const tickY = -tubeHeight + 10 + (tubeHeight - 20) * (i/4);
+        ctx.fillRect(tubeWidth/2, tickY, 6, 2);
+        
+        // Map ticks to labels (from 20 to -40)
+        const labelTemp = 20 - (i * 15); 
+        ctx.fillText(labelTemp + '°', tubeWidth/2 + 10, tickY);
+      }
+
+      ctx.restore();
+    }
+
+    function drawClouds(time) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      const drift = (time * 0.5) % 800;
+      
+      function cloud(cx, cy, scale) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(scale, scale);
+        ctx.beginPath();
+        ctx.arc(0, 0, 20, 0, Math.PI*2);
+        ctx.arc(25, -10, 25, 0, Math.PI*2);
+        ctx.arc(50, 0, 20, 0, Math.PI*2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      cloud(drift - 200, 250, 1.5);
+      cloud(drift + 300, 180, 1);
+      cloud(drift + 700, 220, 1.2);
+    }
+
+    function draw(t, h, isComposed) {
+      // Clear
+      ctx.clearRect(0, 0, 800, 400);
+
+      // Sky Gradient
+      const grad = ctx.createLinearGradient(0, 0, 0, 400);
+      grad.addColorStop(0, '#0f172a'); // Very high altitude (space)
+      grad.addColorStop(0.3, '#1e3a8a');
+      grad.addColorStop(0.6, '#3b82f6');
+      grad.addColorStop(1, '#93c5fd'); // Surface sky
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 800, 400);
+
+      // Stars at top
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for(let i=0; i<30; i++) {
+        const sx = (Math.sin(i * 123) * 400) + 400;
+        const sy = (Math.cos(i * 321) * 100) + 100;
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.random() * 1.5, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // Ground
+      const groundGrad = ctx.createLinearGradient(0, 370, 0, 400);
+      groundGrad.addColorStop(0, '#4ade80');
+      groundGrad.addColorStop(1, '#166534');
+      ctx.fillStyle = groundGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, 400);
+      ctx.lineTo(0, 370);
+      ctx.quadraticCurveTo(400, 360, 800, 380);
+      ctx.lineTo(800, 400);
+      ctx.fill();
+
+      drawClouds(t);
+
+      // Helpers
+      // Altitude 0 to 10000 -> Y maps from 360 to 40
+      const mapY = (alt) => 360 - (alt / 10000) * 320;
+      const gt = 1000 + 5 * t;
+      const tempH = isComposed ? gt : h;
+      const fh = 20 - 0.006 * tempH;
+
+      // Draw Balloon at g(t)
+      const by = mapY(gt);
+      ctx.globalAlpha = isComposed ? 1.0 : 0.6;
+      drawBalloon(250, by);
+      ctx.globalAlpha = 1.0;
+
+      // Altitude indicator lines for balloon
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(250, by);
+      ctx.lineTo(100, by);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(gt.toFixed(0) + ' m', 90, by);
+
+      // Draw Sensor at h (if not composed, it's separate)
+      let sensorY;
+      if (!isComposed) {
+        sensorY = mapY(h);
+        
+        // Draw standalone sensor probe
+        ctx.fillStyle = '#E53935'; // Red
+        ctx.beginPath();
+        ctx.roundRect(350, sensorY - 8, 24, 16, 4);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.fillRect(354, sensorY - 2, 4, 4);
+        ctx.fillRect(362, sensorY - 2, 4, 4);
+        ctx.fillRect(370, sensorY - 2, 4, 4);
+
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Temp Sensor', 380, sensorY);
+        
+        // Draw dotted line showing separation
+        ctx.strokeStyle = 'rgba(255,100,100,0.5)';
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(250, by);
+        ctx.lineTo(350, sensorY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Altitude indicator for sensor
+        ctx.fillStyle = '#fca5a5';
+        ctx.textAlign = 'right';
+        ctx.fillText(h.toFixed(0) + ' m', 340, sensorY);
+
+      } else {
+        // Sensor is attached to balloon basket
+        sensorY = by + 40;
+        ctx.fillStyle = '#E53935';
+        ctx.beginPath();
+        ctx.arc(260, sensorY, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      }
+
+      // Draw beautiful Thermometer on the right
+      // Map temp: 20 to -40 -> Percent 1.0 to 0.0
+      let tempPercent = (fh - (-40)) / 60;
+      tempPercent = Math.max(0, Math.min(1, tempPercent)); // clamp
+      
+      drawThermometer(650, 320, 240, tempPercent);
+
+      // Connecting line from sensor to thermometer
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.beginPath();
+      ctx.moveTo(isComposed ? 260 : 374, sensorY);
+      ctx.lineTo(620, sensorY); // Lead it roughly towards thermometer side
+      
+      // We also draw an arrow pointing to the fluid level
+      const fluidLevelY = 320 - 10 - (240 - 20) * tempPercent;
+      ctx.lineTo(630, fluidLevelY);
+      ctx.stroke();
+
+      // Overlay text HUD
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.beginPath();
+      ctx.roundRect(20, 20, 220, isComposed ? 90 : 70, 8);
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      if (isComposed) {
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = '#c084fc'; // Purple indicating composition
+        ctx.fillText('Composed: f(g(t))', 35, 30);
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px monospace';
+        ctx.fillText(`Time  (t) = ${t}s`, 35, 55);
+        ctx.fillText(`Alt   (h) = ${gt}m`, 35, 70);
+        ctx.fillText(`Temp f(h) = ${fh.toFixed(1)}°C`, 35, 85);
+      } else {
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('Independent Machines', 35, 30);
+        ctx.font = '13px monospace';
+        ctx.fillText(`g(${t}) = ${gt}m`, 35, 55);
+        ctx.fillText(`f(${h}) = ${fh.toFixed(1)}°C`, 35, 70);
+      }
+    }
+
+    function update() {
+      const isComposed = checkLink.checked;
+      
+      if (isComposed) {
+        inputH.disabled = true;
+        wrapH.item.classList.add('opacity-50', 'grayscale');
+        wrapH.item.classList.replace('border-red-500', 'border-gray-300');
+        // Force h to be g(t)
+        const t = parseFloat(inputT.value);
+        const gt = 1000 + 5 * t;
+        inputH.value = gt;
+      } else {
+        inputH.disabled = false;
+        wrapH.item.classList.remove('opacity-50', 'grayscale');
+        wrapH.item.classList.replace('border-gray-300', 'border-red-500');
+      }
+
+      const t = parseFloat(inputT.value);
+      const h = parseFloat(inputH.value);
+
+      valT.textContent = t + ' s';
+      valH.textContent = h + ' m';
+
+      const gt = 1000 + 5 * t;
+      const fh = 20 - 0.006 * h;
+
+      outGt.value.textContent = gt.toFixed(0) + ' m';
+      outFh.value.textContent = fh.toFixed(1) + ' °C';
+
+      if (isComposed) {
+        outFh.container.classList.replace('border-red-200', 'border-purple-300');
+        outFh.container.classList.add('bg-purple-50');
+        outFh.label.classList.replace('text-red-600', 'text-purple-700');
+        outFh.label.innerHTML = 'f(g(t))<br><span class="text-purple-400 text-[10px]">Composed Temp</span>';
+        
+        outGt.container.classList.add('bg-purple-50');
+        outGt.container.classList.replace('border-blue-200', 'border-purple-300');
+      } else {
+        outFh.container.classList.replace('border-purple-300', 'border-red-200');
+        outFh.container.classList.remove('bg-purple-50');
+        outFh.label.classList.replace('text-purple-700', 'text-red-600');
+        outFh.label.innerHTML = 'f(h)<br><span class="text-gray-400 text-[10px]">Sensor Temp</span>';
+
+        outGt.container.classList.remove('bg-purple-50');
+        outGt.container.classList.replace('border-purple-300', 'border-blue-200');
+      }
+
+      draw(t, h, isComposed);
+    }
+
+    // Initialize HTML5 canvas polyfills for rounded rect if missing
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2;
+        if (h < 2 * r) r = h / 2;
+        this.beginPath();
+        this.moveTo(x + r, y);
+        this.arcTo(x + w, y, x + w, y + h, r);
+        this.arcTo(x + w, y + h, x, y + h, r);
+        this.arcTo(x, y + h, x, y, r);
+        this.arcTo(x, y, x + w, y, r);
+        this.closePath();
+        return this;
+      }
+    }
+
+    checkLink.addEventListener('change', update);
+    inputT.addEventListener('input', update);
+    inputH.addEventListener('input', update);
+
+    // Initial draw
+    // Using a tiny timeout to ensure fonts load before drawing, though mostly native fonts are used
+    setTimeout(update, 10);
+
+    return root;
+  }
+
+
+  function renderPredict(block) {
+    const div = document.createElement('div');
+
+    const prompt = document.createElement('p');
+    prompt.textContent = block.prompt || 'Make your prediction.';
+    div.appendChild(prompt);
+
+    const components = block.components || {};
+    const values = {};
+
+    if (components.direction) {
+      const row = document.createElement('div');
+      row.className = 'mt-12';
+      const label = document.createElement('div');
+      label.textContent = 'Direction';
+      row.appendChild(label);
+
+      const select = document.createElement('select');
+      select.className = 'form-select';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select...';
+      select.appendChild(placeholder);
+
+      (components.direction.options || []).forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt;
+        select.appendChild(option);
+      });
+
+      row.appendChild(select);
+      div.appendChild(row);
+      values.direction = select;
+    }
+
+    const magnitudeFields = Object.entries(components).filter(([key, cfg]) => {
+      return key.startsWith('magnitude') && cfg && cfg.format === 'scientific_notation';
+    });
+
+    const sciInputs = [];
+    magnitudeFields.forEach(([key, cfg]) => {
+      const row = document.createElement('div');
+      row.className = 'calculate-input-row mt-12';
+
+      const label = document.createElement('label');
+      label.textContent = cfg.label || key;
+      row.appendChild(label);
+
+      const sci = makeScientificNotationInput('1.00', '0');
+      row.appendChild(sci.wrap);
+      div.appendChild(row);
+
+      sciInputs.push({ key, mantissa: sci.mantissa, exponent: sci.exponent, required: !!cfg.required });
+    });
+
+    if (components.confidence) {
+      const row = document.createElement('div');
+      row.className = 'mt-12';
+      const label = document.createElement('div');
+      label.textContent = 'Confidence';
+      row.appendChild(label);
+
+      const select = document.createElement('select');
+      select.className = 'form-select';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Select...';
+      select.appendChild(placeholder);
+
+      (components.confidence.options || []).forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt;
+        option.textContent = opt;
+        select.appendChild(option);
+      });
+
+      row.appendChild(select);
+      div.appendChild(row);
+      values.confidence = select;
+    }
+
+    const feedback = document.createElement('div');
+    feedback.className = 'mt-12';
+    div.appendChild(feedback);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-primary mt-12';
+    submitBtn.textContent = block.locked ? 'Submit (Locked)' : 'Submit';
+    submitBtn.addEventListener('click', () => {
+      if (values.direction && components.direction.required && !values.direction.value) {
+        feedback.innerHTML = '<div class="feedback feedback-incorrect">Choose a direction.</div>';
+        return;
+      }
+      if (values.confidence && components.confidence.required && !values.confidence.value) {
+        feedback.innerHTML = '<div class="feedback feedback-incorrect">Choose a confidence level.</div>';
+        return;
+      }
+
+      const predictions = {};
+      for (const field of sciInputs) {
+        const value = parseScientificNotation(field.mantissa, field.exponent);
+        if (field.required && value === null) {
+          feedback.innerHTML = '<div class="feedback feedback-incorrect">Enter mantissa and exponent for all required magnitudes.</div>';
+          return;
+        }
+        predictions[field.key] = value;
+      }
+
+      blockState[block.id].prediction = {
+        direction: values.direction ? values.direction.value : null,
+        confidence: values.confidence ? values.confidence.value : null,
+        magnitudes: predictions,
+        submitted_at: Date.now()
+      };
+
+      if (block.locked) {
+        if (values.direction) values.direction.disabled = true;
+        if (values.confidence) values.confidence.disabled = true;
+        sciInputs.forEach(field => {
+          field.mantissa.disabled = true;
+          field.exponent.disabled = true;
+        });
+      }
+
+      submitBtn.disabled = true;
+      feedback.innerHTML = '<div class="feedback feedback-correct">Prediction saved.</div>';
+      markComplete(block.id, div);
+    });
+    div.appendChild(submitBtn);
+
+    return div;
+  }
+
+  function renderDiscover(block) {
+    const div = document.createElement('div');
+
+    const prompt = document.createElement('p');
+    prompt.textContent = block.prompt || 'Discover patterns from the data.';
+    div.appendChild(prompt);
+
+    if (block.data_table && Array.isArray(block.data_table.columns)) {
+      let rows = Array.isArray(block.data_table.sample_values) ? block.data_table.sample_values : [];
+      if ((!rows || rows.length === 0) && block.data_table.source === 'exploration_data' && Array.isArray(lesson.blocks)) {
+        const currentIdx = lesson.blocks.findIndex(b => b.id === block.id);
+        for (let i = currentIdx - 1; i >= 0; i--) {
+          const candidate = lesson.blocks[i];
+          const state = blockState[candidate.id];
+          if (state && Array.isArray(state.exploration_data) && state.exploration_data.length > 0) {
+            rows = state.exploration_data;
+            break;
+          }
+        }
+      }
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'mt-12';
+      const table = document.createElement('table');
+      table.className = 'data-table';
+
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      block.data_table.columns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      rows.forEach(rowData => {
+        const tr = document.createElement('tr');
+        block.data_table.columns.forEach(col => {
+          const td = document.createElement('td');
+          td.textContent = rowData[col] !== undefined ? String(rowData[col]) : '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      div.appendChild(tableWrap);
+    }
+
+    if (Array.isArray(block.questions) && block.questions.length) {
+      const q = document.createElement('ul');
+      q.className = 'mt-12';
+      block.questions.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        q.appendChild(li);
+      });
+      div.appendChild(q);
+    }
+
+    const response = document.createElement('textarea');
+    response.className = 'input-textarea mt-12';
+    response.rows = 5;
+    response.placeholder = 'Write your pattern observations here...';
+    div.appendChild(response);
+
+    const feedback = document.createElement('div');
+    feedback.className = 'mt-12';
+    div.appendChild(feedback);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-primary mt-12';
+    submitBtn.textContent = 'Save observations';
+    submitBtn.addEventListener('click', () => {
+      const text = response.value.trim();
+      if (text.length < 20) {
+        feedback.innerHTML = '<div class="feedback feedback-incorrect">Add a little more detail before submitting.</div>';
+        return;
+      }
+      blockState[block.id].observation = text;
+      response.disabled = true;
+      submitBtn.disabled = true;
+      feedback.innerHTML = '<div class="feedback feedback-correct">Observations saved.</div>';
+      markComplete(block.id, div);
+    });
+    div.appendChild(submitBtn);
+
+    return div;
+  }
+
+  function renderCompare(block) {
+    const div = document.createElement('div');
+    const summary = document.createElement('div');
+    summary.className = 'content';
+
+    function renderSummary() {
+      const predictionState = block.prediction_source ? blockState[block.prediction_source] : null;
+      const prediction = predictionState && predictionState.prediction ? predictionState.prediction : null;
+
+      const lines = [];
+      if (block.comparison_prompt) {
+        const safePrompt = block.comparison_prompt
+          .replaceAll('[student_prediction]', prediction ? 'submitted' : 'not submitted');
+        lines.push('<p>' + safePrompt + '</p>');
+      }
+
+      if (prediction) {
+        const mags = prediction.magnitudes || {};
+        lines.push('<p><strong>Your prediction:</strong> direction=' + esc(String(prediction.direction || 'n/a')) +
+          ', f(g(5))=' + esc(String(mags.magnitude_f_g ?? 'n/a')) +
+          ', g(f(5))=' + esc(String(mags.magnitude_g_f ?? 'n/a')) + '</p>');
+      } else {
+        lines.push('<p><strong>Prediction status:</strong> no saved prediction found.</p>');
+      }
+
+      if (block.gap_analysis && block.gap_analysis.feedback) {
+        lines.push('<p>' + block.gap_analysis.feedback + '</p>');
+      }
+      summary.innerHTML = lines.join('');
+    }
+
+    renderSummary();
+    div.appendChild(summary);
+
+    const actions = document.createElement('div');
+    actions.className = 'mt-12';
+
+    const refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn btn-secondary';
+    refreshBtn.textContent = 'Refresh comparison';
+    refreshBtn.addEventListener('click', renderSummary);
+
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn-primary';
+    doneBtn.textContent = 'Continue';
+    doneBtn.addEventListener('click', () => {
+      doneBtn.disabled = true;
+      markComplete(block.id, div);
+    });
+
+    actions.appendChild(refreshBtn);
+    actions.appendChild(doneBtn);
+    div.appendChild(actions);
+
+    return div;
+  }
+
+  function renderReconcile(block) {
+    const div = document.createElement('div');
+
+    const prompt = document.createElement('p');
+    prompt.textContent = block.prompt || 'Reflect in your own words.';
+    div.appendChild(prompt);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'input-textarea mt-12';
+    textarea.rows = 6;
+    textarea.placeholder = 'Write your explanation...';
+    div.appendChild(textarea);
+
+    const feedback = document.createElement('div');
+    feedback.className = 'mt-12';
+    div.appendChild(feedback);
+
+    const minLength = block.min_length || 30;
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-primary mt-12';
+    submitBtn.textContent = 'Submit reflection';
+    submitBtn.addEventListener('click', () => {
+      const text = textarea.value.trim();
+      if (text.length < minLength) {
+        feedback.innerHTML = '<div class="feedback feedback-incorrect">Write at least ' + minLength + ' characters.</div>';
+        return;
+      }
+      blockState[block.id].reflection = text;
+      textarea.disabled = true;
+      submitBtn.disabled = true;
+      feedback.innerHTML = '<div class="feedback feedback-correct">Reflection saved.</div>';
+      markComplete(block.id, div);
+    });
+    div.appendChild(submitBtn);
+
+    return div;
+  }
+
+  function renderVary(block) {
+    return renderPractice(block);
+  }
+
+  function renderConnect(block) {
+    const div = document.createElement('div');
+
+    if (block.content_html) {
+      const content = document.createElement('div');
+      content.className = 'content';
+      content.innerHTML = block.content_html;
+      div.appendChild(content);
+      renderKaTeX(content);
+    }
+
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn-primary mt-12';
+    doneBtn.textContent = 'Finish lesson';
+    doneBtn.addEventListener('click', () => {
+      doneBtn.disabled = true;
+      markComplete(block.id, div);
+    });
+    div.appendChild(doneBtn);
+
+    return div;
+  }
+
+  function renderUnsupportedBlock(block) {
+    const div = document.createElement('div');
+    div.className = 'content';
+    div.innerHTML = '<p>Unsupported block type: <strong>' + esc(block.type) + '</strong></p>';
+
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn-secondary mt-12';
+    doneBtn.textContent = 'Mark done';
+    doneBtn.addEventListener('click', () => {
+      doneBtn.disabled = true;
+      markComplete(block.id, div);
+    });
+    div.appendChild(doneBtn);
     return div;
   }
 

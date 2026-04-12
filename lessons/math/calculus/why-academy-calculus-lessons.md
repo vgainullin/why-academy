@@ -8,16 +8,108 @@ Student has solid algebra. Every lesson uses the PDCR cycle (Predict → Derive 
 
 ## Implementation Rules for Claude Code
 
-1. Every lesson follows the PDCR cycle defined in why-academy-brief.md
-2. Every lesson starts with an EXPLORE phase (interactive simulation, no equations)
-3. Every derivation step needs: starting equation, target equation, valid operation sequence, SymPy verification spec
-4. Every prediction prompt needs: 3-5 precomputed error patterns with diagnosis and "build on what's right" feedback
-5. Every lesson ends with a CONNECT phase linking to a physics application or surprise domain
-6. Every lesson includes a CODE block verifying the derivation numerically in pure NumPy
-7. Dimensional analysis check required on every result that has physical units
-8. Interleave review problems from previous lessons into practice sections
-9. Handwriting canvas is the primary input. Structured blocks as fallback.
-10. All verification is SymPy. No AI grading at runtime.
+### Lesson Structure Rules
+1. Every lesson follows the **PDCR cycle** defined in why-academy-brief.md: Explore → Predict → Discover → Explain → Derive → Compare → Reconcile → Code → Vary → Connect
+2. Every lesson starts with an **EXPLORE phase** (interactive simulation, no equations)
+3. Every **PREDICT phase** requires: 
+   - Direction (faster/slower/same)
+   - Magnitude in **scientific notation**
+   - Confidence (just guessing/rough idea/pretty sure)
+   - Locked, non-retractable submission
+4. Every lesson must include **COMPARE phase** (prediction vs derivation gap analysis)
+5. Every lesson must include **RECONCILE phase** (handwritten reflection in student's own words)
+
+### Content Generation Rules
+6. Every derivation step needs: starting equation, target equation, valid operation sequence, SymPy verification spec
+7. Every prediction prompt needs: 3-5 precomputed error patterns with diagnosis and "build on what's right" feedback
+8. Every lesson ends with a CONNECT phase linking to a physics application or surprise domain
+9. Every lesson includes a CODE block verifying the derivation numerically in pure NumPy
+10. Dimensional analysis check required on every result that has physical units
+
+### Platform Integration Rules
+11. Interleave review problems from previous lessons into practice sections (interleaving d = 0.79 effect)
+12. **Handwriting canvas** is the primary input. Structured blocks as fallback.
+13. All verification is SymPy. No AI grading at runtime.
+14. All simulations must be interactive and run client-side (Canvas/WebGL + Pyodide)
+15. Scientific notation integration required in all prediction phases
+
+---
+
+## Phase-Based Lesson Structure
+
+### Required Phases (in order):
+```
+PHASE                | DESCRIPTION                                      | BLOCK TYPES
+---------------------------------------------------------------------------------------------------
+EXPLORE              | Interactive simulation, no equations              | interactive_simulation
+PREDICT              | Locked prediction with scientific notation        | predict (locked)
+DISCOVER             | Pattern finding from exploration data            | read + calculate + data_table
+EXPLAIN              | Formal explanation after discovery               | read
+DERIVE               | Stepwise proof on handwriting canvas             | derive
+COMPARE              | Prediction vs derivation gap analysis            | compare
+RECONCILE            | Handwritten reflection in student's own words    | reconcile
+CODE                 | NumPy implementation and verification            | code
+VARY                 | Practice with varied parameters                   | practice (varied_params)
+CONNECT              | Surprise link to other domains                   | connect
+```
+
+### Phase Requirements:
+
+#### EXPLORE Phase:
+- **Interactive simulation** (HTML Canvas/WebGL)
+- **No equations or formulas** displayed initially
+- **Direct manipulation**: sliders, draggable objects
+- **Data collection** for DISCOVER phase
+- **Physics hook** relevant to lesson concept
+
+#### PREDICT Phase:
+- **Three locked components**:
+  1. **Direction**: faster/slower/same (qualitative)
+  2. **Magnitude**: numerical estimate in **scientific notation**
+  3. **Confidence**: just guessing/rough idea/pretty sure
+- **Non-retractable**: Once submitted, cannot be changed
+- **Timestamped** for accuracy tracking
+
+#### DISCOVER Phase:
+- **Organize exploration data** into tables
+- **Pattern identification prompts**: "What do you notice?"
+- **Data transformation** (e.g., compute k/m, √(k/m))
+- **Student writes observations** on handwriting canvas
+
+#### DERIVE Phase:
+- **Handwriting canvas** as primary input
+- **Real-time recognition**: VLM → LaTeX → KaTeX rendering
+- **SymPy verification**: Green/orange dots per line
+- **Stepwise validation**: Starting equation → target equation with operation sequence
+
+#### COMPARE Phase:
+- **Side-by-side display**: Prediction vs derivation
+- **Gap analysis**: Direction correct? Magnitude correct? Error ratio?
+- **Diagnostic feedback**: From precomputed error patterns
+- **Reference back**: To simulation, data table, or derivation
+
+#### RECONCILE Phase:
+- **Handwritten reflection**: "In your own words, why were you right/wrong?"
+- **Not graded**: Required but not evaluated for correctness
+- **Stored for review**: For spaced repetition and misconception tracking
+
+#### CODE Phase:
+- **Pure NumPy implementation** (no frameworks hiding math)
+- **Numerical verification** of algebraic derivation
+- **Plotting** on canvas alongside derivation
+- **Error analysis**: numerical vs analytical comparison
+
+#### VARY Phase:
+- **New parameters**, same concept
+- **Prediction accuracy tracking** across variations
+- **Confidence calibration** visible to student
+- **Interleaving** with previous lesson concepts
+
+#### CONNECT Phase:
+- **Surprise domain connection** (unexpected application)
+- **Bridge to next lesson**
+- **"Wikipedia link energy"**: generates more questions than answers
+- **No completion screens** – tension over resolution
 
 ---
 
@@ -27,29 +119,100 @@ Student has solid algebra. Every lesson uses the PDCR cycle (Predict → Derive 
 
 **Physics hook:** A spring's position depends on time. A temperature depends on altitude. These are functions — input/output machines.
 
-**EXPLORE:** Interactive function machine. Student feeds in numbers, sees outputs. Slider changes the function. Student discovers: stretching, shifting, composing.
+**PHASE 1: EXPLORE**
+- **Interactive function machine simulation**: Input slot, output slot, function selector
+- **Student feeds numbers**, sees outputs
+- **Sliders for function parameters**: stretch, shift, compose
+- **Discover visually**: composition creates nested machines, inverse runs backwards
+- **No equations**: Pure discovery through interaction
 
-**Core content:**
-- Function as process (input → rule → output), not static equation
-- Domain, range, composition: f(g(x)) — the "nested machine"
-- Decomposition: given h(x) = sin(x²), identify outer = sin, inner = x²
-- Inverse functions: running the machine backwards
+**PHASE 2: PREDICT**
+- **Prediction prompt**: "If f(x) = x² and g(x) = x+3, predict f(g(5)) and g(f(5)). Are they the same?"
+- **Locked predictions**: 
+  - Direction: faster/slower/same (qualitative)
+  - Magnitude: in scientific notation (e.g., 6.4e1 vs 2.8e1)
+  - Confidence: just guessing/rough idea/pretty sure
+- **Non-retractable**: Once submitted, cannot be changed
 
-**PREDICT:** "If f(x) = x² and g(x) = x+3, predict f(g(5)) and g(f(5)). Are they the same?"
+**PHASE 3: DISCOVER**
+- **Data table from exploration**: x, f(x), g(x), f(g(x)), g(f(x))
+- **Pattern identification**: "What do you notice about f(g(x)) vs g(f(x))?"
+- **Student writes observations** on handwriting canvas
+- **Data transformation**: Compute differences, ratios
 
-**Error patterns:**
-- Student computes f(g(5)) = f(5) · g(5) → misconception: composition is multiplication
-- Student gets f(g(5)) right but assumes g(f(5)) is the same → misconception: composition commutes
+**PHASE 4: EXPLAIN**
+- **Formal definition**: Function as process (input → rule → output)
+- **Domain, range**: Input/output sets
+- **Composition**: f(g(x)) — "nested machine"
+- **Decomposition**: Given h(x) = sin(x²), identify outer=sin, inner=x²
+- **Inverse functions**: Running the machine backwards
 
-**CODE:** Implement compose(f, g, x) in Python. Verify f(g(x)) ≠ g(f(x)) for 100 random x values.
+**PHASE 5: DERIVE**
+- **On handwriting canvas**: Expand (x+3)² step by step
+- **SymPy verification**: Each algebraic manipulation verified
+- **Compare with g(f(x))**: x² + 3 derivation
+- **Operation sequence**: Starting equation → target equation
 
-**CONNECT:** "The chain rule — the hardest part of calculus — is just differentiating a composed function. If you can decompose h(x) into inner and outer, you can do the chain rule. That's lesson 1.5."
+**PHASE 6: COMPARE**
+- **Side-by-side display**: Prediction vs derivation
+- **Gap analysis**: "You predicted f(g(5)) = g(f(5)) = ?"
+- **Error pattern feedback**: From precomputed patterns
+- **Reference back**: To simulation or data table
+
+**PHASE 7: RECONCILE**
+- **Handwritten reflection**: "In your own words: why does f(g(x)) ≠ g(f(x))?"
+- **Not graded**: Required but not evaluated
+- **Stored for review**: For spaced repetition
+
+**PHASE 8: CODE**
+- **Implement compose(f, g, x)** in Python
+- **Verify f(g(x)) ≠ g(f(x))** for 100 random x values
+- **Numerical verification**: Compare with analytical results
+
+**PHASE 9: VARY**
+- **New functions**: f(x)=sin(x), g(x)=x²
+- **Predict**: f(g(π/2)), g(f(π/2))
+- **Track prediction accuracy**: Improvement across variations
+- **Confidence calibration**: Visible to student
+
+**PHASE 10: CONNECT**
+- **Chain rule**: "d/dx[f(g(x))] = f'(g(x))·g'(x)"
+- **Backpropagation**: "Neural networks use composition"
+- **Link to Lesson 1.5**: Chain Rule
+- **Surprise connection**: "Same math trains GPT"
+
+**Error Pattern Templates:**
+```json
+{
+  "problem_id": "L0-1-P1",
+  "context": "Predict f(g(5)) for f(x)=x², g(x)=x+3",
+  "correct_answer": 64,
+  "error_patterns": [
+    {
+      "answer_range": [40, 49],
+      "partial_credit": ["correct_variable", "correct_direction"],
+      "misconception": "composition_is_multiplication",
+      "feedback": "Good — you identified both functions correctly. But composition f(g(5)) means apply g first, then f — not multiply f(5) × g(5).",
+      "redirect": "simulation",
+      "severity": "moderate"
+    },
+    {
+      "answer_range": [28, 30],
+      "partial_credit": ["correct_order"],
+      "misconception": "commutativity_assumption",
+      "feedback": "You computed g(f(5)) instead of f(g(5)). Good — you applied the functions in the correct order. But the problem asks for f∘g, not g∘f.",
+      "redirect": "derivation",
+      "severity": "mild"
+    }
+  ]
+}
+```
 
 **SymPy verification spec:**
 ```python
-from sympy import symbols, Function, compose
+from sympy import symbols, Function, simplify
 x = symbols('x')
-# Verify student's decomposition: compose(outer, inner) == original
+# Verify student's decomposition: outer(inner(x)) == original(x)
 assert simplify(outer.subs(x, inner) - original) == 0
 ```
 
@@ -59,22 +222,94 @@ assert simplify(outer.subs(x, inner) - original) == 0
 
 **Physics hook:** You're driving. Speedometer reads 60 mph. What does that number actually mean?
 
-**EXPLORE:** Interactive car simulation. Position vs time graph. Student drags a point, sees the slope of the secant line. As the second point gets closer, the secant approaches the tangent.
+**PHASE 1: EXPLORE**
+- **Interactive car simulation**: Position vs time graph
+- **Student drags points**: See secant line slope change
+- **As second point gets closer**: Secant approaches tangent
+- **Visual discovery**: Slope represents rate of change
+- **No formulas**: Pure graphical intuition
 
-**Core content:**
-- Average rate of change = slope of secant = Δy/Δx
-- Instantaneous rate of change = slope of tangent = limit of secant slopes
-- Slope of position-time graph = velocity
-- Slope of velocity-time graph = acceleration
+**PHASE 2: PREDICT**
+- **Prediction prompt**: "A ball is thrown up. At the very top, what is its velocity? What is its acceleration?"
+- **Locked predictions**: 
+  - Direction: faster/slower/same
+  - Magnitude: in scientific notation (e.g., 0 m/s, 9.8e0 m/s²)
+  - Confidence: just guessing/rough idea/pretty sure
+- **Common misconception**: velocity=0 → acceleration=0
 
-**PREDICT:** "A ball is thrown up. At the very top, what is its velocity? What is its acceleration?"
-- Common error: velocity = 0 so acceleration = 0 → "Good — velocity IS zero at the top. But acceleration isn't velocity. Is gravity turned off at the top?"
+**PHASE 3: DISCOVER**
+- **Data table from simulation**: t, position, secant slopes
+- **Pattern identification**: "How does secant slope change as points get closer?"
+- **Student writes observations**: On handwriting canvas
+- **Data transformation**: Compute average velocities for shrinking Δt
 
-**DERIVE:** From a table of position values, compute average velocities over shrinking intervals. Student sees the values converge. This IS the limit — before we call it that.
+**PHASE 4: EXPLAIN**
+- **Average rate of change**: Slope of secant = Δy/Δx
+- **Instantaneous rate of change**: Slope of tangent = limit of secant slopes
+- **Slope of position-time graph**: Velocity
+- **Slope of velocity-time graph**: Acceleration
 
-**CODE:** Given position data as an array, compute finite difference velocities for decreasing Δt. Plot and observe convergence.
+**PHASE 5: DERIVE**
+- **From position table**: Compute average velocities over shrinking intervals
+- **On handwriting canvas**: Calculate Δy/Δx for Δt = 0.1, 0.01, 0.001
+- **SymPy verification**: Each calculation verified
+- **Observe convergence**: Values approach instantaneous velocity
 
-**CONNECT:** "You just computed a derivative by hand. In lesson 1.1, we'll give this process a name and a formula."
+**PHASE 6: COMPARE**
+- **Side-by-side display**: Prediction vs derivation
+- **Gap analysis**: "You predicted acceleration=0 at top. Why?"
+- **Error pattern feedback**: "Good — velocity IS zero at top. But acceleration isn't velocity."
+- **Reference back**: To simulation graph
+
+**PHASE 7: RECONCILE**
+- **Handwritten reflection**: "In your own words: why is acceleration not zero at top?"
+- **Not graded**: Required but not evaluated
+- **Stored for review**: For misconception tracking
+
+**PHASE 8: CODE**
+- **Given position data array**: Compute finite difference velocities
+- **For decreasing Δt**: 0.1, 0.01, 0.001, 0.0001
+- **Plot convergence**: Observe approach to instantaneous velocity
+- **Numerical verification**: Compare with analytical derivative
+
+**PHASE 9: VARY**
+- **New motion**: Parabolic trajectory x(t) = t²
+- **Predict**: Velocity at t=2, acceleration at t=2
+- **Track prediction accuracy**: Improvement across variations
+- **Confidence calibration**: Visible graph of accuracy over time
+
+**PHASE 10: CONNECT**
+- **Derivative intuition**: "You just computed a derivative by hand"
+- **Link to Lesson 1.1**: The Limit (formal definition)
+- **Surprise connection**: "Same math used in stock price analysis"
+- **No completion screen**: "Next: formalizing this as the limit"
+
+**Error Pattern Templates:**
+```json
+{
+  "problem_id": "L0-2-P1",
+  "context": "Predict acceleration at top of ball's trajectory",
+  "correct_answer": 9.8,
+  "error_patterns": [
+    {
+      "answer_range": [0, 0.1],
+      "partial_credit": ["correct_velocity"],
+      "misconception": "acceleration_is_velocity",
+      "feedback": "Good — velocity IS zero at the top. But acceleration isn't velocity. Is gravity turned off at the top?",
+      "redirect": "simulation",
+      "severity": "significant"
+    },
+    {
+      "answer_range": [4.9, 5.1],
+      "partial_credit": ["correct_direction"],
+      "misconception": "half_acceleration",
+      "feedback": "You correctly identified that acceleration is downward. But gravity doesn't halve at the top — it's constant.",
+      "redirect": "data_table",
+      "severity": "moderate"
+    }
+  ]
+}
+```
 
 ---
 
@@ -408,25 +643,131 @@ This is Renkl's fading principle, implemented through the spaced repetition syst
 
 ### Error Pattern Templates
 
-For EVERY prediction prompt and derivation step, Claude Code must generate:
+For EVERY prediction prompt and derivation step, Claude Code must generate comprehensive error pattern templates:
+
 ```json
 {
-  "correct_answer": "...",
+  "problem_id": "L0-1-P1",
+  "context": "Predict f(g(5)) for f(x)=x², g(x)=x+3",
+  "correct_answer": 64,
   "error_patterns": [
     {
-      "answer_range": [...],
-      "partial_credit": ["what student got right"],
-      "misconception": "named_misconception",
-      "feedback": "Good — you knew X. But notice Y.",
-      "redirect": "simulation|data_table|derivation|previous_lesson"
+      "answer_range": [40, 49],
+      "partial_credit": ["correct_variable", "correct_direction"],
+      "misconception": "composition_is_multiplication",
+      "feedback": "Good — you identified both functions correctly. But composition f(g(5)) means apply g first, then f — not multiply f(5) × g(5).",
+      "redirect": "simulation",
+      "severity": "moderate"
+    },
+    {
+      "answer_range": [28, 30],
+      "partial_credit": ["correct_order"],
+      "misconception": "commutativity_assumption",
+      "feedback": "You computed g(f(5)) instead of f(g(5)). Good — you applied the functions in the correct order. But the problem asks for f∘g, not g∘f.",
+      "redirect": "derivation",
+      "severity": "mild"
+    },
+    {
+      "answer_range": [70, 80],
+      "partial_credit": ["correct_concept"],
+      "misconception": "magnitude_overestimate",
+      "feedback": "You correctly identified that f(g(5)) should be larger than f(5)=25. But check your calculation: g(5)=8, then f(8)=64.",
+      "redirect": "data_table",
+      "severity": "mild"
     }
   ]
 }
 ```
 
+**Error Pattern Requirements:**
+
+1. **3-5 patterns per prediction**: Identify most common wrong answers
+2. **Answer ranges**: Numeric intervals covering plausible wrong answers
+3. **Partial credit**: List what student got right ("build on what's right")
+4. **Named misconceptions**: Standardized names (e.g., "composition_is_multiplication")
+5. **Feedback structure**: "Good — you knew X. But notice Y."
+6. **Redirect options**: simulation | data_table | derivation | previous_lesson
+7. **Severity levels**: mild | moderate | significant (for spaced repetition weighting)
+8. **Misconception tracking**: Frequency tracked across problems for targeted remediation
+
+**Feedback Principles:**
+
+1. **Always build on what's right first**: "Good — you knew X" before "But notice Y"
+2. **Never just give the answer**: Point student back to their own data/simulation/derivation
+3. **Reference student's specific reasoning**: Not generic explanations
+4. **Redirect appropriately**: 
+   - Direction errors → simulation
+   - Magnitude errors → data table
+   - Algebraic errors → derivation
+5. **Track misconceptions**: If named misconception appears 3+ times, generate targeted mini-lesson
+
+### Handwriting Canvas Workflow
+
+**Handwriting → Recognition → Verification Pipeline:**
+
+```
+Handwriting → Recognition → Verification → Feedback
+----------------------------------------------------------------
+1. Student writes on canvas (graph paper background, <50ms latency)
+2. VLM recognizes handwriting → converts to LaTeX
+3. Clean KaTeX version appears alongside handwriting
+4. SymPy verifies algebraic correctness
+5. System shows green/orange dot per line
+6. Diagnostic feedback appears in margins (from error patterns)
+```
+
+**Canvas Requirements:**
+
+1. **Feels like paper**: Low latency (<50ms pen-to-ink), smooth strokes, graph paper background
+2. **Multi-input**: Apple Pencil, Wacom stylus, finger, mouse
+3. **Real-time recognition**: VLM converts handwriting to LaTeX as student writes
+4. **Non-destructive**: Handwriting preserved alongside recognized/rendered version
+5. **Scrollable history**: All work accumulates on canvas
+6. **System annotations**: Verification dots (green/orange), diagnostic feedback appear in distinct color in margins
+
+**Fallback System:**
+
+Until handwriting recognition pipeline is rock-solid, structured derive blocks serve as scaffolding:
+- Canvas for freeform work
+- Structured blocks for guided derivation when student is stuck or learning new technique
+
+### Scientific Notation Integration
+
+**Every PREDICT phase must include:**
+
+1. **Magnitude in scientific notation**: 1.5e2 instead of 150
+2. **Order-of-magnitude gates**: Predictions must be within one order of magnitude
+3. **Unit conversion drills**: "Express k = 15000 g/s² in SI scientific notation"
+4. **System checks**: Mantissa and exponent separately
+5. **Progress tracking**: Prediction vs derivation accuracy for scientific notation
+
+**Implementation:**
+
+- Scientific notation practice woven throughout, not separate module
+- Order-of-magnitude validation before proceeding to derivation
+- Unit conversion integrated into dimensional analysis
+
 ### Interleaving Rules
 
 Once Module 2 begins, practice sections must mix derivative and integral problems (never all one type). Once Module 3 begins, mix in single-variable problems. This is non-negotiable — the research shows d = 0.79 effect on delayed retention.
+
+### Lesson Validation Checklist
+
+**Each lesson must pass these checks:**
+
+- [ ] **PDCR sequence**: Explore→Predict→Discover→Explain→Derive→Compare→Reconcile→Code→Vary→Connect
+- [ ] **EXPLORE phase**: Interactive simulation before equations
+- [ ] **PREDICT phase**: Locked predictions with scientific notation
+- [ ] **COMPARE phase**: Prediction vs derivation gap analysis
+- [ ] **RECONCILE phase**: Handwritten reflection in student's own words
+- [ ] **Error patterns**: 3-5 precomputed error patterns per prediction
+- [ ] **CONNECT phase**: Surprise domain link at end
+- [ ] **CODE phase**: NumPy verification of derivation
+- [ ] **Dimensional analysis**: For physical quantities
+- [ ] **Scientific notation**: In all predictions
+- [ ] **Canvas integration**: Handwriting canvas for derivations
+- [ ] **Spaced repetition hooks**: Links to previous/future lessons
+- [ ] **Physics-first**: Concept introduced through physical motivation
 
 ### Physics-First Rule
 

@@ -315,6 +315,110 @@
         'Integrate term by term.',
         'Don\'t forget the 1/2 from integrating t.'
       ]
+    },
+
+    // Bayesian Statistics
+    {
+      id: 'bayes-bayes-theorem',
+      category: 'statistics',
+      name: "Bayes' Theorem",
+      description: 'Derive Bayes theorem from conditional probability',
+      starting_equation: 'P(p \\mid \\text{data}) = \\frac{P(p \\cap \\text{data})}{P(\\text{data})}',
+      target_equation: 'P(p \\mid \\text{data}) = \\frac{P(\\text{data} \\mid p) \\cdot P(p)}{P(\\text{data})}',
+      vars: ['P', 'p', '\\text{data}'],
+      valid_forms: [
+        'P(p \\mid \\text{data}) = \\frac{P(p \\cap \\text{data})}{P(\\text{data})}',
+        'P(p \\cap \\text{data}) = P(\\text{data} \\mid p) \\cdot P(p)',
+        'P(p \\mid \\text{data}) = \\frac{P(\\text{data} \\mid p) \\cdot P(p)}{P(\\text{data})}',
+        'P(p \\mid \\text{data}) \\propto P(\\text{data} \\mid p) \\cdot P(p)'
+      ],
+      hints: [
+        'Start with the definition of conditional probability.',
+        'Write P(p ∩ data) using the OTHER conditional: P(data|p).',
+        'Substitute into the original equation.'
+      ]
+    },
+    {
+      id: 'bayes-log-likelihood',
+      category: 'statistics',
+      name: 'Log-Likelihood for Binomial',
+      description: 'Take the log of the binomial likelihood',
+      starting_equation: 'P(\\text{data} \\mid p) = p^k (1-p)^{n-k}',
+      target_equation: '\\ell(p) = k \\log p + (n-k) \\log(1-p)',
+      vars: ['P', 'p', 'k', 'n', '\\ell', '\\log'],
+      valid_forms: [
+        'P(\\text{data} \\mid p) = p^k (1-p)^{n-k}',
+        '\\ell(p) = \\log(p^k (1-p)^{n-k})',
+        '\\ell(p) = \\log(p^k) + \\log((1-p)^{n-k})',
+        '\\ell(p) = k \\log p + (n-k) \\log(1-p)'
+      ],
+      hints: [
+        'Take the natural log of both sides.',
+        'Use log(a × b) = log a + log b.',
+        'Use log(a^n) = n log a.'
+      ]
+    },
+    {
+      id: 'bayes-mle',
+      category: 'statistics',
+      name: 'Maximum Likelihood Estimate',
+      description: 'Find the peak of the likelihood function',
+      starting_equation: '\\ell(p) = k \\log p + (n-k) \\log(1-p)',
+      target_equation: '\\hat{p} = \\frac{k}{n}',
+      vars: ['p', 'k', 'n', '\\ell', '\\log', '\\hat'],
+      valid_forms: [
+        '\\ell(p) = k \\log p + (n-k) \\log(1-p)',
+        '\\frac{d\\ell}{dp} = \\frac{k}{p} - \\frac{n-k}{1-p}',
+        '\\frac{k}{p} = \\frac{n-k}{1-p}',
+        'k(1-p) = p(n-k)',
+        'k = pn',
+        '\\hat{p} = \\frac{k}{n}'
+      ],
+      hints: [
+        'Differentiate: d/dp of log p is 1/p.',
+        'Set the derivative equal to zero.',
+        'Cross-multiply and solve for p.'
+      ]
+    },
+    {
+      id: 'bayes-width',
+      category: 'statistics',
+      name: 'Posterior Width (1/√N Law)',
+      description: 'Derive why uncertainty shrinks as 1/√N',
+      starting_equation: '\\frac{d^2\\ell}{dp^2}\\bigg|_{p=\\hat{p}} = -\\frac{n}{\\hat{p}(1-\\hat{p})}',
+      target_equation: '\\text{SD} = \\sqrt{\\frac{\\hat{p}(1-\\hat{p})}{n}}',
+      vars: ['p', 'n', '\\ell', '\\hat', '\\text{SD}'],
+      valid_forms: [
+        '\\frac{d^2\\ell}{dp^2} = -\\frac{n}{\\hat{p}(1-\\hat{p})}',
+        '\\sigma^2 = \\frac{1}{\\left|\\frac{d^2\\ell}{dp^2}\\right|}',
+        '\\sigma^2 = \\frac{\\hat{p}(1-\\hat{p})}{n}',
+        '\\text{SD} = \\sqrt{\\frac{\\hat{p}(1-\\hat{p})}{n}}',
+        '\\text{SD} \\propto \\frac{1}{\\sqrt{n}}'
+      ],
+      hints: [
+        'Variance equals 1 divided by the curvature.',
+        'Substitute the second derivative at the peak.',
+        'SD is the square root of variance.'
+      ]
+    },
+    {
+      id: 'bayes-beta-mean',
+      category: 'statistics',
+      name: 'Beta Distribution Mean',
+      description: 'Mean of Beta(α, β) distribution',
+      starting_equation: 'f(p) \\propto p^{\\alpha-1}(1-p)^{\\beta-1}',
+      target_equation: '\\mathbb{E}[p] = \\frac{\\alpha}{\\alpha + \\beta}',
+      vars: ['f', 'p', '\\alpha', '\\beta', '\\mathbb'],
+      valid_forms: [
+        'f(p) \\propto p^{\\alpha-1}(1-p)^{\\beta-1}',
+        '\\mathbb{E}[p] = \\int_0^1 p \\cdot f(p) \\, dp',
+        '\\mathbb{E}[p] = \\frac{\\alpha}{\\alpha + \\beta}'
+      ],
+      hints: [
+        'The mean is the integral of p times the density.',
+        'Use the Beta function B(α, β) = Γ(α)Γ(β)/Γ(α+β).',
+        'The integral of p^α (1-p)^(β-1) is B(α+1, β).'
+      ]
     }
   ];
 

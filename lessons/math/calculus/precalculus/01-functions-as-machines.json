@@ -5,6 +5,20 @@
   "prerequisites": [],
   "blocks": [
     {
+      "id": "C0-1-TRACK",
+      "type": "explore",
+      "title": "Draw a Track",
+      "content_html": "<p>Draw a track for a ball to roll along. Make hills, valleys, slopes -- anything you want. Then watch the ball roll under gravity and see how its speed changes.</p>",
+      "simulation_config": {
+        "type": "track_simulation",
+        "gravity": 500,
+        "friction": 0.3,
+        "show_speed": true,
+        "show_tangent": false
+      },
+      "instructions": "1. Draw a curved track on the canvas<br>2. Click Roll to release the ball<br>3. Watch the speed readout -- where is the ball fastest?<br>4. Click Reset to draw a new track and try again"
+    },
+    {
       "id": "C0-1-B1",
       "type": "explore",
       "title": "Interactive Function Machine",
@@ -25,17 +39,8 @@
             "equation": "1000 + 5t"
           }
         ],
-        "modes": [
-          "single",
-          "compose",
-          "inverse"
-        ],
-        "data_collection": [
-          "t",
-          "g(t)",
-          "f(h)",
-          "f(g(t))"
-        ]
+        "modes": ["single", "compose", "inverse"],
+        "data_collection": ["t", "g(t)", "f(h)", "f(g(t))"]
       },
       "instructions": "1. Drag time values into machine g<br>2. Drag altitude values into machine f<br>3. Chain them: feed time into g, and its output into f<br>4. Try the inverse: feed temperature backwards into f to find altitude."
     },
@@ -61,40 +66,33 @@
         },
         "confidence": {
           "required": true,
-          "options": [
-            "just_guessing",
-            "rough_idea",
-            "pretty_sure"
-          ]
+          "options": ["just_guessing", "rough_idea", "pretty_sure"]
         }
       },
       "locked": true,
       "error_patterns": [
         {
-          "magnitude_f_g_range": [
-            3000,
-            4000
-          ],
-          "partial_credit": [
-            "correct_inner"
-          ],
+          "magnitude_f_g_range": [3000, 4000],
+          "partial_credit": ["correct_inner"],
           "misconception": "forgot_outer_function",
           "feedback": "You calculated the altitude g(500) = 3500m. Good! But the question asks for the temperature at that altitude. Now plug 3500 into f(h).",
           "redirect": "simulation",
           "severity": "significant"
         },
         {
-          "magnitude_f_g_range": [
-            15,
-            19
-          ],
-          "partial_credit": [
-            "correct_direction"
-          ],
-          "misconception": "multiplication_instead_of_composition",
-          "feedback": "It looks like you didn't evaluate f(g(500)) correctly. Remember, compute g(500) first, then plug that entire result in for h in the f(h) equation.",
-          "redirect": "derivation",
+          "magnitude_f_g_range": [15, 25],
+          "partial_credit": ["correct_direction"],
+          "misconception": "used_wrong_altitude",
+          "feedback": "Your answer suggests you plugged a smaller altitude into f. Remember: the balloon starts at 1000m and climbs 5m every second. At t=500, g(500) = 1000 + 2500 = 3500m, not 1000m.",
+          "redirect": "simulation",
           "severity": "moderate"
+        },
+        {
+          "direction": "Temperature increases with time",
+          "misconception": "wrong_direction",
+          "feedback": "As the balloon rises, does it get warmer or colder? Look at f(h) = 20 - 0.006h. The minus sign means temperature decreases as altitude increases. Higher altitude = colder.",
+          "redirect": "simulation",
+          "severity": "significant"
         }
       ]
     },
@@ -104,33 +102,13 @@
       "title": "Discover Patterns",
       "prompt": "Look at the data table from your exploration. What patterns do you notice about f(g(x)) and g(f(x))? Write your observations on the handwriting canvas.",
       "data_table": {
-        "columns": [
-          "t (s)",
-          "g(t) (m)",
-          "f(g(t)) (\u00b0C)"
-        ],
+        "columns": ["t (s)", "g(t) (m)", "f(g(t)) (\u00b0C)"],
         "source": "exploration_data",
         "sample_values": [
-          {
-            "t (s)": 0,
-            "g(t) (m)": 1000,
-            "f(g(t)) (\u00b0C)": 14
-          },
-          {
-            "t (s)": 100,
-            "g(t) (m)": 1500,
-            "f(g(t)) (\u00b0C)": 11
-          },
-          {
-            "t (s)": 200,
-            "g(t) (m)": 2000,
-            "f(g(t)) (\u00b0C)": 8
-          },
-          {
-            "t (s)": 300,
-            "g(t) (m)": 2500,
-            "f(g(t)) (\u00b0C)": 5
-          }
+          {"t (s)": 0, "g(t) (m)": 1000, "f(g(t)) (\u00b0C)": 14},
+          {"t (s)": 100, "g(t) (m)": 1500, "f(g(t)) (\u00b0C)": 11},
+          {"t (s)": 200, "g(t) (m)": 2000, "f(g(t)) (\u00b0C)": 8},
+          {"t (s)": 300, "g(t) (m)": 2500, "f(g(t)) (\u00b0C)": 5}
         ]
       },
       "questions": [
@@ -142,59 +120,108 @@
       "id": "C0-1-B4",
       "type": "read",
       "title": "Formal Explanation",
-      "content_html": "<p>Now that you've discovered the patterns, here's the formal explanation.</p><p>A function is a <strong>machine</strong>: a rule that takes one number in and gives one number back. Forget the y-vs-x graph for a moment. A function is a <em>process</em>.</p><div class=\"equation\">$$f(x) = x^2$$</div><p>The letter $$f$$ is the machine's name. $$x$$ is the input slot \u2014 a placeholder, not a fixed number. The right-hand side describes what the machine does.</p><p><strong>Composition</strong> is chaining machines: take the output of the first and feed it into the second.</p><div class=\"equation\">$$(f \\circ g)(x) = f(g(x))$$</div><p>Read from inside out: first $$g$$ acts on $$x$$, producing $$g(x)$$. Then $$f$$ acts on that, producing $$f(g(x))$$.</p><p><strong>Decomposition</strong> is the reverse: given a complicated machine like $$h(x) = \\sin(x^2)$$, identify the simple machines inside it (inner: $$x^2$$, outer: $$\\sin$$).</p><p><strong>Inverse functions</strong> run the machine backwards: if $$f$$ takes $$x$$ to $$y$$, $$f^{-1}$$ takes $$y$$ back to $$x$$.</p>"
+      "content_html": "<p>Now that you've discovered the patterns, here's the formal explanation.</p><p>A function is a <strong>machine</strong>: a rule that takes one number in and gives one number back. Forget the y-vs-x graph for a moment. A function is a <em>process</em>.</p><div class=\"equation\">$$f(x) = x^2$$</div><p>The letter $$f$$ is the machine's name. $$x$$ is the input slot \u2014 a placeholder, not a fixed number. The right-hand side describes what the machine does.</p><p><strong>Composition</strong> is chaining machines: take the output of the first and feed it into the second.</p><div class=\"equation\">$$(f \\circ g)(x) = f(g(x))$$</div><p>Read from inside out: first $$g$$ acts on $$x$$, producing $$g(x)$$. Then $$f$$ acts on that, producing $$f(g(x))$$.</p><p><strong>Decomposition</strong> is the reverse: given a complicated machine like $$h(x) = (3x+1)^5$$, identify the simple machines inside it (inner: $$3x+1$$, outer: $$u^5$$).</p><p><strong>Inverse functions</strong> run the machine backwards: if $$f$$ takes $$x$$ to $$y$$, $$f^{-1}$$ takes $$y$$ back to $$x$$.</p>"
     },
     {
       "id": "C0-1-B5",
       "type": "handwrite",
-      "title": "Derive the Composition",
-      "prompt": "Derive f(g(500)) step by step. First find the altitude at t=500, then find the temperature at that altitude.",
-      "starting_equation": "f(g(500)) = 20 - 0.006(1000 + 5(500))",
-      "target_equation": "f(g(500)) = -1",
+      "title": "Derive the General Composition",
+      "prompt": "Derive the general formula for f(g(t)) by substituting g(t) = 1000 + 5t into f(h) = 20 - 0.006h and simplifying. This gives you temperature as a function of time.",
+      "starting_equation": "f(g(t)) = 20 - 0.006(1000 + 5t)",
+      "target_equation": "f(g(t)) = 14 - 0.03t",
       "steps": [
         {
           "id": "step1",
-          "instruction": "Compute inner function g(500): find altitude",
-          "result_equation": "g(500) = 1000 + 5(500) = 3500",
-          "explanation": "At 500 seconds, the balloon is at 3500 meters."
+          "instruction": "Substitute g(t) into f",
+          "result_equation": "f(g(t)) = 20 - 0.006(1000 + 5t)",
+          "explanation": "Replace h with the entire expression 1000 + 5t."
         },
         {
           "id": "step2",
-          "instruction": "Apply outer function f: find temperature at 3500m",
-          "result_equation": "f(3500) = 20 - 0.006(3500)",
-          "explanation": "Plug the altitude into the temperature machine."
+          "instruction": "Distribute -0.006 across both terms",
+          "result_equation": "f(g(t)) = 20 - 6 - 0.03t",
+          "explanation": "-0.006 \u00d7 1000 = -6 and -0.006 \u00d7 5t = -0.03t."
         },
         {
           "id": "step3",
-          "instruction": "Calculate final temperature",
-          "result_equation": "f(g(500)) = -1",
-          "explanation": "20 - 21 = -1 \u00b0C"
+          "instruction": "Combine the constant terms",
+          "result_equation": "f(g(t)) = 14 - 0.03t",
+          "explanation": "20 - 6 = 14. The composed machine is a new linear function of t."
+        },
+        {
+          "id": "step4",
+          "instruction": "Verify: evaluate at t = 500",
+          "result_equation": "f(g(500)) = 14 - 0.03(500) = 14 - 15 = -1",
+          "explanation": "This matches the prediction question. The general formula works."
         }
       ],
+      "hints": [
+        "What does f do? It takes its input and computes 20 - 0.006 \u00d7 (input).",
+        "The input to f is g(t) = 1000 + 5t. Write the whole thing inside f.",
+        "Distribute: -0.006 \u00d7 1000 = ? and -0.006 \u00d7 5t = ?",
+        "Check your work by plugging in t = 500."
+      ],
       "sympy_verification": {
-        "expression": "20 - 0.006*(1000 + 5*500)",
-        "target": "-1"
+        "expression": "20 - 0.006*(1000 + 5*t)",
+        "target": "14 - 0.03*t"
+      }
+    },
+    {
+      "id": "C0-1-B5b",
+      "type": "handwrite",
+      "title": "Derive the Other Composition",
+      "prompt": "Now derive g(f(h)) \u2014 plug temperature into the time slot. Substitute f(h) = 20 - 0.006h into g(t) = 1000 + 5t and simplify.",
+      "starting_equation": "g(f(h)) = 1000 + 5(20 - 0.006h)",
+      "target_equation": "g(f(h)) = 1100 - 0.03h",
+      "steps": [
+        {
+          "id": "step1",
+          "instruction": "Substitute f(h) into g",
+          "result_equation": "g(f(h)) = 1000 + 5(20 - 0.006h)",
+          "explanation": "Replace t with the entire expression 20 - 0.006h."
+        },
+        {
+          "id": "step2",
+          "instruction": "Distribute 5 across both terms",
+          "result_equation": "g(f(h)) = 1000 + 100 - 0.03h",
+          "explanation": "5 \u00d7 20 = 100 and 5 \u00d7 (-0.006h) = -0.03h."
+        },
+        {
+          "id": "step3",
+          "instruction": "Combine the constant terms",
+          "result_equation": "g(f(h)) = 1100 - 0.03h",
+          "explanation": "1000 + 100 = 1100. Another linear function, but with a very different intercept."
+        }
+      ],
+      "hints": [
+        "g takes its input and computes 1000 + 5 \u00d7 (input).",
+        "The input to g is f(h) = 20 - 0.006h.",
+        "Distribute the 5: 5 \u00d7 20 = ? and 5 \u00d7 (-0.006h) = ?"
+      ],
+      "sympy_verification": {
+        "expression": "1000 + 5*(20 - 0.006*h)",
+        "target": "1100 - 0.03*h"
       }
     },
     {
       "id": "C0-1-B6",
       "type": "compare",
-      "title": "Compare Prediction vs Derivation",
+      "title": "Compare the Two Compositions",
       "prediction_source": "C0-1-B2",
       "derivation_source": "C0-1-B5",
       "gap_analysis": {
         "direction_correct": true,
         "magnitude_f_g_correct": true,
         "error_ratio_f_g": 1.0,
-        "feedback": "Compare your predictions with the derived results. Did you correctly predict that f(g(5)) \u2260 g(f(5))? Was your magnitude prediction accurate?"
+        "feedback": "Compare your prediction of f(g(500)) with the derived result of -1\u00b0C."
       },
-      "comparison_prompt": "Your prediction: f(g(500)) = [student_prediction]<br>Derived result: f(g(500)) = -1 (or -1.0e0)<br>Analysis: Were your magnitude and direction accurate?"
+      "comparison_prompt": "Your prediction: f(g(500)) = [student_prediction]<br>Derived result: f(g(500)) = -1\u00b0C<br><br><strong>Key observation:</strong> Both compositions have the same slope: -0.03. Why? Because -0.006 \u00d7 5 = 5 \u00d7 (-0.006) = -0.03. Multiplying the individual rates gives the same result either way. But the intercepts differ: 14 vs 1100. The order changes <em>where you start</em>, not <em>how fast you change</em>.<br><br>This is a preview of the chain rule: when you compose functions, their rates of change <strong>multiply</strong>."
     },
     {
       "id": "C0-1-B7",
       "type": "reconcile",
       "title": "Reconcile in Your Own Words",
-      "prompt": "In your own words, write why your prediction was right or wrong. Also, explain physically why computing g(f(t)) (plugging temperature into the time slot) is mathematically possible but physically nonsense.",
+      "prompt": "In your own words, write on the canvas:\\n\\n1. Why f(g(t)) and g(f(h)) give different results even though they use the same two machines\\n2. Why both compositions have slope -0.03 but different intercepts\\n3. What it means physically that g(f(h)) = 1100 - 0.03h (what quantity does this represent?)",
       "required": true,
       "not_graded": true,
       "min_length": 50,
@@ -203,44 +230,47 @@
     {
       "id": "C0-1-B8",
       "type": "predict",
-      "title": "Decomposition: Working Backwards",
-      "prompt": "If you are given the composed temperature function T(t) = sin((0.5t)\u00b2), identify the inner and outer machines.",
+      "title": "Decomposition: Identify the Machines",
+      "prompt": "Given the composed function h(x) = (3x + 1)^5, identify the inner and outer machines. Which simple function acts on x first, and which acts on the result?",
       "components": {
         "inner_function": {
           "required": true,
           "options": [
-            "0.5t",
-            "(0.5t)\u00b2",
-            "sin(0.5t)"
+            "3x + 1",
+            "(3x + 1)^5",
+            "x^5"
           ]
         },
         "outer_function": {
           "required": true,
           "options": [
-            "square",
-            "sin",
-            "multiply_by_0.5"
+            "u^5",
+            "3u + 1",
+            "(3u)^5"
           ]
         },
         "confidence": {
           "required": true,
-          "options": [
-            "just_guessing",
-            "rough_idea",
-            "pretty_sure"
-          ]
+          "options": ["just_guessing", "rough_idea", "pretty_sure"]
         }
       },
       "locked": true,
       "error_patterns": [
         {
-          "inner_function": "sin(0.5t)",
-          "outer_function": "square",
-          "partial_credit": [
-            "identified_components"
-          ],
+          "inner_function": "(3x + 1)^5",
+          "outer_function": "u^5",
+          "partial_credit": ["identified_power"],
+          "misconception": "inner_is_whole_function",
+          "feedback": "You picked the entire expression as the inner function. But the inner machine is the one that acts on x FIRST. What happens to x before the fifth power is applied? It gets multiplied by 3 and shifted by 1.",
+          "redirect": "explain",
+          "severity": "significant"
+        },
+        {
+          "inner_function": "x^5",
+          "outer_function": "3u + 1",
+          "partial_credit": ["identified_components"],
           "misconception": "reversed_order",
-          "feedback": "You picked sin as the inner function and square as the outer. But evaluating sin((0.5t)\u00b2) means you square FIRST, then take the sine. The inner machine is the one that acts first.",
+          "feedback": "You identified the right operations (power of 5, and 3x+1) but in the wrong order. In (3x+1)^5, the exponent is applied LAST \u2014 it's the outer machine. The linear transformation 3x+1 happens first.",
           "redirect": "explain",
           "severity": "significant"
         }
@@ -249,21 +279,38 @@
     {
       "id": "C0-1-B9",
       "type": "handwrite",
-      "title": "Derive the Decomposition",
-      "prompt": "Show that if inner machine u(t) = (0.5t)\u00b2 and outer machine is sin(u), their composition is T(t) = sin((0.5t)\u00b2).",
-      "starting_equation": "T(t) = \\sin(u(t))",
-      "target_equation": "T(t) = \\sin((0.5t)^2)",
+      "title": "Verify the Decomposition",
+      "prompt": "Verify your decomposition by composing the pieces back together. Let the inner machine be u(x) = 3x + 1 and the outer machine be f(u) = u^5. Show that f(u(x)) = (3x + 1)^5. Then evaluate at x = 1 to check.",
+      "starting_equation": "f(u(x)) = (u(x))^5",
+      "target_equation": "f(u(1)) = 4^5 = 1024",
       "steps": [
         {
           "id": "step1",
-          "instruction": "Substitute the inner function u(t)",
-          "result_equation": "T(t) = \\sin((0.5t)^2)",
-          "explanation": "Replace u with (0.5t)\u00b2"
+          "instruction": "Write the inner function",
+          "result_equation": "u(x) = 3x + 1",
+          "explanation": "The inner machine: multiply by 3, add 1."
+        },
+        {
+          "id": "step2",
+          "instruction": "Apply the outer function to u(x)",
+          "result_equation": "f(u(x)) = (3x + 1)^5",
+          "explanation": "Replace u with 3x + 1 in u^5. This reconstructs the original h(x)."
+        },
+        {
+          "id": "step3",
+          "instruction": "Evaluate at x = 1 to verify",
+          "result_equation": "f(u(1)) = (3(1) + 1)^5 = 4^5 = 1024",
+          "explanation": "Inner: 3(1) + 1 = 4. Outer: 4^5 = 1024."
         }
       ],
+      "hints": [
+        "The inner machine acts first: what does u(x) = 3x + 1 give when x = 1?",
+        "Now the outer machine takes that result and raises it to the 5th power.",
+        "4^5 = 4 \u00d7 4 \u00d7 4 \u00d7 4 \u00d7 4."
+      ],
       "sympy_verification": {
-        "expression": "sin((0.5*t)**2)",
-        "target": "sin(0.25*t**2)"
+        "expression": "(3*1 + 1)**5",
+        "target": "1024"
       }
     },
     {
@@ -280,52 +327,86 @@
         },
         "confidence": {
           "required": true,
-          "options": [
-            "just_guessing",
-            "rough_idea",
-            "pretty_sure"
-          ]
+          "options": ["just_guessing", "rough_idea", "pretty_sure"]
         }
       },
       "locked": true,
       "error_patterns": [
         {
-          "magnitude_range": [
-            0,
-            1
-          ],
+          "magnitude_range": [0, 1],
           "misconception": "inverse_is_reciprocal",
           "feedback": "It looks like you computed 1 / f(14). An inverse function doesn't mean 1/f(x); it means running the machine backwards to solve for the input.",
           "redirect": "explain",
           "severity": "significant"
+        },
+        {
+          "magnitude_range": [5, 9],
+          "misconception": "plugged_into_f_not_inverse",
+          "feedback": "You computed f(14) = 20 - 0.006(14) \u2248 19.9. But the question asks for the inverse: given a temperature of 14\u00b0C, what altitude produces it? You need to solve 14 = 20 - 0.006h for h.",
+          "redirect": "explain",
+          "severity": "moderate"
         }
       ]
     },
     {
       "id": "C0-1-B11",
       "type": "handwrite",
-      "title": "Derive the Inverse",
-      "prompt": "Derive the inverse of T = 20 - 0.006h by solving for h. Then use it to find the altitude when T = 14\u00b0C.",
-      "starting_equation": "14 = 20 - 0.006h",
-      "target_equation": "h = 1000",
+      "title": "Derive the Inverse Function",
+      "prompt": "Derive the general inverse of f(h) = 20 - 0.006h. Start from T = 20 - 0.006h and solve for h in terms of T.",
+      "starting_equation": "T = 20 - 0.006h",
+      "target_equation": "h = \\frac{20 - T}{0.006}",
       "steps": [
         {
           "id": "step1",
           "instruction": "Subtract 20 from both sides",
-          "result_equation": "-6 = -0.006h",
-          "explanation": "Isolate the term with h."
+          "result_equation": "T - 20 = -0.006h",
+          "explanation": "Isolate the term containing h."
         },
         {
           "id": "step2",
-          "instruction": "Divide by -0.006",
-          "result_equation": "h = 1000",
-          "explanation": "-6 / -0.006 = 1000 meters."
+          "instruction": "Multiply both sides by -1",
+          "result_equation": "20 - T = 0.006h",
+          "explanation": "Flip the signs to make the coefficient of h positive."
+        },
+        {
+          "id": "step3",
+          "instruction": "Divide both sides by 0.006",
+          "result_equation": "h = \\frac{20 - T}{0.006}",
+          "explanation": "This is the general inverse: f\u207b\u00b9(T) = (20 - T) / 0.006."
+        },
+        {
+          "id": "step4",
+          "instruction": "Verify at T = 14\u00b0C",
+          "result_equation": "h = \\frac{20 - 14}{0.006} = \\frac{6}{0.006} = 1000",
+          "explanation": "At 14\u00b0C, the altitude is 1000m \u2014 matches the starting altitude from the balloon simulation."
         }
       ],
+      "hints": [
+        "You want h alone on one side. Start by moving the 20.",
+        "T - 20 = -0.006h. How do you get rid of the negative?",
+        "Now divide both sides by 0.006 to isolate h.",
+        "Check: does f(1000) = 20 - 0.006(1000) = 14? Yes."
+      ],
       "sympy_verification": {
-        "expression": "(14 - 20) / -0.006",
-        "target": "1000"
+        "expression": "(20 - T) / 0.006",
+        "target": "(20 - T) / 0.006"
       }
+    },
+    {
+      "id": "C0-1-B11b",
+      "type": "canvas-derive",
+      "title": "Derive f\u207b\u00b9 on the Canvas",
+      "prompt": "Now do it from scratch on the canvas \u2014 no step-by-step guide. Start from T = 20 - 0.006h and solve for h. Write each step of your algebra.",
+      "starting_equation": "T = 20 - 0.006h",
+      "target_equation": "h = \\frac{20 - T}{0.006}",
+      "valid_forms": [
+        "T - 20 = -0.006h",
+        "20 - T = 0.006h",
+        "h = (20 - T) / 0.006",
+        "h = \\frac{20 - T}{0.006}",
+        "-0.006h = T - 20",
+        "0.006h = 20 - T"
+      ]
     },
     {
       "id": "C0-1-B12",
@@ -338,7 +419,7 @@
         {
           "variable": "num_agree",
           "max_value": 1,
-          "message": "f(g(x)) and g(f(x)) should disagree on essentially every random sample. Algebraically they coincide only at x = -1, which a random uniform sample on [-10, 10] will almost certainly miss."
+          "message": "f(g(x)) and g(f(x)) should disagree on essentially every random sample."
         },
         {
           "variable": "fg_residual",
@@ -356,18 +437,14 @@
       "id": "C0-1-B13",
       "type": "vary",
       "title": "Practice with Variations",
-      "template": "Let f(x) = x^2 and g(x) = x + {a}. Compute (f \u2218 g)({b}) \u2014 that is, f(g({b})).",
+      "template": "Let f(x) = x^2 + {c} and g(x) = {a}x + {b}. Compute f(g({d})).",
       "parameter_ranges": {
-        "a": [
-          1,
-          9
-        ],
-        "b": [
-          1,
-          9
-        ]
+        "a": [2, 5],
+        "b": [1, 5],
+        "c": [0, 3],
+        "d": [1, 6]
       },
-      "answer_formula": "Math.pow(b + a, 2)",
+      "answer_formula": "Math.pow(a * d + b, 2) + c",
       "format": "scientific_notation",
       "tolerance_mantissa": 0.5,
       "tolerance_exponent": 0,
@@ -375,16 +452,9 @@
       "required_consecutive_correct": 3,
       "prediction_required": true,
       "components": {
-        "direction": {
-          "required": false
-        },
-        "magnitude": {
-          "required": true,
-          "format": "scientific_notation"
-        },
-        "confidence": {
-          "required": true
-        }
+        "direction": { "required": false },
+        "magnitude": { "required": true, "format": "scientific_notation" },
+        "confidence": { "required": true }
       }
     },
     {
@@ -414,7 +484,7 @@
           "id": "d",
           "text": "They actually are equal \u2014 f(g(x)) = g(f(x)) for any two functions, just like a + b = b + a.",
           "correct": false,
-          "misconception": "You just computed $$f(g(5)) = 64$$ and $$g(f(5)) = 28$$ for $$f(x) = x^2$$, $$g(x) = x + 3$$. One counterexample is enough to kill the claim. Composition is not commutative; addition is."
+          "misconception": "You just derived $$f(g(t)) = 14 - 0.03t$$ and $$g(f(h)) = 1100 - 0.03h$$. Same slope, different intercepts. One counterexample is enough to kill the claim. Composition is not commutative."
         }
       ]
     },
@@ -422,7 +492,7 @@
       "id": "C0-1-B15",
       "type": "connect",
       "title": "Where This Goes: The Chain Rule",
-      "content_html": "<p>You now have the three moves that make calculus possible to <em>do</em>, not just memorize:</p><ul><li><strong>Compose</strong> \u2014 chain simple machines into a complicated one.</li><li><strong>Decompose</strong> \u2014 read a complicated machine and identify the simple machines inside it, in order.</li><li><strong>Invert</strong> \u2014 when possible, build the machine that runs the original backwards.</li></ul><p>The hardest single rule in differential calculus is the <strong>chain rule</strong>, which says:</p><div class=\"equation\">$$\\frac{d}{dx}\\,f(g(x)) \\;=\\; f'(g(x)) \\cdot g'(x)$$</div><p>Look closely. The chain rule is doing exactly what you just practiced: it sees the outer function $$f$$, the inner function $$g$$, and treats them as a composition. The derivative of a composition is the derivative of the outer machine (evaluated at the inner machine's output) <em>times</em> the derivative of the inner machine.</p><p>If you can decompose $$\\sin(x^2)$$ into outer = $$\\sin$$ and inner = $$x^2$$, you can do the chain rule on it the moment you know that the derivative of $$\\sin$$ is $$\\cos$$ and the derivative of $$x^2$$ is $$2x$$.</p><p><strong>Surprise connection:</strong> Every time a neural network is trained, the algorithm called <em>backpropagation</em> applies the chain rule millions of times across composed layers of functions. The skill you just practiced \u2014 \"what's the inner machine, what's the outer machine\" \u2014 is literally the same skill that trains GPT.</p><p>Next lesson: <strong>Rates of Change</strong>. You're driving a car. The speedometer reads 60 mph at this very instant. What does that number actually mean, when \"this very instant\" has zero duration?</p>"
+      "content_html": "<p>You now have the three moves that make calculus possible to <em>do</em>, not just memorize:</p><ul><li><strong>Compose</strong> \u2014 chain simple machines into a complicated one.</li><li><strong>Decompose</strong> \u2014 read a complicated machine and identify the simple machines inside it, in order.</li><li><strong>Invert</strong> \u2014 when possible, build the machine that runs the original backwards.</li></ul><p>The hardest single rule in differential calculus is the <strong>chain rule</strong>, which says:</p><div class=\"equation\">$$\\frac{d}{dx}\\,f(g(x)) \\;=\\; f'(g(x)) \\cdot g'(x)$$</div><p>Look closely. The chain rule is doing exactly what you just practiced: it sees the outer function $$f$$, the inner function $$g$$, and treats them as a composition. The derivative of a composition is the derivative of the outer machine (evaluated at the inner machine's output) <em>times</em> the derivative of the inner machine.</p><p>You already saw this in action: when you composed f(h) = 20 - 0.006h and g(t) = 1000 + 5t, the rate of the composition was -0.006 \u00d7 5 = -0.03. The rates <strong>multiplied</strong>. That's the chain rule for linear functions.</p><p>If you can decompose $$(3x+1)^5$$ into outer = $$u^5$$ and inner = $$3x+1$$, you can do the chain rule on it the moment you know that the derivative of $$u^5$$ is $$5u^4$$ and the derivative of $$3x+1$$ is $$3$$.</p><p><strong>Surprise connection:</strong> Every time a neural network is trained, the algorithm called <em>backpropagation</em> applies the chain rule millions of times across composed layers of functions. The skill you just practiced \u2014 \"what's the inner machine, what's the outer machine\" \u2014 is literally the same skill that trains GPT.</p><p>Next lesson: <strong>Rates of Change</strong>. You're driving a car. The speedometer reads 60 mph at this very instant. What does that number actually mean, when \"this very instant\" has zero duration?</p>"
     }
   ]
 }

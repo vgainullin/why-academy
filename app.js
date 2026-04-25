@@ -997,6 +997,8 @@
       div.appendChild(renderFunctionMachineSimulation(block));
     } else if (block.simulation_config && block.simulation_config.type === 'globe_tossing') {
       div.appendChild(renderGlobeTossingSimulation(block));
+    } else if (block.simulation_config && block.simulation_config.type === 'track_simulation') {
+      div.appendChild(renderTrackSimulation(block));
     } else if (block.simulation_config) {
       const sim = document.createElement('div');
       sim.className = 'mt-12';
@@ -1863,6 +1865,75 @@
     });
     div.appendChild(doneBtn);
     return div;
+  }
+
+  // ── Track Simulation (canvas-physics) ──
+  function renderTrackSimulation(block) {
+    const cfg = block.simulation_config || {};
+    const root = document.createElement('div');
+    root.className = 'track-simulation mt-12';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 400;
+    canvas.style.cssText = 'display:block;max-width:100%;height:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:12px;background:#fafafa;cursor:crosshair;';
+    root.appendChild(canvas);
+
+    const sim = createTrackSimulation(canvas, {
+      gravity: cfg.gravity || 500,
+      friction: cfg.friction || 0.3,
+      ballRadius: cfg.ball_radius || 10,
+      showSpeed: cfg.show_speed !== false,
+      showTangent: cfg.show_tangent || false,
+      onUpdate: function(state) {
+        blockState[block.id] = blockState[block.id] || {};
+        blockState[block.id].speed = state.speed;
+        blockState[block.id].slopeAngle = state.slopeAngle;
+        blockState[block.id].position = state.position;
+      }
+    });
+
+    // Controls
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:12px 0;';
+
+    const drawBtn = document.createElement('button');
+    drawBtn.className = 'btn btn-secondary';
+    drawBtn.textContent = 'Draw';
+    drawBtn.addEventListener('click', () => {
+      sim.reset();
+      canvas.style.cursor = 'crosshair';
+      drawBtn.classList.add('active');
+      rollBtn.classList.remove('active');
+    });
+
+    const rollBtn = document.createElement('button');
+    rollBtn.className = 'btn btn-primary';
+    rollBtn.textContent = 'Roll';
+    rollBtn.addEventListener('click', () => {
+      if (!sim.hasTrack()) return;
+      sim.setMode('simulate');
+      canvas.style.cursor = 'default';
+      rollBtn.classList.add('active');
+      drawBtn.classList.remove('active');
+    });
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn btn-secondary';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', () => {
+      sim.reset();
+      canvas.style.cursor = 'crosshair';
+      drawBtn.classList.add('active');
+      rollBtn.classList.remove('active');
+    });
+
+    controls.appendChild(drawBtn);
+    controls.appendChild(rollBtn);
+    controls.appendChild(resetBtn);
+    root.appendChild(controls);
+
+    return root;
   }
 
   // ── Globe Tossing Simulation ──

@@ -289,13 +289,7 @@
   const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODEL_PRESETS[0].id;
 
   function handwriteBackend() {
-    const stored = localStorage.getItem('handwriteBackend');
-    if (stored) return stored;
-    // No explicit choice yet: LM Studio is the dev default on localhost,
-    // OpenRouter is the default everywhere else (production / GitHub Pages).
-    const host = window.location.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-    return isLocal ? 'lmstudio' : 'openrouter';
+    return localStorage.getItem('handwriteBackend') || 'openrouter';
   }
   function lmstudioEndpoint() {
     return localStorage.getItem('handwriteEndpoint') || DEFAULT_LMSTUDIO_ENDPOINT;
@@ -303,8 +297,37 @@
   function lmstudioModel() {
     return localStorage.getItem('handwriteModel') || DEFAULT_LMSTUDIO_MODEL;
   }
+  // Obfuscate the API key in localStorage so it's not plaintext in DevTools.
+  // This is NOT real encryption — the obfuscation key is in the source — but
+  // it prevents casual exposure when someone browses localStorage.
+  const _OBF_SALT = 'why-academy-obf';
+  function _obfuscate(plain) {
+    const out = [];
+    for (let i = 0; i < plain.length; i++)
+      out.push(plain.charCodeAt(i) ^ _OBF_SALT.charCodeAt(i % _OBF_SALT.length));
+    return btoa(String.fromCharCode(...out));
+  }
+  function _deobfuscate(encoded) {
+    const raw = atob(encoded);
+    const out = [];
+    for (let i = 0; i < raw.length; i++)
+      out.push(raw.charCodeAt(i) ^ _OBF_SALT.charCodeAt(i % _OBF_SALT.length));
+    return String.fromCharCode(...out);
+  }
   function openrouterApiKey() {
-    return localStorage.getItem('openrouterApiKey') || '';
+    const stored = localStorage.getItem('openrouterApiKey') || '';
+    if (!stored) return '';
+    // Migrate plaintext keys (start with sk-or-) to obfuscated form
+    if (stored.startsWith('sk-or-')) {
+      localStorage.setItem('openrouterApiKey', _obfuscate(stored));
+      return stored;
+    }
+    try { return _deobfuscate(stored); }
+    catch { return ''; }
+  }
+  function setOpenrouterApiKey(key) {
+    if (key) localStorage.setItem('openrouterApiKey', _obfuscate(key));
+    else localStorage.removeItem('openrouterApiKey');
   }
   function openrouterModel() {
     return localStorage.getItem('openrouterModel') || DEFAULT_OPENROUTER_MODEL;
@@ -355,7 +378,10 @@
       'NO dollar signs ($, $$). NO \\[ \\] or \\( \\) delimiters. ' +
       'NO \\begin{aligned} or other environments. ' +
       'NO prose. NO code fences. NO explanation. ' +
-      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc.' +
+      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc. ' +
+      'IMPORTANT: If the handwriting is unreadable, too messy to parse, or the image is blank/empty, ' +
+      'output exactly the word UNREADABLE on a single line. Do NOT guess or hallucinate equations. ' +
+      'Only transcribe what you can clearly see.' +
       varsLine
     );
   }
@@ -363,6 +389,8 @@
   function parseMultiLineLatex(raw) {
     if (!raw) return [];
     let s = raw.trim();
+    // Vision model says it can't read the handwriting
+    if (/^\s*UNREADABLE\s*$/i.test(s)) return [];
     // Strip code fences
     s = s.replace(/^```(?:latex|tex)?\s*/i, '').replace(/\s*```$/, '');
     // Strip aligned wrapper if model added one despite the prompt
@@ -372,7 +400,7 @@
     const parts = s.split(/\r?\n|\\\\/);
     return parts
       .map(p => cleanLatex(p))
-      .filter(p => p.length > 0);
+      .filter(p => p.length > 0 && !/^\s*UNREADABLE\s*$/i.test(p));
   }
 
   // Shared backend caller for any vision-LM transcription request. Handles the
@@ -619,8 +647,7 @@
       else localStorage.removeItem('handwriteModel');
 
       const orKey = orKeyEl.value.trim();
-      if (orKey) localStorage.setItem('openrouterApiKey', orKey);
-      else localStorage.removeItem('openrouterApiKey');
+      setOpenrouterApiKey(orKey);
 
       // Resolve model: if dropdown is on "Custom…" use the text field, else
       // use the dropdown value directly.
@@ -968,6 +995,8 @@
       div.appendChild(renderPhysicalFunctionMachineSimulation(block));
     } else if (block.simulation_config && block.simulation_config.type === 'function_machine') {
       div.appendChild(renderFunctionMachineSimulation(block));
+    } else if (block.simulation_config && block.simulation_config.type === 'globe_tossing') {
+      div.appendChild(renderGlobeTossingSimulation(block));
     } else if (block.simulation_config) {
       const sim = document.createElement('div');
       sim.className = 'mt-12';
@@ -1836,6 +1865,349 @@
     return div;
   }
 
+  // ── Globe Tossing Simulation ──
+  function renderGlobeTossingSimulation(block) {
+    const cfg = block.simulation_config || {};
+    const hasPreset = !!cfg.preset;
+    const hasPriorControls = !!(cfg.controls && cfg.controls.prior_controls);
+    const hasTossButton = !hasPreset && cfg.controls && cfg.controls.toss_button;
+    const tossOptions = (cfg.controls && cfg.controls.tosses_per_click) || [1];
+    const gridPoints = (cfg.belief_curve && cfg.belief_curve.grid_points) || 1000;
+
+    // ── State ──
+    const st = {
+      tosses: 0, water: 0, land: 0,
+      dots: [],
+      trueWaterFraction: 0.7,
+      priorAlpha: 1, priorBeta: 1
+    };
+    blockState[block.id] = blockState[block.id] || {};
+    Object.assign(blockState[block.id], st);
+
+    // ── Math ──
+    function computePosterior(alpha, beta, k, n) {
+      const grid = new Float64Array(gridPoints);
+      const a = alpha + k - 1;
+      const b = beta + (n - k) - 1;
+      let maxLog = -Infinity;
+      for (let i = 1; i < gridPoints - 1; i++) {
+        const p = i / (gridPoints - 1);
+        const logVal = a * Math.log(p) + b * Math.log(1 - p);
+        grid[i] = logVal;
+        if (logVal > maxLog) maxLog = logVal;
+      }
+      grid[0] = 0; grid[gridPoints - 1] = 0;
+      let sum = 0;
+      for (let i = 1; i < gridPoints - 1; i++) {
+        grid[i] = Math.exp(grid[i] - maxLog);
+        sum += grid[i];
+      }
+      const dp = 1 / (gridPoints - 1);
+      const norm = sum * dp;
+      if (norm > 0) for (let i = 0; i < gridPoints; i++) grid[i] /= norm;
+      return grid;
+    }
+
+    function computeInterval89(posterior) {
+      const dp = 1 / (gridPoints - 1);
+      let cumSum = 0;
+      let lo = 0, hi = 1;
+      for (let i = 0; i < gridPoints; i++) {
+        cumSum += posterior[i] * dp;
+        if (lo === 0 && cumSum >= 0.055) lo = i / (gridPoints - 1);
+        if (cumSum >= 0.945) { hi = i / (gridPoints - 1); break; }
+      }
+      return { lo, hi, width: hi - lo };
+    }
+
+    // ── DOM ──
+    const root = document.createElement('div');
+    root.className = 'globe-tossing mt-12';
+
+    // Planet canvas
+    const planetW = 400, planetH = 400;
+    const planetCanvas = document.createElement('canvas');
+    planetCanvas.width = planetW; planetCanvas.height = planetH;
+    planetCanvas.style.cssText = 'display:block;max-width:100%;height:auto;margin:0 auto;border-radius:12px;';
+    const pctx = planetCanvas.getContext('2d');
+    root.appendChild(planetCanvas);
+
+    // Controls row
+    const controlsRow = document.createElement('div');
+    controlsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center;align-items:center;margin:16px 0;';
+
+    if (hasTossButton) {
+      tossOptions.forEach(count => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.textContent = 'Toss ' + count;
+        btn.addEventListener('click', () => performToss(count));
+        controlsRow.appendChild(btn);
+      });
+    }
+
+    // Prior sliders (B1-B2)
+    let centerSlider, strengthSlider, centerVal, strengthVal;
+    if (hasPriorControls) {
+      const pc = cfg.controls.prior_controls;
+
+      const centerGroup = document.createElement('div');
+      centerGroup.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;';
+      const centerLabel = document.createElement('label');
+      centerLabel.style.cssText = 'font-size:0.78rem;text-transform:uppercase;color:#475569;font-weight:700;';
+      centerLabel.textContent = pc.starting_center.label;
+      centerSlider = document.createElement('input');
+      centerSlider.type = 'range'; centerSlider.min = '0.01'; centerSlider.max = '0.99';
+      centerSlider.step = '0.01'; centerSlider.value = String(pc.starting_center.default);
+      centerSlider.style.cssText = 'width:120px;accent-color:#6366f1;';
+      centerVal = document.createElement('span');
+      centerVal.style.cssText = 'font-size:0.85rem;font-weight:600;color:#1e293b;';
+      centerVal.textContent = pc.starting_center.default;
+      centerGroup.appendChild(centerLabel);
+      centerGroup.appendChild(centerSlider);
+      centerGroup.appendChild(centerVal);
+      controlsRow.appendChild(centerGroup);
+
+      const strGroup = document.createElement('div');
+      strGroup.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:2px;';
+      const strLabel = document.createElement('label');
+      strLabel.style.cssText = 'font-size:0.78rem;text-transform:uppercase;color:#475569;font-weight:700;';
+      strLabel.textContent = pc.starting_strength.label;
+      strengthSlider = document.createElement('input');
+      strengthSlider.type = 'range'; strengthSlider.min = String(pc.starting_strength.range[0]);
+      strengthSlider.max = String(pc.starting_strength.range[1]);
+      strengthSlider.step = '1'; strengthSlider.value = String(pc.starting_strength.default);
+      strengthSlider.style.cssText = 'width:120px;accent-color:#6366f1;';
+      strengthVal = document.createElement('span');
+      strengthVal.style.cssText = 'font-size:0.85rem;font-weight:600;color:#1e293b;';
+      strengthVal.textContent = pc.starting_strength.default;
+      strGroup.appendChild(strLabel);
+      strGroup.appendChild(strengthSlider);
+      strGroup.appendChild(strengthVal);
+      controlsRow.appendChild(strGroup);
+
+      function onPriorChange() {
+        const c = parseFloat(centerSlider.value);
+        const s = parseFloat(strengthSlider.value);
+        centerVal.textContent = c.toFixed(2);
+        strengthVal.textContent = s;
+        const bs = blockState[block.id];
+        bs.priorAlpha = Math.max(0.01, c * s);
+        bs.priorBeta = Math.max(0.01, (1 - c) * s);
+        bs.tosses = 0; bs.water = 0; bs.land = 0; bs.dots = [];
+        redraw();
+      }
+      centerSlider.addEventListener('input', onPriorChange);
+      strengthSlider.addEventListener('input', onPriorChange);
+    }
+
+    root.appendChild(controlsRow);
+
+    // Belief curve canvas
+    const curveW = 600, curveH = 220;
+    const curveCanvas = document.createElement('canvas');
+    curveCanvas.width = curveW; curveCanvas.height = curveH;
+    curveCanvas.style.cssText = 'display:block;max-width:100%;height:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;background:#fafafa;';
+    const cctx = curveCanvas.getContext('2d');
+    root.appendChild(curveCanvas);
+
+    // Stats row
+    const statsRow = document.createElement('div');
+    statsRow.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px;';
+    function makeStat(label, color) {
+      const tile = document.createElement('div');
+      tile.style.cssText = 'border:1px solid #cbd5e1;border-radius:6px;padding:8px 10px;background:#fff;text-align:center;';
+      const k = document.createElement('div');
+      k.style.cssText = 'font-size:0.75rem;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;';
+      k.textContent = label;
+      const v = document.createElement('div');
+      v.style.cssText = 'font-size:1.1rem;font-weight:700;color:' + (color || '#0f172a') + ';';
+      v.textContent = '0';
+      tile.appendChild(k); tile.appendChild(v);
+      return { tile, v };
+    }
+    const statTosses = makeStat('Tosses');
+    const statWater = makeStat('Water', '#2563eb');
+    const statLand = makeStat('Land', '#92400e');
+    const statWidth = makeStat('89% Width', '#6366f1');
+    [statTosses, statWater, statLand, statWidth].forEach(s => statsRow.appendChild(s.tile));
+    root.appendChild(statsRow);
+
+    // ── Planet drawing ──
+    const planetCX = planetW / 2, planetCY = planetH / 2, planetR = 150;
+
+    function drawPlanet() {
+      pctx.clearRect(0, 0, planetW, planetH);
+      // Space background
+      pctx.fillStyle = '#0f172a';
+      pctx.fillRect(0, 0, planetW, planetH);
+      // Planet
+      const grad = pctx.createRadialGradient(planetCX - 30, planetCY - 30, 10, planetCX, planetCY, planetR);
+      grad.addColorStop(0, '#94a3b8');
+      grad.addColorStop(0.7, '#64748b');
+      grad.addColorStop(1, '#334155');
+      pctx.beginPath();
+      pctx.arc(planetCX, planetCY, planetR, 0, Math.PI * 2);
+      pctx.fillStyle = grad;
+      pctx.fill();
+      // Dots
+      const bs = blockState[block.id];
+      const dotR = Math.max(1.5, 4 - Math.log10(Math.max(1, bs.dots.length)) * 0.8);
+      bs.dots.forEach(d => {
+        const x = planetCX + d.dx;
+        const y = planetCY + d.dy;
+        pctx.beginPath();
+        pctx.arc(x, y, dotR, 0, Math.PI * 2);
+        pctx.fillStyle = d.isWater ? '#3b82f6' : '#a16207';
+        pctx.fill();
+      });
+      // Atmosphere rim
+      pctx.beginPath();
+      pctx.arc(planetCX, planetCY, planetR + 2, 0, Math.PI * 2);
+      pctx.strokeStyle = 'rgba(148,163,184,0.3)';
+      pctx.lineWidth = 4;
+      pctx.stroke();
+    }
+
+    // ── Curve drawing ──
+    const plotL = 55, plotR = curveW - 20, plotT = 15, plotB = curveH - 35;
+    const plotW = plotR - plotL, plotH = plotB - plotT;
+
+    function drawCurve(posterior, interval) {
+      cctx.clearRect(0, 0, curveW, curveH);
+      cctx.fillStyle = '#fafafa';
+      cctx.fillRect(0, 0, curveW, curveH);
+
+      // Find max for scaling
+      let maxVal = 0;
+      for (let i = 0; i < gridPoints; i++) if (posterior[i] > maxVal) maxVal = posterior[i];
+      if (maxVal === 0) maxVal = 1;
+
+      // Shaded 89% interval
+      const iLoX = plotL + interval.lo * plotW;
+      const iHiX = plotL + interval.hi * plotW;
+      cctx.beginPath();
+      cctx.moveTo(iLoX, plotB);
+      for (let px = Math.floor(iLoX); px <= Math.ceil(iHiX); px++) {
+        const p = (px - plotL) / plotW;
+        const idx = Math.min(gridPoints - 1, Math.max(0, Math.round(p * (gridPoints - 1))));
+        const y = plotB - (posterior[idx] / maxVal) * plotH;
+        cctx.lineTo(px, y);
+      }
+      cctx.lineTo(iHiX, plotB);
+      cctx.closePath();
+      cctx.fillStyle = 'rgba(99,102,241,0.18)';
+      cctx.fill();
+
+      // Curve line
+      cctx.beginPath();
+      for (let i = 0; i < gridPoints; i++) {
+        const x = plotL + (i / (gridPoints - 1)) * plotW;
+        const y = plotB - (posterior[i] / maxVal) * plotH;
+        if (i === 0) cctx.moveTo(x, y); else cctx.lineTo(x, y);
+      }
+      cctx.strokeStyle = '#4338ca';
+      cctx.lineWidth = 2;
+      cctx.stroke();
+
+      // Axes
+      cctx.strokeStyle = '#94a3b8';
+      cctx.lineWidth = 1;
+      cctx.beginPath();
+      cctx.moveTo(plotL, plotT); cctx.lineTo(plotL, plotB); cctx.lineTo(plotR, plotB);
+      cctx.stroke();
+
+      // X ticks
+      cctx.fillStyle = '#64748b';
+      cctx.font = '11px system-ui, sans-serif';
+      cctx.textAlign = 'center';
+      for (let v = 0; v <= 1; v += 0.2) {
+        const x = plotL + v * plotW;
+        cctx.beginPath(); cctx.moveTo(x, plotB); cctx.lineTo(x, plotB + 5); cctx.stroke();
+        cctx.fillText(v.toFixed(1), x, plotB + 17);
+      }
+      cctx.textAlign = 'center';
+      cctx.fillText('Water fraction p', plotL + plotW / 2, curveH - 2);
+
+      // Y label
+      cctx.save();
+      cctx.translate(12, plotT + plotH / 2);
+      cctx.rotate(-Math.PI / 2);
+      cctx.textAlign = 'center';
+      cctx.fillText('Belief density', 0, 0);
+      cctx.restore();
+
+      // Width annotation
+      if (interval.width > 0 && interval.width < 1) {
+        const bracketY = plotT + plotH * 0.15;
+        cctx.strokeStyle = '#6366f1';
+        cctx.lineWidth = 1.5;
+        cctx.beginPath();
+        cctx.moveTo(iLoX, bracketY - 4); cctx.lineTo(iLoX, bracketY);
+        cctx.lineTo(iHiX, bracketY);
+        cctx.lineTo(iHiX, bracketY - 4);
+        cctx.stroke();
+        cctx.fillStyle = '#6366f1';
+        cctx.font = 'bold 12px system-ui, sans-serif';
+        cctx.textAlign = 'center';
+        cctx.fillText('Width: ' + interval.width.toFixed(3), (iLoX + iHiX) / 2, bracketY - 8);
+      }
+    }
+
+    // ── Toss logic ──
+    function performToss(count) {
+      const bs = blockState[block.id];
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * 2 * Math.PI;
+        const r = Math.sqrt(Math.random()) * planetR;
+        const isWater = Math.random() < bs.trueWaterFraction;
+        bs.dots.push({ dx: Math.cos(angle) * r, dy: Math.sin(angle) * r, isWater });
+        bs.tosses++;
+        if (isWater) bs.water++; else bs.land++;
+      }
+      redraw();
+    }
+
+    // ── Redraw ──
+    function redraw() {
+      const bs = blockState[block.id];
+      const posterior = computePosterior(bs.priorAlpha, bs.priorBeta, bs.water, bs.tosses);
+      const interval = bs.tosses > 0 ? computeInterval89(posterior) : { lo: 0, hi: 1, width: 1 };
+
+      drawPlanet();
+      drawCurve(posterior, interval);
+
+      statTosses.v.textContent = bs.tosses;
+      statWater.v.textContent = bs.water;
+      statLand.v.textContent = bs.land;
+      statWidth.v.textContent = bs.tosses > 0 ? interval.width.toFixed(3) : '--';
+
+      bs.belief_curve_width = interval.width;
+      bs.exploration_data = {
+        tosses: bs.tosses, water: bs.water, land: bs.land,
+        belief_curve_width: interval.width
+      };
+    }
+
+    // ── Preset init (B1-B3) ──
+    if (hasPreset) {
+      const bs = blockState[block.id];
+      bs.tosses = cfg.preset.tosses;
+      bs.water = cfg.preset.water;
+      bs.land = cfg.preset.land;
+      if (cfg.preset.prior === 'uniform') { bs.priorAlpha = 1; bs.priorBeta = 1; }
+      for (let i = 0; i < bs.tosses; i++) {
+        const angle = Math.random() * 2 * Math.PI;
+        const r = Math.sqrt(Math.random()) * planetR;
+        const isWater = i < bs.water;
+        bs.dots.push({ dx: Math.cos(angle) * r, dy: Math.sin(angle) * r, isWater });
+      }
+    }
+
+    setTimeout(redraw, 10);
+    return root;
+  }
+
   // ── Spring Animation ──
   function initSpringAnimation(container) {
     const canvas = document.createElement('canvas');
@@ -2637,7 +3009,7 @@ plt.close('all')
 
       let text = block.template;
       for (const [key, val] of Object.entries(params)) {
-        text = text.replace('{' + key + '}', val);
+        text = text.replaceAll('{' + key + '}', val);
       }
       problemDiv.textContent = text;
       mantissa.value = '';

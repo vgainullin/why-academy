@@ -1,0 +1,342 @@
+{
+  "lesson_id": "B1",
+  "title": "The Unknown Planet",
+  "description": "Discover Bayesian inference through exploration of an unknown planet. Learn that beliefs sharpen with data following a 1/√N law, derive Bayes' theorem from conditional probability, and verify your derivations numerically.",
+  "prerequisites": [],
+  "blocks": [
+    {
+      "id": "B1-B1",
+      "type": "explore",
+      "title": "The Unknown Planet",
+      "content_html": "<p>A planet floats in the center of the screen, shrouded in clouds. You can only learn about it by tossing a ball: where it lands, a dot appears. Blue = water, Brown = land. Each toss reveals one pixel of truth.</p><p>What will you discover about how beliefs sharpen with data?</p>",
+      "simulation_config": {
+        "type": "globe_tossing",
+        "planet_visualization": true,
+        "controls": {
+          "toss_button": true,
+          "tosses_per_click": [1, 10, 100],
+          "reveal_true_fraction": false
+        },
+        "belief_curve": {
+          "enabled": true,
+          "grid_points": 1000,
+          "prior_type": "uniform",
+          "interval_display": "89%",
+          "show_width": true
+        },
+        "data_collection": ["tosses", "water", "land", "belief_curve_width"]
+      },
+      "instructions": "1. Click 'Toss' to reveal dots on the planet.<br>2. Watch the belief curve update after each toss.<br>3. Observe how the curve changes as you collect more data.<br>4. Try different toss counts (1, 10, 100) to explore faster.",
+      "canvas_prompt": "Write on the canvas: what happens to the belief curve as you toss more? What happens to its height and width? Write at least two observations."
+    },
+    {
+      "id": "B1-B2",
+      "type": "explore",
+      "title": "The Power of the Prior",
+      "content_html": "<p>Now you can control your starting belief. Set it far from the truth and watch what happens.</p>",
+      "simulation_config": {
+        "type": "globe_tossing",
+        "planet_visualization": true,
+        "controls": {
+          "toss_button": true,
+          "tosses_per_click": [1, 10, 100],
+          "reveal_true_fraction": false,
+          "prior_controls": {
+            "starting_center": {
+              "label": "Starting belief center",
+              "range": [0, 1],
+              "default": 0.5
+            },
+            "starting_strength": {
+              "label": "Starting belief strength",
+              "range": [1, 50],
+              "default": 2
+            }
+          }
+        },
+        "belief_curve": {
+          "enabled": true,
+          "grid_points": 1000,
+          "interval_display": "89%",
+          "show_width": true
+        }
+      },
+      "instructions": "1. Set your starting belief far from what you think is true.<br>2. Toss 10 times.<br>3. Toss 100 more times.<br>4. Watch when the starting belief stops mattering.",
+      "canvas_prompt": "Write on the canvas: when does the starting belief stop mattering? At what point does the data overwhelm your initial assumption?"
+    },
+    {
+      "id": "B1-P1",
+      "type": "predict",
+      "title": "Predict the Width",
+      "prompt": "With a flat starting belief and 9 tosses (6 water, 3 land), the belief curve's 89% interval has width ≈ 0.35.\\n\\nNow imagine 9× more data: 81 tosses with the same 2/3 water rate (54 water, 27 land). Predict the new width of the 89% interval.",
+      "components": {
+        "direction": {
+          "required": true,
+          "options": [
+            "narrower",
+            "wider",
+            "same"
+          ]
+        },
+        "magnitude": {
+          "required": true,
+          "format": "scientific_notation",
+          "placeholder_mantissa": "1.0",
+          "placeholder_exponent": "-1",
+          "units": "width"
+        },
+        "confidence": {
+          "required": true,
+          "options": [
+            "just_guessing",
+            "rough_idea",
+            "pretty_sure"
+          ]
+        }
+      },
+      "locked": true,
+      "error_patterns": [
+        {
+          "magnitude_range": [0.03, 0.05],
+          "diagnosis": "Assumed linear relationship: 0.35/9 ≈ 0.039",
+          "misconception": "linear_assumption",
+          "feedback": "Good — you knew more data means a narrower belief. But when N went from 9 to 27 (3× more data), did the width shrink to 1/3? The width shrinks by 1/√N, not 1/N.",
+          "severity": "mild"
+        },
+        {
+          "magnitude_range": [0.005, 0.015],
+          "diagnosis": "May have divided by 81 instead of √81",
+          "misconception": "excessive_shrinkage",
+          "feedback": "The actual factor for 9× more data is √9 = 3, not 9 or 81. Width shrinks much slower than you predicted.",
+          "severity": "moderate"
+        },
+        {
+          "magnitude_range": [0.30, 0.38],
+          "diagnosis": "Predicted little or no change",
+          "misconception": "width_insensitivity",
+          "feedback": "More data always sharpens belief. Go back to the simulation and observe.",
+          "severity": "significant"
+        },
+        {
+          "magnitude_range": [0.08, 0.15],
+          "diagnosis": "Approximately correct",
+          "misconception": null,
+          "feedback": "Strong intuition! The answer is ≈0.12. Width ∝ 1/√N.",
+          "severity": "none"
+        }
+      ]
+    },
+    {
+      "id": "B1-B3",
+      "type": "explore",
+      "title": "Test Your Prediction",
+      "content_html": "<p>Now see what actually happens with 81 tosses.</p>",
+      "simulation_config": {
+        "type": "globe_tossing",
+        "preset": {
+          "tosses": 81,
+          "water": 54,
+          "land": 27,
+          "prior": "uniform"
+        },
+        "belief_curve": {
+          "enabled": true,
+          "highlight_interval": "89%",
+          "show_width": true
+        }
+      },
+      "instructions": "Click 'Toss' to run 81 tosses with 54 water. The actual width is 0.12.",
+      "post_action": "display_prediction_gap"
+    },
+    {
+      "id": "B1-B4",
+      "type": "discover",
+      "title": "Find the Pattern",
+      "prompt": "Collect data at N = 3, 9, 27, 81, 243 (always with 2/3 water rate). Record the 89% interval width at each size. Can you spot the pattern?",
+      "data_table": {
+        "columns": ["N tosses", "k water", "Belief center", "89% width", "Width × √N"],
+        "preset_values": [
+          {"N": 3, "k": 2, "center": 0.60, "width": 0.58},
+          {"N": 9, "k": 6, "center": 0.636, "width": 0.35},
+          {"N": 27, "k": 18, "center": 0.655, "width": 0.19},
+          {"N": 81, "k": 54, "center": 0.663, "width": 0.12},
+          {"N": 243, "k": 162, "center": 0.665, "width": 0.063}
+        ],
+        "reveal_column": "Width × √N"
+      },
+      "canvas_prompt": "Each time N triples, the width changes by a factor. What factor? Write what you notice.",
+      "discovery_text": "Width × √N is nearly constant. Width ≈ C/√N, where C ≈ 1.0. 9× more data doesn't make your belief 9× sharper — it makes it √9 = 3× sharper."
+    },
+    {
+      "id": "B1-B5",
+      "type": "read",
+      "title": "New Notation",
+      "content_html": "<p><strong>New notation:</strong> We write P(A|B) to mean \"the probability of A given that B is true.\" The vertical bar | means \"given.\"</p><p>We'll use these terms:</p><ul><li><strong>p</strong> — the fraction of the planet that's water (what we're trying to learn)</li><li><strong>data</strong> — the sequence of tosses we've observed</li><li><strong>P(p | data)</strong> — our belief about p after seeing the data (the belief curve)</li><li><strong>P(data | p)</strong> — the probability of getting this data if we knew p</li></ul>"
+    },
+    {
+      "id": "B1-D1",
+      "type": "handwrite",
+      "title": "Derive Bayes' Theorem (Part A)",
+      "prompt": "Derive Bayes' theorem from the definition of conditional probability. Write each step on the canvas.",
+      "starting_equation": "P(p \\mid \\text{data}) = \\frac{P(p \\cap \\text{data})}{P(\\text{data})}",
+      "target_equation": "P(p \\mid \\text{data}) \\propto P(\\text{data} \\mid p) \\cdot P(p)",
+      "steps": [
+        {
+          "id": "step1",
+          "instruction": "Write the definition of conditional probability",
+          "result_equation": "P(p \\mid \\text{data}) = \\frac{P(p \\cap \\text{data})}{P(\\text{data})}",
+          "explanation": "This is our starting point — the definition of conditional probability.",
+          "sympy_check": "axiom"
+        },
+        {
+          "id": "step2",
+          "instruction": "Rewrite P(p ∩ data) using P(data | p)",
+          "result_equation": "P(p \\cap \\text{data}) = P(\\text{data} \\mid p) \\cdot P(p)",
+          "explanation": "Apply the same definition in the other direction and rearrange.",
+          "sympy_check": "Eq(P_joint, P_data_given_p * P_p)"
+        },
+        {
+          "id": "step3",
+          "instruction": "Substitute Step 2 into Step 1",
+          "result_equation": "P(p \\mid \\text{data}) = \\frac{P(\\text{data} \\mid p) \\cdot P(p)}{P(\\text{data})}",
+          "explanation": "Replace P(p ∩ data) with the expression from Step 2.",
+          "sympy_check": "Eq(P_p_given_data, P_data_given_p * P_p / P_data)"
+        },
+        {
+          "id": "step4",
+          "instruction": "Write the proportional form",
+          "result_equation": "P(p \\mid \\text{data}) \\propto P(\\text{data} \\mid p) \\cdot P(p)",
+          "explanation": "P(data) is just a normalizing constant. Posterior ∝ likelihood × prior.",
+          "sympy_check": "naming"
+        }
+      ],
+      "hints": [
+        "What does P(A|B) equal? You just learned this definition.",
+        "P(data | p) = P(data ∩ p) / P(p). Rearrange to get P(data ∩ p).",
+        "Substitute your expression for P(p ∩ data) into Step 1.",
+        "P(data) is just a constant that makes probabilities sum to 1."
+      ],
+      "sympy_verification": {
+        "expression": "P_data_given_p * P_p / P_data",
+        "target": "posterior"
+      }
+    },
+    {
+      "id": "B1-B6",
+      "type": "read",
+      "title": "New Notation: Log-Likelihood",
+      "content_html": "<p><strong>New notation:</strong> log means the natural logarithm (ln). We write ℓ(p) = log P(data|p) for the <strong>log-likelihood</strong> — the logarithm of the likelihood function. Taking logs turns products into sums, which makes calculus easier.</p>"
+    },
+    {
+      "id": "B1-D2",
+      "type": "handwrite",
+      "title": "Derive the Width Formula (Part B)",
+      "prompt": "Derive why the posterior width shrinks as 1/√N from the curvature of the log-likelihood.",
+      "starting_equation": "P(\\text{data} \\mid p) = p^k (1-p)^{n-k}",
+      "target_equation": "\\text{SD} = \\sqrt{\\frac{\\hat{p}(1-\\hat{p})}{n}}",
+      "steps": [
+        {
+          "id": "step1",
+          "instruction": "Take the log of the likelihood",
+          "result_equation": "\\ell(p) = k \\log p + (n-k) \\log(1-p)",
+          "explanation": "log(a × b) = log a + log b. log(a^n) = n log a.",
+          "sympy_check": "simplify(log(p**k * (1-p)**(n-k)))"
+        },
+        {
+          "id": "step2",
+          "instruction": "Differentiate and find the peak",
+          "result_equation": "\\hat{p} = \\frac{k}{n}",
+          "explanation": "dℓ/dp = k/p − (n−k)/(1−p) = 0. Solve for p.",
+          "sympy_check": "solve(k/p - (n-k)/(1-p), p)"
+        },
+        {
+          "id": "step3",
+          "instruction": "Find the second derivative at the peak",
+          "result_equation": "\\frac{d^2\\ell}{dp^2}\\bigg|_{\\hat{p}} = -\\frac{n}{\\hat{p}(1-\\hat{p})}",
+          "explanation": "d²ℓ/dp² = −k/p² − (n−k)/(1−p)². Substitute p̂ = k/n.",
+          "sympy_check": "-n/(p_hat*(1-p_hat))"
+        },
+        {
+          "id": "step4",
+          "instruction": "Read off the width from the curvature",
+          "result_equation": "\\text{SD} = \\sqrt{\\frac{\\hat{p}(1-\\hat{p})}{n}} \\propto \\frac{1}{\\sqrt{n}}",
+          "explanation": "Variance = 1/curvature. SD = √variance ∝ 1/√n.",
+          "sympy_check": "sqrt(p_hat*(1-p_hat)/n)"
+        }
+      ],
+      "hints": [
+        "Use log(a × b) = log a + log b and log(a^n) = n log a.",
+        "d/dp log(p) = 1/p. d/dp log(1−p) = −1/(1−p). Set sum to zero.",
+        "Differentiate dℓ/dp one more time. d/dp(1/p) = −1/p².",
+        "Variance = 1/|curvature|. SD is the square root of variance."
+      ],
+      "sympy_verification": {
+        "expression": "sqrt((k/n) * (1-k/n) / n)",
+        "target": "SD"
+      }
+    },
+    {
+      "id": "B1-C1",
+      "type": "code",
+      "title": "Grid Approximation",
+      "prompt": "Verify your derivations numerically using grid approximation in pure NumPy.",
+      "starter_code": "import numpy as np\nimport matplotlib.pyplot as plt\n\n# Define a grid of possible water fractions\np_grid = np.linspace(0, 1, 1000)\ndp = p_grid[1] - p_grid[0]\n\n# Define the prior: flat (uniform)\nprior = np.ones(1000)\n\n# Define the likelihood: 6 water in 9 tosses\nk, n = 6, 9\nlikelihood = p_grid**k * (1 - p_grid)**(n - k)\n\n# YOUR CODE: Compute posterior ∝ likelihood × prior\n# Don't forget to normalize!\nposterior = None\n\n# Plot the posterior\nplt.plot(p_grid, posterior)\nplt.xlabel('Water fraction p')\nplt.ylabel('Belief density')\n\n# TASK 1: Find the peak (MAP estimate)\np_map = None\nprint(f'Peak: {p_map:.3f}')\n\n# TASK 2: Compute the 89% interval width\ncumulative = np.cumsum(posterior * dp)\nlo = p_grid[np.searchsorted(cumulative, 0.055)]\nhi = p_grid[np.searchsorted(cumulative, 0.945)]\nwidth = hi - lo\nprint(f'89% interval width: {width:.3f}')",
+      "solution_code": "import numpy as np\nimport matplotlib.pyplot as plt\n\np_grid = np.linspace(0, 1, 1000)\ndp = p_grid[1] - p_grid[0]\n\nprior = np.ones(1000)\n\nk, n = 6, 9\nlikelihood = p_grid**k * (1 - p_grid)**(n - k)\n\nposterior = likelihood * prior\nposterior = posterior / (posterior.sum() * dp)\nposterior_integral = np.sum(posterior * dp)\n\nplt.plot(p_grid, posterior)\nplt.xlabel('Water fraction p')\nplt.ylabel('Belief density')\n\np_map = p_grid[np.argmax(posterior)]\nprint(f'Peak: {p_map:.3f}')\n\ncumulative = np.cumsum(posterior * dp)\nlo = p_grid[np.searchsorted(cumulative, 0.055)]\nhi = p_grid[np.searchsorted(cumulative, 0.945)]\nwidth = hi - lo\nprint(f'89% interval width: {width:.3f}')",
+      "checks": [
+        {
+          "variable": "posterior_integral",
+          "expected_expr": "1.0",
+          "tolerance": 0.02
+        },
+        {
+          "variable": "p_map",
+          "expected_expr": "6/9",
+          "tolerance": 0.02
+        },
+        {
+          "variable": "width",
+          "expected_expr": "0.445",
+          "tolerance": 0.05
+        }
+      ]
+    },
+    {
+      "id": "B1-R1",
+      "type": "reconcile",
+      "title": "Reconcile Your Understanding",
+      "prompt": "In your own words, write on the canvas:\\n\\n1. Why more data makes beliefs sharper\\n2. Why the sharpening follows a square root law, not linear\\n3. What role the 'starting belief' plays when you have a lot of data",
+      "required": true,
+      "min_length": 100,
+      "canvas_only": true
+    },
+    {
+      "id": "B1-B7",
+      "type": "read",
+      "title": "The Medical Test",
+      "content_html": "<p>You just learned to update beliefs about one number (water fraction) from data. Here's where this matters in real life:</p><p>A medical test for a rare disease is 99% accurate. A patient tests positive. Most doctors believe there's a 99% chance the patient has the disease. They're wrong.</p><p>Suppose 1 in 10,000 people has the disease. Out of 10,000 people:</p><ul><li>1 truly sick person tests positive (99% accuracy)</li><li>9,999 healthy people: 1% false positive rate → ~100 test positive</li><li>Total positive tests: 101. Only 1 is truly sick.</li><li><strong>P(sick | positive) = 1/101 ≈ 1%, not 99%</strong></li></ul><p>Bayes' theorem handles this automatically. Without the prior, you'd tell 100 healthy people they're dying.</p>"
+    },
+    {
+      "id": "B1-V1",
+      "type": "vary",
+      "title": "Practice: Different Data",
+      "template": "{k} water in {n} tosses. Predict the 89% interval width.",
+      "parameter_ranges": {
+        "k": [5, 40],
+        "n": [20, 60]
+      },
+      "components": {
+        "magnitude": {
+          "required": true,
+          "format": "scientific_notation"
+        }
+      },
+      "answer_formula": "3.2 * Math.sqrt((k/n) * (1 - k/n) / n)"
+    },
+    {
+      "id": "B1-CON1",
+      "type": "connect",
+      "title": "Where This Goes",
+      "content_html": "<p>You now have the fundamental tools of Bayesian inference:</p><ul><li><strong>Posterior ∝ Likelihood × Prior</strong> — Bayes' theorem</li><li><strong>Width ∝ 1/√N</strong> — uncertainty shrinks with data</li><li><strong>Grid approximation</strong> — numerical verification</li></ul><p>Next lesson: <strong>What Can You Do with a Posterior?</strong> Point estimates, intervals, predictions, and the question that connects everything: when your model says one thing and reality says another, who do you believe?</p>"
+    }
+  ]
+}

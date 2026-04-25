@@ -741,11 +741,7 @@
   const DEFAULT_OPENROUTER_MODEL = OPENROUTER_MODEL_PRESETS[0].id;
 
   function handwriteBackend() {
-    const stored = localStorage.getItem('handwriteBackend');
-    if (stored) return stored;
-    const host = window.location.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-    return isLocal ? 'lmstudio' : 'openrouter';
+    return localStorage.getItem('handwriteBackend') || 'openrouter';
   }
   function lmstudioEndpoint() {
     return localStorage.getItem('handwriteEndpoint') || DEFAULT_LMSTUDIO_ENDPOINT;
@@ -753,8 +749,33 @@
   function lmstudioModel() {
     return localStorage.getItem('handwriteModel') || DEFAULT_LMSTUDIO_MODEL;
   }
+  const _OBF_SALT = 'why-academy-obf';
+  function _obfuscate(plain) {
+    const out = [];
+    for (let i = 0; i < plain.length; i++)
+      out.push(plain.charCodeAt(i) ^ _OBF_SALT.charCodeAt(i % _OBF_SALT.length));
+    return btoa(String.fromCharCode(...out));
+  }
+  function _deobfuscate(encoded) {
+    const raw = atob(encoded);
+    const out = [];
+    for (let i = 0; i < raw.length; i++)
+      out.push(raw.charCodeAt(i) ^ _OBF_SALT.charCodeAt(i % _OBF_SALT.length));
+    return String.fromCharCode(...out);
+  }
   function openrouterApiKey() {
-    return localStorage.getItem('openrouterApiKey') || '';
+    const stored = localStorage.getItem('openrouterApiKey') || '';
+    if (!stored) return '';
+    if (stored.startsWith('sk-or-')) {
+      localStorage.setItem('openrouterApiKey', _obfuscate(stored));
+      return stored;
+    }
+    try { return _deobfuscate(stored); }
+    catch { return ''; }
+  }
+  function setOpenrouterApiKey(key) {
+    if (key) localStorage.setItem('openrouterApiKey', _obfuscate(key));
+    else localStorage.removeItem('openrouterApiKey');
   }
   function openrouterModel() {
     return localStorage.getItem('openrouterModel') || DEFAULT_OPENROUTER_MODEL;
@@ -774,7 +795,10 @@
       'NO dollar signs ($, $$). NO \\[ \\] or \\( \\) delimiters. ' +
       'NO \\begin{aligned} or other environments. ' +
       'NO prose. NO code fences. NO explanation. ' +
-      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc.' +
+      'Use standard LaTeX commands: \\frac, \\sqrt, \\ddot, \\dot, \\omega, \\alpha, \\pi, etc. ' +
+      'IMPORTANT: If the handwriting is unreadable, too messy to parse, or the image is blank/empty, ' +
+      'output exactly the word UNREADABLE on a single line. Do NOT guess or hallucinate equations. ' +
+      'Only transcribe what you can clearly see.' +
       varsLine
     );
   }
@@ -782,13 +806,15 @@
   function parseMultiLineLatex(raw) {
     if (!raw) return [];
     let s = raw.trim();
+    // Vision model says it can't read the handwriting
+    if (/^\s*UNREADABLE\s*$/i.test(s)) return [];
     s = s.replace(/^```(?:latex|tex)?\s*/i, '').replace(/\s*```$/, '');
     s = s.replace(/\\begin\{(aligned|align\*?|gathered|equation\*?)\}/g, '');
     s = s.replace(/\\end\{(aligned|align\*?|gathered|equation\*?)\}/g, '');
     const parts = s.split(/\r?\n|\\\\/);
     return parts
       .map(p => cleanLatex(p))
-      .filter(p => p.length > 0);
+      .filter(p => p.length > 0 && !/^\s*UNREADABLE\s*$/i.test(p));
   }
 
   function cleanLatex(s) {
@@ -1451,8 +1477,7 @@
       else localStorage.removeItem('handwriteModel');
 
       const orKey = orKeyEl.value.trim();
-      if (orKey) localStorage.setItem('openrouterApiKey', orKey);
-      else localStorage.removeItem('openrouterApiKey');
+      setOpenrouterApiKey(orKey);
 
       let orModel;
       if (orModelSelect.value === CUSTOM_VALUE) {

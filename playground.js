@@ -607,119 +607,15 @@
     canvas.height = 900;
     padWrap.appendChild(canvas);
 
-    const ctx = canvas.getContext('2d');
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#1f2937';
-
-    let strokes = [];
-    let active = null;
-
-    function paint() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const s of strokes) drawStroke(s);
-      if (active) drawStroke(active);
-    }
-    function drawStroke(stroke) {
-      if (stroke.points.length < 2) {
-        if (stroke.points.length === 1) {
-          const p = stroke.points[0];
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, stroke.width / 2, 0, Math.PI * 2);
-          ctx.fillStyle = '#1f2937';
-          ctx.fill();
-        }
-        return;
-      }
-      ctx.lineWidth = stroke.width;
-      ctx.beginPath();
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      for (let i = 1; i < stroke.points.length - 1; i++) {
-        const p0 = stroke.points[i];
-        const p1 = stroke.points[i + 1];
-        ctx.quadraticCurveTo(p0.x, p0.y, (p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
-      }
-      const last = stroke.points[stroke.points.length - 1];
-      ctx.lineTo(last.x, last.y);
-      ctx.stroke();
-    }
-    function pointFromEvent(e) {
-      const rect = canvas.getBoundingClientRect();
-      return {
-        x: (e.clientX - rect.left) * (canvas.width / rect.width),
-        y: (e.clientY - rect.top) * (canvas.height / rect.height),
-        pressure: e.pressure || 0.5
-      };
-    }
-
     let recognitionTimer = null;
     let lastRecognizedStrokeCount = 0;
     let busy = false;
     const RECOGNITION_DEBOUNCE_MS = 1200;
 
-    canvas.addEventListener('touchstart', e => {
-      e.preventDefault();
-      if (window.getSelection) window.getSelection().removeAllRanges();
-    }, { passive: false });
-    canvas.addEventListener('touchmove', e => {
-      e.preventDefault();
-    }, { passive: false });
-
-    let eraserMode = false;
-    let activeErasing = false;
-    let erasedSinceDown = false;
-
-    function eraseAtPoint(p) {
-      const idx = findStrokeHitByPoint(strokes, p, 12);
-      if (idx >= 0) {
-        strokes.splice(idx, 1);
-        erasedSinceDown = true;
-        paint();
-      }
-    }
-
-    canvas.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      if (window.getSelection) window.getSelection().removeAllRanges();
-      canvas.setPointerCapture(e.pointerId);
-      const p = pointFromEvent(e);
-      if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
-      if (isEraserPointerEvent(e, eraserMode)) {
-        activeErasing = true;
-        erasedSinceDown = false;
-        eraseAtPoint(p);
-        return;
-      }
-      const baseW = getStrokeWidth();
-      const w = e.pointerType === 'pen' ? baseW * (0.65 + (p.pressure || 0.5) * 0.7) : baseW;
-      active = { points: [p], width: w };
-      paint();
+    const dc = new DrawingCanvas(canvas, {
+      onStrokeChange: function () { scheduleRecognition(); },
+      onEraseEnd: function () { lastRecognizedStrokeCount = -1; }
     });
-    canvas.addEventListener('pointermove', e => {
-      if (activeErasing) {
-        eraseAtPoint(pointFromEvent(e));
-        return;
-      }
-      if (!active) return;
-      active.points.push(pointFromEvent(e));
-      paint();
-    });
-    canvas.addEventListener('pointerup', () => {
-      if (activeErasing) {
-        activeErasing = false;
-        if (erasedSinceDown) {
-          lastRecognizedStrokeCount = -1;
-          scheduleRecognition();
-        }
-        return;
-      }
-      if (!active) return;
-      strokes.push(active);
-      active = null;
-      paint();
-      scheduleRecognition();
-    });
-    paint();
 
     // Controls
     const controls = document.createElement('div');
@@ -729,19 +625,14 @@
     const undoBtn = document.createElement('button');
     undoBtn.className = 'btn btn-secondary';
     undoBtn.textContent = 'Undo';
-    undoBtn.addEventListener('click', () => {
-      strokes.pop();
-      paint();
-      scheduleRecognition();
-    });
+    undoBtn.addEventListener('click', () => dc.undo());
 
     const clearBtn = document.createElement('button');
     clearBtn.className = 'btn btn-secondary';
     clearBtn.textContent = 'Clear';
     clearBtn.addEventListener('click', () => {
-      strokes = [];
+      dc.clear();
       lastRecognizedStrokeCount = 0;
-      paint();
       recognizedLines = [];
       renderLinesPanel();
     });
@@ -774,10 +665,10 @@
     const widthSlider = makeStrokeWidthSlider();
 
     const eraserToggle = makeEraserToggle(
-      () => eraserMode,
+      () => dc.eraserMode,
       v => {
-        eraserMode = v;
-        canvas.classList.toggle('eraser-active', eraserMode);
+        dc.eraserMode = v;
+        canvas.classList.toggle('eraser-active', v);
       }
     );
 
@@ -785,8 +676,8 @@
       if (e.key !== 'e' && e.key !== 'E') return;
       const tag = (document.activeElement && document.activeElement.tagName) || '';
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      eraserMode = !eraserMode;
-      canvas.classList.toggle('eraser-active', eraserMode);
+      dc.eraserMode = !dc.eraserMode;
+      canvas.classList.toggle('eraser-active', dc.eraserMode);
       eraserToggle.sync();
     }
     document.addEventListener('keydown', onKey);
@@ -901,50 +792,17 @@
     function scheduleRecognition() {
       if (busy) return;
       if (recognitionTimer) clearTimeout(recognitionTimer);
-      if (strokes.length === 0) return;
+      if (dc.strokes.length === 0) return;
       recognitionTimer = setTimeout(runRecognition, RECOGNITION_DEBOUNCE_MS);
-    }
-
-    function rasterizeCanvas() {
-      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-      let found = false;
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-          const i = (y * canvas.width + x) * 4;
-          if (img.data[i + 3] > 0 && img.data[i] < 200) {
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-            found = true;
-          }
-        }
-      }
-      if (!found) return null;
-      const pad = 24;
-      minX = Math.max(0, minX - pad);
-      minY = Math.max(0, minY - pad);
-      maxX = Math.min(canvas.width, maxX + pad);
-      maxY = Math.min(canvas.height, maxY + pad);
-      const w = maxX - minX, h = maxY - minY;
-      const out = document.createElement('canvas');
-      out.width = w;
-      out.height = h;
-      const octx = out.getContext('2d');
-      octx.fillStyle = '#fff';
-      octx.fillRect(0, 0, w, h);
-      octx.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
-      return out.toDataURL('image/png');
     }
 
     async function runRecognition() {
       if (busy) return;
-      if (strokes.length === lastRecognizedStrokeCount) return;
-      const dataUrl = rasterizeCanvas();
+      if (dc.strokes.length === lastRecognizedStrokeCount) return;
+      const dataUrl = dc.getDataUrl(24);
       if (!dataUrl) return;
       busy = true;
-      lastRecognizedStrokeCount = strokes.length;
+      lastRecognizedStrokeCount = dc.strokes.length;
       panelStatus.textContent = 'Reading...';
       try {
         const { lines } = await transcribeMultiLine(dataUrl, eq.vars || []);

@@ -400,6 +400,8 @@
       div.appendChild(renderGlobeTossingSimulation(block));
     } else if (block.simulation_config && block.simulation_config.type === 'track_simulation') {
       div.appendChild(renderTrackSimulation(block));
+    } else if (block.simulation_config && block.simulation_config.type === 'loop_track') {
+      div.appendChild(renderLoopSimulation(block));
     } else if (block.simulation_config) {
       const sim = document.createElement('div');
       sim.className = 'mt-12';
@@ -960,6 +962,43 @@
       sciInputs.push({ key, mantissa: sci.mantissa, exponent: sci.exponent, required: !!cfg.required });
     });
 
+    // Tap-only multiple choice magnitude (no keyboard needed).
+    const choiceFields = Object.entries(components).filter(([key, cfg]) => {
+      return key.startsWith('magnitude') && cfg && cfg.format === 'multiple_choice';
+    });
+    const choiceInputs = [];
+    choiceFields.forEach(([key, cfg]) => {
+      const row = document.createElement('div');
+      row.className = 'mt-12';
+      if (cfg.label) {
+        const label = document.createElement('div');
+        label.style.cssText = 'font-weight:600;margin-bottom:8px;';
+        label.textContent = cfg.label + (cfg.units ? ' (' + cfg.units + ')' : '');
+        row.appendChild(label);
+      }
+      const cards = document.createElement('div');
+      cards.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+      const state = { value: null };
+      (cfg.options || []).forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary';
+        btn.style.cssText = 'min-width:60px;';
+        btn.textContent = String(opt);
+        btn.addEventListener('click', () => {
+          state.value = opt;
+          cards.querySelectorAll('button').forEach(b => b.classList.remove('btn-primary'));
+          cards.querySelectorAll('button').forEach(b => b.classList.add('btn-secondary'));
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-primary');
+        });
+        cards.appendChild(btn);
+      });
+      row.appendChild(cards);
+      div.appendChild(row);
+      choiceInputs.push({ key, state, required: !!cfg.required });
+    });
+
     if (components.confidence) {
       const row = document.createElement('div');
       row.className = 'mt-12';
@@ -1012,6 +1051,13 @@
         }
         predictions[field.key] = value;
       }
+      for (const field of choiceInputs) {
+        if (field.required && field.state.value == null) {
+          feedback.innerHTML = '<div class="feedback feedback-incorrect">Tap one of the options.</div>';
+          return;
+        }
+        predictions[field.key] = field.state.value;
+      }
 
       blockState[block.id].prediction = {
         direction: values.direction ? values.direction.value : null,
@@ -1026,6 +1072,9 @@
         sciInputs.forEach(field => {
           field.mantissa.disabled = true;
           field.exponent.disabled = true;
+        });
+        div.querySelectorAll('button.btn-secondary, button.btn-primary').forEach(b => {
+          if (b !== submitBtn) b.disabled = true;
         });
       }
 
@@ -1141,16 +1190,31 @@
 
       const lines = [];
       if (block.comparison_prompt) {
-        const safePrompt = block.comparison_prompt
+        let safePrompt = block.comparison_prompt
           .replaceAll('[student_prediction]', prediction ? 'submitted' : 'not submitted');
+        // Generic placeholders: [prediction.<magnitude_key>], [prediction.direction], [prediction.confidence]
+        if (prediction) {
+          const mags = prediction.magnitudes || {};
+          safePrompt = safePrompt.replace(/\[prediction\.([a-zA-Z0-9_]+)\]/g, function (_m, key) {
+            if (key === 'direction') return esc(String(prediction.direction || ''));
+            if (key === 'confidence') return esc(String(prediction.confidence || ''));
+            if (mags[key] != null) return esc(String(mags[key]));
+            return '';
+          });
+        } else {
+          safePrompt = safePrompt.replace(/\[prediction\.[a-zA-Z0-9_]+\]/g, '(no prediction)');
+        }
         lines.push('<p>' + safePrompt + '</p>');
       }
 
+      // Legacy calculus-lesson summary; only emit when those exact magnitude keys exist.
       if (prediction) {
         const mags = prediction.magnitudes || {};
-        lines.push('<p><strong>Your prediction:</strong> direction=' + esc(String(prediction.direction || 'n/a')) +
-          ', f(g(5))=' + esc(String(mags.magnitude_f_g ?? 'n/a')) +
-          ', g(f(5))=' + esc(String(mags.magnitude_g_f ?? 'n/a')) + '</p>');
+        if (mags.magnitude_f_g != null || mags.magnitude_g_f != null) {
+          lines.push('<p><strong>Your prediction:</strong> direction=' + esc(String(prediction.direction || 'n/a')) +
+            ', f(g(5))=' + esc(String(mags.magnitude_f_g ?? 'n/a')) +
+            ', g(f(5))=' + esc(String(mags.magnitude_g_f ?? 'n/a')) + '</p>');
+        }
       } else {
         lines.push('<p><strong>Prediction status:</strong> no saved prediction found.</p>');
       }
@@ -1331,6 +1395,81 @@
 
     controls.appendChild(drawBtn);
     controls.appendChild(rollBtn);
+    controls.appendChild(resetBtn);
+    root.appendChild(controls);
+
+    return root;
+  }
+
+  // ── Loop-the-loop Simulation ──
+  function renderLoopSimulation(block) {
+    const cfg = block.simulation_config || {};
+    const root = document.createElement('div');
+    root.className = 'track-simulation mt-12';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 480;
+    canvas.style.cssText = 'display:block;max-width:100%;height:auto;margin:0 auto;border:1px solid #e2e8f0;border-radius:12px;background:#fafafa;';
+    root.appendChild(canvas);
+
+    const initialH = typeof cfg.initial_height_r === 'number' ? cfg.initial_height_r
+                   : typeof cfg.fixed_height_r === 'number' ? cfg.fixed_height_r
+                   : 1.5;
+
+    const sim = window.createLoopSimulation(canvas, {
+      gravity: cfg.gravity || 600,
+      onResult: function (res) {
+        blockState[block.id] = blockState[block.id] || {};
+        blockState[block.id].last_result = res;
+      }
+    });
+    sim.setHeight(initialH);
+
+    const sliderRow = document.createElement('div');
+    sliderRow.style.cssText = 'display:flex;align-items:center;gap:12px;justify-content:center;margin:14px auto;max-width:560px;flex-wrap:wrap;';
+
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'font-weight:600;color:#1e293b;';
+    lbl.textContent = 'Drop height (× R)';
+
+    const valueOut = document.createElement('span');
+    valueOut.style.cssText = 'font-variant-numeric:tabular-nums;min-width:3.5em;text-align:right;font-weight:700;color:#1e3a8a;';
+    valueOut.textContent = initialH.toFixed(2);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0.5';
+    slider.max = '3.5';
+    slider.step = '0.05';
+    slider.value = String(initialH);
+    slider.style.cssText = 'flex:1;min-width:200px;';
+    if (cfg.fixed_height_r != null) slider.disabled = true;
+    slider.addEventListener('input', function () {
+      const v = parseFloat(slider.value);
+      sim.setHeight(v);
+      valueOut.textContent = v.toFixed(2);
+    });
+
+    sliderRow.appendChild(lbl);
+    sliderRow.appendChild(slider);
+    sliderRow.appendChild(valueOut);
+    root.appendChild(sliderRow);
+
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;gap:10px;justify-content:center;margin:8px 0 4px;flex-wrap:wrap;';
+
+    const dropBtn = document.createElement('button');
+    dropBtn.className = 'btn btn-primary';
+    dropBtn.textContent = 'Drop ball';
+    dropBtn.addEventListener('click', function () { sim.start(); });
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn btn-secondary';
+    resetBtn.textContent = 'Reset';
+    resetBtn.addEventListener('click', function () { sim.reset(); });
+
+    controls.appendChild(dropBtn);
     controls.appendChild(resetBtn);
     root.appendChild(controls);
 

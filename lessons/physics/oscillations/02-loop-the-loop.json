@@ -1,0 +1,91 @@
+{
+  "lesson_id": "L-LOOP",
+  "title": "How High to Start?",
+  "description": "The loop-the-loop. Find the minimum drop height in units of R that lets a ball complete a vertical circular loop, by combining energy conservation with the centripetal-force-at-the-top constraint.",
+  "prerequisites": [],
+  "blocks": [
+    {
+      "id": "LOOP-EXPLORE",
+      "type": "explore",
+      "title": "Try to make the ball complete the loop",
+      "content_html": "<p>The ramp drops a ball into a vertical loop of radius <strong>R</strong>. Slide the drop-height handle and tap <strong>Drop ball</strong>. If the ball is too slow at the top of the loop, it falls off the track.</p><p>Play with it. What's the smallest height (in units of R) that lets the ball complete the loop?</p>",
+      "simulation_config": {
+        "type": "loop_track",
+        "initial_height_r": 1.5,
+        "gravity": 600
+      },
+      "instructions": "1. Drag the slider to set drop height (in units of R).<br>2. Tap <strong>Drop ball</strong>.<br>3. If it falls off, try higher. If it makes it, try lower."
+    },
+    {
+      "id": "LOOP-PREDICT",
+      "type": "predict",
+      "title": "Predict the threshold",
+      "prompt": "Without doing the math yet — based on what you saw, what's the smallest drop height (as a multiple of R) that still completes the loop?",
+      "components": {
+        "magnitude_h_min": {
+          "required": true,
+          "label": "Minimum drop height",
+          "format": "multiple_choice",
+          "options": [1, 1.5, 2, 2.5, 3]
+        },
+        "confidence": {
+          "required": true,
+          "options": ["just_guessing", "rough_idea", "pretty_sure"]
+        }
+      },
+      "locked": true
+    },
+    {
+      "id": "LOOP-DERIVE",
+      "type": "canvas-derive",
+      "title": "Derive the minimum height",
+      "prompt": "On the canvas, derive the minimum drop height in terms of R. Two ideas combine: (1) at the top of the loop, gravity alone has to supply the centripetal force, so mg = m v² / R; (2) energy is conserved, so ½ m v² + m g y = constant. Use the bottom of the loop as y = 0; the top of the loop is at y = 2R; the drop point is at y = h.",
+      "starting_equation": "mg = \\frac{m v^2}{R}",
+      "target_equation": "h = \\frac{5R}{2}",
+      "valid_forms": [
+        "mg = \\frac{m v^2}{R}",
+        "g = \\frac{v^2}{R}",
+        "v^2 = gR",
+        "\\frac{1}{2} m v^2 + m g (2R) = m g h",
+        "\\frac{1}{2} v^2 + 2 g R = g h",
+        "\\frac{1}{2} (gR) + 2gR = gh",
+        "\\frac{1}{2} gR + 2gR = gh",
+        "\\frac{5}{2} g R = g h",
+        "\\frac{5}{2} R = h",
+        "h = \\frac{5R}{2}",
+        "h = \\frac{5}{2} R",
+        "h = 2.5 R"
+      ],
+      "vars": ["m", "g", "v", "R", "h"],
+      "hints": [
+        "At the top of the loop, normal force is zero in the minimum case. What single force is left to supply the centripetal acceleration?",
+        "Set mg = m v² / R and solve for v² at the top.",
+        "Now use energy conservation: KE at the top + PE at the top = PE at the drop point. KE at the bottom of the drop is zero (released from rest).",
+        "PE at the top of the loop is mg(2R). PE at the drop point is mgh.",
+        "Substitute v² = gR into ½ m v² + m g (2R) = m g h, then cancel m and g."
+      ]
+    },
+    {
+      "id": "LOOP-DISCOVER",
+      "type": "explore",
+      "title": "Watch the derived height in action",
+      "content_html": "<p>The slider is locked at <strong>2.5 R</strong>, the height you just derived. Tap <strong>Drop ball</strong>. The ball should just barely make it — at the top of the loop its speed-squared equals exactly <em>gR</em>.</p>",
+      "simulation_config": {
+        "type": "loop_track",
+        "fixed_height_r": 2.5,
+        "gravity": 600
+      },
+      "instructions": "Tap <strong>Drop ball</strong>. Watch the speed-squared envelope at the top of the loop."
+    },
+    {
+      "id": "LOOP-COMPARE",
+      "type": "compare",
+      "title": "Compare your guess and the derivation",
+      "prediction_source": "LOOP-PREDICT",
+      "comparison_prompt": "Your guess: <strong>[prediction.magnitude_h_min] × R</strong>. The math says <strong>2.5 × R</strong>. If those match — your intuition was already calibrated. If not, the difference is exactly the half-R needed so v² = gR at the top of the loop.",
+      "gap_analysis": {
+        "feedback": "The 2.5 R rule is geometric: the loop itself is 2 R tall, and you need an extra ½ R of height to deliver enough kinetic energy at the top so gravity alone (no track normal force) provides the centripetal acceleration. It doesn't depend on g, m, or the size of the loop — only on the ratio."
+      }
+    }
+  ]
+}

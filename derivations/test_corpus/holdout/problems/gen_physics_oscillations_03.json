@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_oscillations_03",
+  "category": "physics_oscillations",
+  "difficulty": "easy",
+  "target_text": "derive T = 2*pi/omega from omega = 2*pi*f and T = 1/f",
+  "expected_goal_srepr": "Eq(Symbol('T'), Mul(Integer(2), pi, Pow(Symbol('omega'), Integer(-1))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.16.2"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_mechanics_02",
+  "category": "physics_mechanics",
+  "difficulty": "medium",
+  "target_text": "derive s = u*t + (1/2)*a*t^2 from v = u + a*t by integrating position with respect to time with s(0) = 0",
+  "expected_goal_srepr": "Eq(Symbol('s'), Add(Mul(Symbol('u'), Symbol('t')), Mul(Rational(1,2), Symbol('a'), Pow(Symbol('t'), Integer(2)))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.2.5"
+}

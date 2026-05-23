@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_mechanics_04",
+  "category": "physics_mechanics",
+  "difficulty": "medium",
+  "target_text": "derive the work-kinetic-energy theorem W = (1/2)*m*v^2 - (1/2)*m*u^2 from W = F*s using F = m*a and v^2 = u^2 + 2*a*s",
+  "expected_goal_srepr": "Eq(Symbol('W'), Add(Mul(Rational(1,2), Symbol('m'), Pow(Symbol('v'), Integer(2))), Mul(Integer(-1), Rational(1,2), Symbol('m'), Pow(Symbol('u'), Integer(2)))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.7.3"
+}

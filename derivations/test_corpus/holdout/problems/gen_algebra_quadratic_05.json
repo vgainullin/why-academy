@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_quadratic_05",
+  "category": "algebra_quadratic",
+  "difficulty": "hard",
+  "target_text": "derive the quadratic formula x = (-b + sqrt(b^2 - 4ac))/(2a) for the positive root from ax^2 + bx + c = 0 by completing the square",
+  "expected_goal_srepr": "Eq(Symbol('x'), Mul(Rational(1,2), Pow(Symbol('a'), Integer(-1)), Add(Mul(Integer(-1), Symbol('b')), Pow(Add(Pow(Symbol('b'), Integer(2)), Mul(Integer(-4), Symbol('a'), Symbol('c'))), Rational(1,2)))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.9.4"
+}

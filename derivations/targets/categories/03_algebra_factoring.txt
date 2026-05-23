@@ -1,0 +1,8 @@
+# Algebra: factoring identities
+# Difference/sum of squares and cubes. These often canvas_fail because sympy
+# auto-evaluates (x-a)(x+a) and x^2 - a^2 to the same expression.
+
+factor x^2 - 9 as a difference of squares to get (x - 3)(x + 3)
+factor x^2 - 16 as (x - 4)(x + 4)
+factor x^3 - 1 as (x - 1)(x^2 + x + 1) using the difference-of-cubes identity
+factor x^3 + 8 as (x + 2)(x^2 - 2x + 4) using the sum-of-cubes identity

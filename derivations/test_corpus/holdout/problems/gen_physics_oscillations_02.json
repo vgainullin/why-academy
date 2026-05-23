@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_oscillations_02",
+  "category": "physics_oscillations",
+  "difficulty": "medium",
+  "target_text": "derive T = 2*pi*sqrt(L/g) for a simple pendulum from the small-angle equation of motion thetaddot = -(g/L)*theta and the trial solution thetaddot = -omega^2*theta with T = 2*pi/omega",
+  "expected_goal_srepr": "Eq(Symbol('T'), Mul(Integer(2), pi, Pow(Mul(Symbol('L'), Pow(Symbol('g'), Integer(-1))), Rational(1,2))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.16.4"
+}

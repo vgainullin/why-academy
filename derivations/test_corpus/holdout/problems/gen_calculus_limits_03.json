@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_limits_03",
+  "category": "calculus_limits",
+  "difficulty": "medium",
+  "target_text": "evaluate the limit as x approaches 0 of (1 - cos(x))/x = 0 using the standard sin(x)/x limit and a half-angle identity",
+  "expected_goal_srepr": "Eq(Limit(Mul(Add(Integer(1), Mul(Integer(-1), cos(Symbol('x')))), Pow(Symbol('x'), Integer(-1))), Symbol('x'), Integer(0)), Integer(0))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.2.4"
+}

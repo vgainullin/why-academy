@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_derivatives_04",
+  "category": "calculus_derivatives",
+  "difficulty": "medium",
+  "target_text": "derive d/dx(x^n) = n*x^(n-1) (the power rule for natural n) using the binomial expansion of (x + h)^n in the limit definition",
+  "expected_goal_srepr": "Eq(Derivative(Pow(Symbol('x'), Symbol('n')), Symbol('x')), Mul(Symbol('n'), Pow(Symbol('x'), Add(Symbol('n'), Integer(-1)))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.3.4"
+}

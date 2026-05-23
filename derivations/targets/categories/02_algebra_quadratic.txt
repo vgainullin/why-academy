@@ -1,0 +1,10 @@
+# Algebra: quadratics
+# Roots via square-root, factoring, and completing the square. Expect a mix of
+# verify_fail (factoring/completing introduces non-truth-preserving heuristic steps)
+# and canvas_fail (sympy may collapse some intermediate forms).
+
+solve x^2 = 9 for x by taking the positive and negative square roots
+solve x^2 - 5x + 6 = 0 for x by factoring as (x - 2)(x - 3)
+solve x^2 - 10x + 21 = 0 for x by factoring
+complete the square for x^2 + 6x + 5 to write it in the form (x + h)^2 + k
+derive the quadratic formula x = (-b + sqrt(b^2 - 4ac))/(2a) from ax^2 + bx + c = 0 by completing the square (positive root only)

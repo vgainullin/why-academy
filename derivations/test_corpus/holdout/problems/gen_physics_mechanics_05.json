@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_mechanics_05",
+  "category": "physics_mechanics",
+  "difficulty": "hard",
+  "target_text": "derive momentum conservation m1*v1 + m2*v2 = m1*u1 + m2*u2 for a 1D collision from Newton's third law F_12 = -F_21 applied over a common contact interval delta_t",
+  "expected_goal_srepr": "Eq(Add(Mul(Symbol('m1'), Symbol('v1')), Mul(Symbol('m2'), Symbol('v2'))), Add(Mul(Symbol('m1'), Symbol('u1')), Mul(Symbol('m2'), Symbol('u2'))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.8.4"
+}

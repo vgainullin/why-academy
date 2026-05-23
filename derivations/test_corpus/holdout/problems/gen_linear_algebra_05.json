@@ -1,0 +1,9 @@
+{
+  "id": "gen_linear_algebra_05",
+  "category": "linear_algebra",
+  "difficulty": "medium",
+  "target_text": "derive Cramer's rule for y in a 2x2 system a*x + b*y = e, c*x + d*y = f as y = (a*f - e*c) / (a*d - b*c)",
+  "expected_goal_srepr": "Eq(Symbol('y'), Mul(Add(Mul(Symbol('a'), Symbol('f')), Mul(Integer(-1), Symbol('e'), Symbol('c'))), Pow(Add(Mul(Symbol('a'), Symbol('d')), Mul(Integer(-1), Symbol('b'), Symbol('c'))), Integer(-1))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.4.6"
+}

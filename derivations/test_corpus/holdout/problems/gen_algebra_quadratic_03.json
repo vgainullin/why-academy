@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_quadratic_03",
+  "category": "algebra_quadratic",
+  "difficulty": "medium",
+  "target_text": "solve x^2 + 4x - 5 = 0 for x by factoring; take the positive root",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(1))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.9.2"
+}

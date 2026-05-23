@@ -1,0 +1,6 @@
+# Trigonometry: identity derivations from angle-addition or pythagorean identity.
+
+derive sin(2*theta) = 2*sin(theta)*cos(theta) from the angle-addition formula sin(a+b) = sin(a)*cos(b) + cos(a)*sin(b) by setting a = b = theta
+derive cos(2*theta) = cos(theta)^2 - sin(theta)^2 from the angle-addition formula cos(a+b) = cos(a)*cos(b) - sin(a)*sin(b) by setting a = b = theta
+derive 1 + tan(theta)^2 = sec(theta)^2 by dividing the pythagorean identity sin(theta)^2 + cos(theta)^2 = 1 by cos(theta)^2
+derive sin(a - b) = sin(a)*cos(b) - cos(a)*sin(b) from sin(a + (-b)) using the angle-addition formula and even/odd properties of sin and cos

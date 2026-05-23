@@ -1,0 +1,11 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "add_constant_to_both_sides",
+  "kind": "sidewise",
+  "operation": "add",
+  "arg": {
+    "name": "constant"
+  },
+  "args_prompt": "{ \"constant\": <number-or-expression-string> }",
+  "safety": "preserve Eq side orientation"
+}

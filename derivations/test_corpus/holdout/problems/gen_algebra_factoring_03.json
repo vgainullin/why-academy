@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_factoring_03",
+  "category": "algebra_factoring",
+  "difficulty": "medium",
+  "target_text": "factor x^2 + 6x + 9 as a perfect square trinomial",
+  "expected_goal_srepr": "Eq(Add(Pow(Symbol('x'), Integer(2)), Mul(Integer(6), Symbol('x')), Integer(9)), Pow(Add(Symbol('x'), Integer(3)), Integer(2)))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.7.3"
+}

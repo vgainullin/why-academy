@@ -1,0 +1,11 @@
+{
+  "id": "gen_linear_algebra_02",
+  "category": "linear_algebra",
+  "difficulty": "easy",
+  "target_text": "solve the 2x2 linear system 3x + 2y = 12 and x + y = 5 for y by elimination",
+  "expected_goal_srepr": "Eq(Symbol('y'), Integer(3))",
+  "acceptable_alternate_goals": [
+    "Eq(Integer(3), Symbol('y'))"
+  ],
+  "source": "OpenStax Intermediate Algebra 2e Ch.4.1"
+}

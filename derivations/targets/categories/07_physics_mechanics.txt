@@ -1,0 +1,9 @@
+# Physics: kinematics and mechanics
+# Classical derivations. Expect verify_fail on substitute_expression and
+# integrate (no validators).
+
+derive v = u + a*t by integrating the constant-acceleration definition a = dv/dt with initial velocity u at t = 0
+derive s = u*t + (1/2)*a*t^2 from v = u + a*t by integrating position with respect to time (s(0) = 0)
+derive v^2 = u^2 + 2*a*s by eliminating t from v = u + a*t and s = u*t + (1/2)*a*t^2
+derive the work-kinetic-energy theorem W = (1/2)*m*v^2 - (1/2)*m*u^2 by integrating F = m*dv/dt along a path
+derive momentum conservation m1*v1 + m2*v2 = m1*u1 + m2*u2 from Newton's third law F12 = -F21 applied over a time interval

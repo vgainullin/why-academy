@@ -1,0 +1,2 @@
+# One-target smoke test for JSON-only inner generation.
+solve x + 2 = 5 for x

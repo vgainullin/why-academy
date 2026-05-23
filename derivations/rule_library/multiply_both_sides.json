@@ -1,0 +1,11 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "multiply_both_sides",
+  "kind": "sidewise",
+  "operation": "multiply",
+  "arg": {
+    "name": "multiplier"
+  },
+  "args_prompt": "{ \"multiplier\": <number-or-expression-string> }",
+  "safety": "preserve Eq side orientation; symbolic multipliers must be JSON strings"
+}

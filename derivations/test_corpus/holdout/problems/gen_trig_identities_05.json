@@ -1,0 +1,9 @@
+{
+  "id": "gen_trig_identities_05",
+  "category": "trig_identities",
+  "difficulty": "medium",
+  "target_text": "derive cos(2*theta) = 1 - 2*sin(theta)^2 from cos(2*theta) = cos(theta)^2 - sin(theta)^2 and sin(theta)^2 + cos(theta)^2 = 1",
+  "expected_goal_srepr": "Eq(cos(Mul(Integer(2), Symbol('theta'))), Add(Integer(1), Mul(Integer(-2), Pow(sin(Symbol('theta')), Integer(2)))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Algebra and Trigonometry 2e Ch.9.4"
+}

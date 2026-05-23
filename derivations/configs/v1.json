@@ -1,0 +1,37 @@
+{
+  "description": "Baseline config (captured from hardcoded script defaults). Opus for generation/analysis/implementation (cold + high-stakes paths). Sonnet for judge/evolve (hot paths where cost scales with batch volume).",
+  "models": {
+    "inner":     "opus",
+    "judge":     "sonnet",
+    "evolve":    "sonnet",
+    "outer":     "opus",
+    "implement": "opus"
+  },
+  "engines": {
+    "inner":     "claude",
+    "judge":     "claude",
+    "evolve":    "claude",
+    "outer":     "claude",
+    "implement": "claude"
+  },
+  "budgets_usd": {
+    "inner":     3,
+    "judge":     1,
+    "evolve":    1,
+    "outer":    10,
+    "implement": 5
+  },
+  "timeouts_s": {
+    "inner":      600,
+    "judge":      180,
+    "evolve":     120,
+    "outer":      900,
+    "implement": 1200
+  },
+  "evolution": {
+    "max_iter": 3
+  },
+  "batch": {
+    "parallel": 4
+  }
+}

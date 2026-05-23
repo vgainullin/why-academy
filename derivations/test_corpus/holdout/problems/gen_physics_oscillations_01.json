@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_oscillations_01",
+  "category": "physics_oscillations",
+  "difficulty": "medium",
+  "target_text": "derive omega = sqrt(k/m) for a mass-spring system from the equation of motion m*xddot = -k*x and the trial-solution result xddot = -omega^2*x",
+  "expected_goal_srepr": "Eq(Symbol('omega'), Pow(Mul(Symbol('k'), Pow(Symbol('m'), Integer(-1))), Rational(1,2)))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.16.3"
+}

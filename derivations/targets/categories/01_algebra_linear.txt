@@ -1,0 +1,9 @@
+# Algebra: linear equations
+# Single- and two-step solving. Exercises add/subtract validators (which exist)
+# and divide_both_sides (which doesn't -- expect verify_fail there).
+
+solve x + 7 = 12 for x
+solve x - 4 = 9 for x
+solve 4x = 20 for x by dividing both sides by 4
+solve 2x + 3 = 11 for x
+solve 5x - 8 = 17 for x

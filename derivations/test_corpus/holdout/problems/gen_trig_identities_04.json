@@ -1,0 +1,9 @@
+{
+  "id": "gen_trig_identities_04",
+  "category": "trig_identities",
+  "difficulty": "hard",
+  "target_text": "derive sin(a - b) = sin(a)*cos(b) - cos(a)*sin(b) from sin(a + (-b)) using the angle-addition formula and the odd/even properties sin(-b) = -sin(b), cos(-b) = cos(b)",
+  "expected_goal_srepr": "Eq(sin(Add(Symbol('a'), Mul(Integer(-1), Symbol('b')))), Add(Mul(sin(Symbol('a')), cos(Symbol('b'))), Mul(Integer(-1), cos(Symbol('a')), sin(Symbol('b')))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Algebra and Trigonometry 2e Ch.9.2"
+}

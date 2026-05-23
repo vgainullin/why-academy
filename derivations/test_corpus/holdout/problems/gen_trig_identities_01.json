@@ -1,0 +1,9 @@
+{
+  "id": "gen_trig_identities_01",
+  "category": "trig_identities",
+  "difficulty": "medium",
+  "target_text": "derive sin(2*theta) = 2*sin(theta)*cos(theta) from the angle-addition formula sin(a + b) = sin(a)*cos(b) + cos(a)*sin(b) by setting a = b = theta",
+  "expected_goal_srepr": "Eq(sin(Mul(Integer(2), Symbol('theta'))), Mul(Integer(2), sin(Symbol('theta')), cos(Symbol('theta'))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Algebra and Trigonometry 2e Ch.9.3"
+}

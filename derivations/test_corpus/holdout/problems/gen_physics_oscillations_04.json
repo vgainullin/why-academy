@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_oscillations_04",
+  "category": "physics_oscillations",
+  "difficulty": "hard",
+  "target_text": "derive the minimum drop height h = 5R/2 for a ball completing a vertical loop of radius R from (1) centripetal m*g = m*v^2/R at the top and (2) energy conservation (1/2)*m*v^2 + m*g*(2R) = m*g*h",
+  "expected_goal_srepr": "Eq(Symbol('h'), Mul(Rational(5,2), Symbol('R')))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.6 / Halliday tradition"
+}

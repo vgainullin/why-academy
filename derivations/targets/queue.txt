@@ -1,0 +1,25 @@
+# Derivation targets, one per line. Lines starting with # are comments; blank
+# lines are skipped. scripts/batch.sh reads this file and runs inner.sh against
+# each target in parallel.
+#
+# Curate intentionally: outer loop is supposed to mine PATTERNS, so the queue
+# should cover a range of rules and domains rather than minor variants of the
+# same problem.
+
+# === Algebra (linear) ===
+solve x + 2 = 5 for x
+solve 3x - 5 = 10 for x
+solve 2x + 6 = 10 for x by subtracting then dividing
+
+# === Algebra (quadratic / factoring) ===
+factor x^2 - 4 as a difference of squares, target (x - 2)(x + 2)
+derive the quadratic formula x = (-b +- sqrt(b^2 - 4ac))/(2a) from ax^2 + bx + c = 0 by completing the square
+
+# === Calculus (derivatives) ===
+derive d/dx(x^2) = 2x from the limit definition of the derivative
+derive d/dx(x^3) = 3x^2 from the limit definition of the derivative
+
+# === Physics (already in lessons; useful for comparison) ===
+derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x
+derive the minimum drop height h = 5R/2 for a ball completing a vertical loop, given (1) centripetal: m*g = m*v^2/R and (2) energy: (1/2)*m*v^2 + m*g*(2R) = m*g*h
+derive T = 2*pi*sqrt(L/g) for a simple pendulum from the small-angle equation of motion thetaddot = -(g/L)*theta and the trial solution thetaddot = -omega^2 * theta

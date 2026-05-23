@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_limits_04",
+  "category": "calculus_limits",
+  "difficulty": "hard",
+  "target_text": "evaluate the limit as n approaches infinity of (1 + 1/n)^n = E using the standard definition of the base of the natural logarithm",
+  "expected_goal_srepr": "Eq(Limit(Pow(Add(Integer(1), Pow(Symbol('n'), Integer(-1))), Symbol('n')), Symbol('n'), oo), E)",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.6.7"
+}

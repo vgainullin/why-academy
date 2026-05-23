@@ -1,0 +1,11 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "subtract_constant_from_both_sides",
+  "kind": "sidewise",
+  "operation": "subtract",
+  "arg": {
+    "name": "constant"
+  },
+  "args_prompt": "{ \"constant\": <number-or-expression-string> }",
+  "safety": "preserve Eq side orientation"
+}

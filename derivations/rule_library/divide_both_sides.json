@@ -1,0 +1,12 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "divide_both_sides",
+  "kind": "sidewise",
+  "operation": "divide",
+  "arg": {
+    "name": "divisor",
+    "aliases": ["factor", "constant"]
+  },
+  "args_prompt": "{ \"divisor\": <number-or-expression-string> }",
+  "safety": "preserve Eq side orientation; symbolic divisors must be JSON strings"
+}

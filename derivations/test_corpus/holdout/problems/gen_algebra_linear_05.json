@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_linear_05",
+  "category": "algebra_linear",
+  "difficulty": "medium",
+  "target_text": "solve (x/3) + 2 = 7 for x",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(15))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.2.5"
+}

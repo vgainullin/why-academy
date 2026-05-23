@@ -1,0 +1,110 @@
+# Cohort v1 -- diverse training corpus assembled from categories/
+# Generated: 2026-05-13T05:20:12Z
+# Total targets per category file follows; concatenated below.
+
+# 01_algebra_linear.txt: 5 targets
+# 02_algebra_quadratic.txt: 5 targets
+# 03_algebra_factoring.txt: 4 targets
+# 04_calculus_derivatives.txt: 5 targets
+# 05_calculus_integrals.txt: 3 targets
+# 06_calculus_limits.txt: 3 targets
+# 07_physics_mechanics.txt: 5 targets
+# 08_physics_oscillations.txt: 4 targets
+# 09_trig_identities.txt: 4 targets
+# 10_linear_algebra.txt: 2 targets
+
+# === 01_algebra_linear.txt ===
+# Algebra: linear equations
+# Single- and two-step solving. Exercises add/subtract validators (which exist)
+# and divide_both_sides (which doesn't -- expect verify_fail there).
+
+solve x + 7 = 12 for x
+solve x - 4 = 9 for x
+solve 4x = 20 for x by dividing both sides by 4
+solve 2x + 3 = 11 for x
+solve 5x - 8 = 17 for x
+
+# === 02_algebra_quadratic.txt ===
+# Algebra: quadratics
+# Roots via square-root, factoring, and completing the square. Expect a mix of
+# verify_fail (factoring/completing introduces non-truth-preserving heuristic steps)
+# and canvas_fail (sympy may collapse some intermediate forms).
+
+solve x^2 = 9 for x by taking the positive and negative square roots
+solve x^2 - 5x + 6 = 0 for x by factoring as (x - 2)(x - 3)
+solve x^2 - 10x + 21 = 0 for x by factoring
+complete the square for x^2 + 6x + 5 to write it in the form (x + h)^2 + k
+derive the quadratic formula x = (-b + sqrt(b^2 - 4ac))/(2a) from ax^2 + bx + c = 0 by completing the square (positive root only)
+
+# === 03_algebra_factoring.txt ===
+# Algebra: factoring identities
+# Difference/sum of squares and cubes. These often canvas_fail because sympy
+# auto-evaluates (x-a)(x+a) and x^2 - a^2 to the same expression.
+
+factor x^2 - 9 as a difference of squares to get (x - 3)(x + 3)
+factor x^2 - 16 as (x - 4)(x + 4)
+factor x^3 - 1 as (x - 1)(x^2 + x + 1) using the difference-of-cubes identity
+factor x^3 + 8 as (x + 2)(x^2 - 2x + 4) using the sum-of-cubes identity
+
+# === 04_calculus_derivatives.txt ===
+# Calculus: derivatives via the limit definition
+# Tests Limit + Derivative parsing. Expect canvas_fail on chains where sympy
+# auto-cancels h/h, x^2-x^2, etc.
+
+derive d/dx(x) = 1 from the limit definition of the derivative
+derive d/dx(c) = 0 for constant c from the limit definition
+derive d/dx(x^2) = 2x from the limit definition of the derivative
+derive d/dx(x^3) = 3x^2 from the limit definition of the derivative
+derive d/dx(x^2 + 3x) = 2x + 3 from the limit definition (expand, simplify, take the limit)
+
+# === 05_calculus_integrals.txt ===
+# Calculus: definite/indefinite integrals via antiderivatives
+# Mostly relies on rule application; expect verify_fail on power_rule_antiderivative.
+
+derive integral of x dx = x^2 / 2 + C from the antiderivative of the power rule (n = 1)
+derive integral of x^2 dx = x^3 / 3 + C from the antiderivative of the power rule (n = 2)
+compute the definite integral from 0 to 1 of x^2 dx = 1/3 using the antiderivative and the fundamental theorem
+
+# === 06_calculus_limits.txt ===
+# Calculus: classic limits
+# Direct manipulation of limit expressions; many will canvas_fail due to
+# sympy auto-evaluating the limit.
+
+evaluate the limit as x approaches 0 of sin(x)/x using the standard result that this limit equals 1
+evaluate the limit as x approaches 0 of (1 - cos(x))/x^2 = 1/2 using a half-angle identity
+evaluate the limit as x approaches infinity of (1 + 1/n)^n = E using the standard definition of E
+
+# === 07_physics_mechanics.txt ===
+# Physics: kinematics and mechanics
+# Classical derivations. Expect verify_fail on substitute_expression and
+# integrate (no validators).
+
+derive v = u + a*t by integrating the constant-acceleration definition a = dv/dt with initial velocity u at t = 0
+derive s = u*t + (1/2)*a*t^2 from v = u + a*t by integrating position with respect to time (s(0) = 0)
+derive v^2 = u^2 + 2*a*s by eliminating t from v = u + a*t and s = u*t + (1/2)*a*t^2
+derive the work-kinetic-energy theorem W = (1/2)*m*v^2 - (1/2)*m*u^2 by integrating F = m*dv/dt along a path
+derive momentum conservation m1*v1 + m2*v2 = m1*u1 + m2*u2 from Newton's third law F12 = -F21 applied over a time interval
+
+# === 08_physics_oscillations.txt ===
+# Physics: oscillations and circular motion
+# Already exercised t007-t009 in the v1 batch; adding two more to deepen coverage.
+
+derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x
+derive T = 2*pi*sqrt(L/g) for a simple pendulum from the small-angle equation of motion thetaddot = -(g/L)*theta and the trial solution thetaddot = -omega^2 * theta
+derive the minimum drop height h = 5R/2 for a ball completing a vertical loop, given (1) centripetal: m*g = m*v^2/R and (2) energy: (1/2)*m*v^2 + m*g*(2R) = m*g*h
+derive the period-frequency relation T = 2*pi/omega from omega = 2*pi*f and T = 1/f
+
+# === 09_trig_identities.txt ===
+# Trigonometry: identity derivations from angle-addition or pythagorean identity.
+
+derive sin(2*theta) = 2*sin(theta)*cos(theta) from the angle-addition formula sin(a+b) = sin(a)*cos(b) + cos(a)*sin(b) by setting a = b = theta
+derive cos(2*theta) = cos(theta)^2 - sin(theta)^2 from the angle-addition formula cos(a+b) = cos(a)*cos(b) - sin(a)*sin(b) by setting a = b = theta
+derive 1 + tan(theta)^2 = sec(theta)^2 by dividing the pythagorean identity sin(theta)^2 + cos(theta)^2 = 1 by cos(theta)^2
+derive sin(a - b) = sin(a)*cos(b) - cos(a)*sin(b) from sin(a + (-b)) using the angle-addition formula and even/odd properties of sin and cos
+
+# === 10_linear_algebra.txt ===
+# Linear algebra: 2x2 cases that fit sympy scalar machinery.
+# Matrix-valued srepr would need different verifier handling; keeping it scalar here.
+
+solve the 2x2 linear system 2x + y = 5 and x - y = 1 for x and y, by elimination
+derive Cramer's rule for a 2x2 system in scalar form: x = (e*d - b*f) / (a*d - b*c) and y = (a*f - e*c) / (a*d - b*c) where the system is a*x + b*y = e, c*x + d*y = f

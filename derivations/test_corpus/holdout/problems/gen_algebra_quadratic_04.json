@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_quadratic_04",
+  "category": "algebra_quadratic",
+  "difficulty": "medium",
+  "target_text": "complete the square for x^2 + 8x + 7 to write it as (x + h)^2 + k",
+  "expected_goal_srepr": "Eq(Add(Symbol('x')**2, Mul(Integer(8), Symbol('x')), Integer(7)), Add(Pow(Add(Symbol('x'), Integer(4)), Integer(2)), Integer(-9)))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.9.3"
+}

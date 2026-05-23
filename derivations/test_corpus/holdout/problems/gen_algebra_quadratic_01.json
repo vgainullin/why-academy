@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_quadratic_01",
+  "category": "algebra_quadratic",
+  "difficulty": "easy",
+  "target_text": "solve x^2 = 25 for x, taking the positive root",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(5))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.9.1"
+}

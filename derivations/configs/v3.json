@@ -1,0 +1,37 @@
+{
+  "description": "DeepSeek judge + Claude Sonnet inner/evolve. The judge runs against the DeepSeek v4-flash API (reasoning ON) -- ~$0.002 per call vs ~$0.10 for the Claude Sonnet judge, and a separate quota that doesn't compete with the inner generation. Cross-model independence also breaks the Goodhart loop where Claude is both author and judge.",
+  "models": {
+    "inner":     "sonnet",
+    "judge":     "deepseek-v4-flash",
+    "evolve":    "sonnet",
+    "outer":     "sonnet",
+    "implement": "sonnet"
+  },
+  "engines": {
+    "inner":     "claude",
+    "judge":     "deepseek",
+    "evolve":    "claude",
+    "outer":     "claude",
+    "implement": "claude"
+  },
+  "budgets_usd": {
+    "inner":     1,
+    "judge":     1,
+    "evolve":    1,
+    "outer":     3,
+    "implement": 2
+  },
+  "timeouts_s": {
+    "inner":      600,
+    "judge":      180,
+    "evolve":     120,
+    "outer":      900,
+    "implement": 1200
+  },
+  "evolution": {
+    "max_iter": 3
+  },
+  "batch": {
+    "parallel": 4
+  }
+}

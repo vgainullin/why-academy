@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_factoring_04",
+  "category": "algebra_factoring",
+  "difficulty": "medium",
+  "target_text": "factor x^3 - 27 as a difference of cubes",
+  "expected_goal_srepr": "Eq(Add(Pow(Symbol('x'), Integer(3)), Integer(-27)), Mul(Add(Symbol('x'), Integer(-3)), Add(Pow(Symbol('x'), Integer(2)), Mul(Integer(3), Symbol('x')), Integer(9))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.6.4"
+}

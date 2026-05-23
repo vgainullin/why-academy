@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_linear_02",
+  "category": "algebra_linear",
+  "difficulty": "easy",
+  "target_text": "solve 7x = 42 for x",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(6))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.2.3"
+}

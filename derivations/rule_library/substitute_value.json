@@ -1,0 +1,8 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "substitute_value",
+  "aliases": ["substitute_expression"],
+  "kind": "substitute",
+  "args_prompt": "{ \"symbol\": \"<symbol-name>\", \"replacement\": <number-or-expression-string> }",
+  "safety": "replace exactly that symbol in the source Eq and preserve Eq side orientation; use a separate swap_sides edge if needed"
+}

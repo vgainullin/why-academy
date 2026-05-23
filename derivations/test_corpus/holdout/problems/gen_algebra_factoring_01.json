@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_factoring_01",
+  "category": "algebra_factoring",
+  "difficulty": "easy",
+  "target_text": "factor x^2 - 25 as a difference of squares",
+  "expected_goal_srepr": "Eq(Add(Pow(Symbol('x'), Integer(2)), Integer(-25)), Mul(Add(Symbol('x'), Integer(-5)), Add(Symbol('x'), Integer(5))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.7.4"
+}

@@ -51,7 +51,7 @@ The top-level object must have exactly these keys:
 <<RULE_CONTRACTS>>
 - `rule_args` must be valid JSON. Symbolic expressions such as `-x`, `k/m`, or `-Symbol('omega')**2*x` must be quoted as strings.
 - Non-swap rule contracts are side-sensitive: keep the same left/right orientation across the edge. For `x + 2 = 5`, emit `Eq(x + 2, 5)` -> `Eq(x, 3)` with `subtract_constant_from_both_sides`; do not swap to `Eq(5, x + 2)` first.
-- If no validator-backed rule fits, choose a clear snake_case rule. It may be weakly verified if the edge preserves truth.
+- If no validator-backed rule fits, do not invent a rule to hide the gap. Keep the requested target visible and let the verifier expose the missing proof obligation.
 - Do not introduce a given with a non-truth-preserving edge. If a given is needed only as substitution evidence, include it as its own visible node and use a strict substitution rule edge from the equation being transformed.
 - Do not rewrite the target to fit available validators. If a requested final step needs assumptions or validator support that is missing, still keep the requested target as `goal_node`; the failure should be visible to the gates instead of hidden by changing the goal.
 

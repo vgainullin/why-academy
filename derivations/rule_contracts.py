@@ -11,13 +11,43 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sympy import Eq, Symbol, sqrt
+from sympy import Eq, Symbol, simplify, solve, sqrt
 
 from sympy_eval import align_symbols_to, expr_equal_zero, parse_arg
 
 
 ROOT = Path(__file__).resolve().parent
 RULE_LIBRARY = ROOT / "rule_library"
+
+BUILTIN_CONTRACT_SPECS: dict[str, dict[str, Any]] = {
+    "simplify_expression": {
+        "schema_version": "rule_contract.v1",
+        "rule_name": "simplify_expression",
+        "kind": "symbolic_equivalence",
+        "args_prompt": "{}",
+        "safety": "only for equivalence-preserving local rewrites; split side operations into their specific rules",
+        "_source": "rule_contracts:builtin",
+        "_rule_name": "simplify_expression",
+    },
+    "expand_expression": {
+        "schema_version": "rule_contract.v1",
+        "rule_name": "expand_expression",
+        "kind": "symbolic_equivalence",
+        "args_prompt": "{}",
+        "safety": "only for equivalence-preserving local expansion rewrites",
+        "_source": "rule_contracts:builtin",
+        "_rule_name": "expand_expression",
+    },
+    "factor_expression": {
+        "schema_version": "rule_contract.v1",
+        "rule_name": "factor_expression",
+        "kind": "symbolic_equivalence",
+        "args_prompt": "{}",
+        "safety": "only for equivalence-preserving local factorization rewrites",
+        "_source": "rule_contracts:builtin",
+        "_rule_name": "factor_expression",
+    },
+}
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -28,7 +58,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def load_contract_specs(base: Path = RULE_LIBRARY) -> dict[str, dict[str, Any]]:
-    specs: dict[str, dict[str, Any]] = {}
+    specs: dict[str, dict[str, Any]] = {name: dict(spec) for name, spec in BUILTIN_CONTRACT_SPECS.items()}
     if not base.exists():
         return specs
     for path in sorted(base.glob("*.json")):
@@ -44,6 +74,24 @@ def load_contract_specs(base: Path = RULE_LIBRARY) -> dict[str, dict[str, Any]]:
 
 def _eq_zero(expr) -> bool:
     return expr_equal_zero(expr)
+
+
+def _truth_preserves_eq(a: Eq, b: Eq) -> bool:
+    try:
+        da = simplify(a.lhs - a.rhs)
+        db = simplify(b.lhs - b.rhs)
+        if _eq_zero(da - db):
+            return True
+        ratio = simplify(da / db)
+        if ratio.is_constant() and ratio != 0 and ratio.is_finite:
+            return True
+        free = a.free_symbols | b.free_symbols
+        if len(free) == 1:
+            v = next(iter(free))
+            return set(solve(a, v)) == set(solve(b, v))
+    except Exception:
+        return False
+    return False
 
 
 def _parse_symbol(value):
@@ -182,11 +230,24 @@ def validate_swap_sides(from_expr, to_expr, args: dict, spec: dict[str, Any]) ->
     return ("FAIL", "to_expr must be Eq(from_expr.rhs, from_expr.lhs)")
 
 
+def validate_symbolic_equivalence(from_expr, to_expr, args: dict, spec: dict[str, Any]) -> tuple[str, str]:
+    if not (isinstance(from_expr, Eq) and isinstance(to_expr, Eq)):
+        return ("FAIL", "both endpoints must be Eq")
+    if not isinstance(args, dict):
+        return ("FAIL", "rule_args must be an object")
+    if args:
+        return ("FAIL", "rule_args must be empty for symbolic equivalence rules")
+    if _truth_preserves_eq(from_expr, to_expr):
+        return ("PASS", f"{spec.get('rule_name', 'rule')} proof obligation discharged by symbolic equivalence")
+    return ("FAIL", "symbolic equivalence proof obligation failed")
+
+
 CONTRACT_VALIDATORS = {
     "sidewise": validate_sidewise,
     "substitute": validate_substitute,
     "principal_sqrt": validate_principal_sqrt,
     "swap_sides": validate_swap_sides,
+    "symbolic_equivalence": validate_symbolic_equivalence,
 }
 
 
@@ -222,9 +283,10 @@ def prompt_contract_lines() -> list[str]:
     seen_sources = set()
     for rule, spec in sorted(load_contract_specs().items()):
         source = spec.get("_source")
-        if source in seen_sources:
+        source_key = f"{source}:{rule}" if source == "rule_contracts:builtin" else source
+        if source_key in seen_sources:
             continue
-        seen_sources.add(source)
+        seen_sources.add(source_key)
         aliases = [a for a in spec.get("aliases", []) if isinstance(a, str)]
         alias_text = f" (aliases: {', '.join(f'`{a}`' for a in aliases)})" if aliases else ""
         args = spec.get("args_prompt") or "{}"

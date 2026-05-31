@@ -4,10 +4,8 @@
 v0 contract:
   - Parse every node's sympy_srepr under `from sympy import *` + standard symbols.
   - Per node: classify as TRUE (identity), FALSE (non-identity equation), NA (not an Eq), ERROR (parse failed).
-  - Per edge: run the rule-specific validator if registered; otherwise fall back to
-    truth-preservation between Eq endpoints. Truth-preserving + no validator -> WEAK_PASS.
-    Validator says no -> FAIL. Non-truth-preserving + no validator -> FAIL. No Eq endpoints
-    and no validator -> UNCOVERED.
+  - Per edge: run the rule-specific validator/proof obligation. Rules without
+    an explicit obligation fail even if the endpoints look truth-preserving.
   - Emit <problem>.verifier.json sidecar with machine-readable per-edge results.
   - Print the structured summary that generate_derivation.md expects.
 
@@ -129,11 +127,7 @@ def verify_edge(from_expr, to_expr, rule: str, args: dict) -> tuple[str, str]:
             return ("FAIL", f"validator raised: {e}")
     if rule not in KNOWN_RULES:
         return ("FAIL", f"unknown rule {rule!r}; use registered rules from the prompt/rule library")
-    if not (isinstance(from_expr, Eq) and isinstance(to_expr, Eq)):
-        return ("UNCOVERED", "non-Eq endpoints and no specific validator")
-    if truth_preserves(from_expr, to_expr):
-        return ("WEAK_PASS", "truth-preserving; no specific validator registered")
-    return ("FAIL", "not truth-preserving and no specific validator to defer to")
+    return ("FAIL", f"known rule {rule!r} has no registered proof obligation")
 
 
 def verify(problem_path: Path) -> int:

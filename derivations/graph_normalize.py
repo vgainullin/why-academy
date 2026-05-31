@@ -22,7 +22,7 @@ from sympy_eval import parse_srepr  # noqa: E402
 from to_canvas import eq_to_latex  # noqa: E402
 
 
-NORMALIZER_VERSION = "0.1"
+NORMALIZER_VERSION = "0.2"
 
 
 def _json_key(value: Any) -> str:
@@ -38,6 +38,17 @@ def _canonical_srepr(expr, fallback: str) -> str:
         return candidate
     except Exception:
         return fallback
+
+
+def _canonical_node(expr, fallback: str):
+    canonical_srepr = _canonical_srepr(expr, fallback)
+    try:
+        canonical_expr = parse_srepr(canonical_srepr)
+        if isinstance(expr, sp.Equality) and not isinstance(canonical_expr, sp.Equality):
+            return expr, fallback
+        return canonical_expr, canonical_srepr
+    except Exception:
+        return expr, fallback
 
 
 def _node_keys(expr) -> list[tuple[str, str]]:
@@ -67,14 +78,15 @@ def normalize_problem(problem: dict[str, Any]) -> tuple[dict[str, Any], dict[str
             continue
         try:
             expr = parse_srepr(raw)
-            keys = _node_keys(expr)
+            canonical_expr, canonical_srepr = _canonical_node(expr, raw)
+            keys = _node_keys(canonical_expr)
             owner = next((key_owner[k] for k in keys if k in key_owner), None)
             if owner is None:
                 owner = node_id
                 retained_ids.add(node_id)
                 retained_nodes.append({
                     "id": node_id,
-                    "sympy_srepr": _canonical_srepr(expr, raw),
+                    "sympy_srepr": canonical_srepr,
                 })
                 for key in keys:
                     key_owner.setdefault(key, owner)

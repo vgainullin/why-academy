@@ -6,12 +6,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DERIVATIONS = ROOT / "derivations"
 sys.path.insert(0, str(DERIVATIONS))
 
+import graph_normalize  # noqa: E402
 from graph_normalize import normalize_problem  # noqa: E402
 
 
@@ -214,6 +216,76 @@ class GraphNormalizeTests(unittest.TestCase):
 
         node_ids = {n["id"] for n in normalized["nodes"]}
         self.assertEqual(node_ids, {"n0", "n1"})
+
+    def test_merge_keys_are_computed_from_canonical_node(self) -> None:
+        problem = {
+            "id": "canonical_key_alignment",
+            "root_node": "n0",
+            "goal_node": "n1",
+            "nodes": [
+                {
+                    "id": "n0",
+                    "sympy_srepr": "Eq(Add(Symbol('x'), Integer(1), evaluate=False), Integer(2), evaluate=False)",
+                },
+                {
+                    "id": "n1",
+                    "sympy_srepr": "Eq(Symbol('x'), Integer(1), evaluate=False)",
+                },
+            ],
+            "edges": [
+                {
+                    "from": "n0",
+                    "to": "n1",
+                    "rule": "subtract_constant_from_both_sides",
+                    "rule_args": {"constant": "Integer(1)"},
+                }
+            ],
+        }
+
+        with patch.object(
+            graph_normalize,
+            "_canonical_srepr",
+            return_value="Eq(Symbol('x'), Integer(1), evaluate=False)",
+        ):
+            normalized, report = graph_normalize.normalize_problem(problem)
+
+        self.assertEqual([n["id"] for n in normalized["nodes"]], ["n0"])
+        self.assertEqual(normalized["goal_node"], "n0")
+        self.assertEqual(report["n_nodes_after"], 1)
+        self.assertEqual(report["dropped_edges"][0]["reason"], "self_edge_after_merge")
+
+    def test_does_not_merge_factor_and_expanded_forms(self) -> None:
+        problem = {
+            "id": "preserve_factor_expand_step",
+            "root_node": "n0",
+            "goal_node": "n1",
+            "nodes": [
+                {
+                    "id": "n0",
+                    "sympy_srepr": (
+                        "Eq(Mul(Add(Symbol('x'), Integer(1), evaluate=False), "
+                        "Add(Symbol('x'), Integer(2), evaluate=False), evaluate=False), Integer(0), evaluate=False)"
+                    ),
+                },
+                {
+                    "id": "n1",
+                    "sympy_srepr": (
+                        "Eq(Add(Pow(Symbol('x'), Integer(2), evaluate=False), "
+                        "Mul(Integer(3), Symbol('x'), evaluate=False), Integer(2), evaluate=False), "
+                        "Integer(0), evaluate=False)"
+                    ),
+                },
+            ],
+            "edges": [
+                {"from": "n0", "to": "n1", "rule": "expand_expression", "rule_args": {}},
+            ],
+        }
+
+        normalized, report = normalize_problem(problem)
+
+        self.assertEqual([n["id"] for n in normalized["nodes"]], ["n0", "n1"])
+        self.assertEqual(normalized["edges"], problem["edges"])
+        self.assertEqual(report["node_merges"], [])
 
     def test_normalized_previous_duplicate_failure_passes_local_gates(self) -> None:
         target = (

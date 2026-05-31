@@ -23,7 +23,10 @@ The top-level object must have exactly these keys:
 
 ## Schema Rules
 
+- The object is schema-validated before any verifier runs. Extra fields and wrong types fail immediately.
 - `id` must be exactly `<<PROBLEM_ID>>`.
+- `nodes` must be a non-empty array of `{ "id": string, "sympy_srepr": string }` objects only.
+- `edges` must be an array of `{ "from": string, "to": string, "rule": string, "rule_args": object }` objects only. `rule_args` may be omitted.
 - Every node `sympy_srepr` must be exactly one top-level `Eq(lhs, rhs)`.
 - `goal_node` must be the exact requested target result, not a weaker or easier intermediate. If the target asks for `omega = sqrt(k/m)`, do not stop at `omega^2 = k/m`.
 - Do not emit tuples, lists, sets, `And(...)`, assumptions, facts, prose nodes, or bundled equations.

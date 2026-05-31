@@ -12,6 +12,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
 from rule_contracts import known_rule_names as contract_rule_names
 from rule_contracts import prompt_contract_lines
 
@@ -37,9 +40,68 @@ PROBLEM_KEYS = {"id", "root_node", "goal_node", "nodes", "edges"}
 NODE_KEYS = {"id", "sympy_srepr"}
 EDGE_KEYS = {"from", "to", "rule", "rule_args"}
 
+PROBLEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["id", "root_node", "goal_node", "nodes", "edges"],
+    "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "root_node": {"type": "string", "minLength": 1},
+        "goal_node": {"type": "string", "minLength": 1},
+        "nodes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["id", "sympy_srepr"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "sympy_srepr": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["from", "to", "rule"],
+                "properties": {
+                    "from": {"type": "string", "minLength": 1},
+                    "to": {"type": "string", "minLength": 1},
+                    "rule": {"type": "string", "minLength": 1},
+                    "rule_args": {"type": "object"},
+                },
+            },
+        },
+    },
+}
+
+PROBLEM_VALIDATOR = Draft202012Validator(PROBLEM_SCHEMA)
+
 
 class ProblemJsonError(ValueError):
     pass
+
+
+def _schema_path(error: ValidationError) -> str:
+    if not error.path:
+        return "$"
+    parts = ["$"]
+    for part in error.path:
+        if isinstance(part, int):
+            parts.append(f"[{part}]")
+        else:
+            parts.append(f".{part}")
+    return "".join(parts)
+
+
+def _validate_schema(problem: Any) -> None:
+    errors = sorted(PROBLEM_VALIDATOR.iter_errors(problem), key=lambda e: tuple(str(p) for p in e.path))
+    if errors:
+        error = errors[0]
+        raise ProblemJsonError(f"schema validation failed at {_schema_path(error)}: {error.message}")
 
 
 def known_rule_names() -> list[str]:
@@ -122,6 +184,8 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 def validate_problem(problem: dict[str, Any], *, problem_id: str) -> dict[str, Any]:
     """Validate the graph schema enough to safely hand it to verify.py."""
+    _validate_schema(problem)
+
     extra = set(problem) - PROBLEM_KEYS
     if extra:
         raise ProblemJsonError(f"unexpected top-level keys: {sorted(extra)}")

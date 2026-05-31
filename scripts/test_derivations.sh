@@ -8,6 +8,7 @@ source "$ROOT/scripts/_derivation_python.sh"
 
 "$PY" -m py_compile \
   derivations/graph_normalize.py \
+  derivations/json_inner.py \
   derivations/inner_evolve.py \
   derivations/canvas_check.py \
   derivations/target_check.py \

@@ -51,6 +51,10 @@ def batch_started_at(batch_dir: Path) -> str:
     checkpoint = batch_dir / "checkpoint.json"
     if not checkpoint.exists():
         return ""
+    try:
+        return json.loads(checkpoint.read_text()).get("started_at", "")
+    except Exception:
+        return ""
 
 
 def transition_for_iter(iter_dir: Path) -> dict:
@@ -67,10 +71,6 @@ def transition_for_iter(iter_dir: Path) -> dict:
         }
     except Exception:
         return {"score": 0.0, "verdict": "unreadable"}
-    try:
-        return json.loads(checkpoint.read_text()).get("started_at", "")
-    except Exception:
-        return ""
 
 
 def find_seed_variant(target: str, *, current_batch_id: str | None = None) -> dict | None:

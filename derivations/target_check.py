@@ -41,6 +41,8 @@ KNOWN_FUNCS = {
     "E": sp.E,
     "oo": sp.oo,
     "Rational": sp.Rational,
+    "Derivative": sp.Derivative,
+    "Limit": sp.Limit,
 }
 STOPWORDS = {
     "a",
@@ -82,13 +84,14 @@ STOPWORDS = {
 
 
 def normalize_text(text: str) -> str:
-    return (
+    text = (
         text.replace("ω", "omega")
         .replace("π", "pi")
         .replace("θ", "theta")
         .replace("−", "-")
         .replace("√", "sqrt")
     )
+    return re.sub(r"\bd\s*/\s*d([A-Za-z]\w*)\s*\(([^()]+)\)", r"Derivative(\2, \1)", text)
 
 
 def local_dict_for(text: str) -> dict:

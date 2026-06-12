@@ -1,0 +1,8 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "rewrite_within_limit",
+  "aliases": ["expand_within_limit", "cancel_within_limit", "simplify_within_limit"],
+  "kind": "limit_rewrite",
+  "args_prompt": "{}",
+  "safety": "rewrites only the expression inside a Limit; the limit variable, point, direction, and the other equation side must stay fixed; one local rewrite per edge (expand, cancel, or collect -- not several at once)"
+}

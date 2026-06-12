@@ -11,9 +11,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sympy import Eq, Symbol, simplify, solve, sqrt
+import sympy as sp
+from sympy import Derivative, Eq, Limit, Symbol, simplify, solve, sqrt
 
-from sympy_eval import align_symbols_to, expr_equal_zero, parse_arg
+from sympy_eval import align_symbols_to, expr_equal_zero, parse_arg, strip_symbol_assumptions
 
 
 ROOT = Path(__file__).resolve().parent
@@ -242,12 +243,141 @@ def validate_symbolic_equivalence(from_expr, to_expr, args: dict, spec: dict[str
     return ("FAIL", "symbolic equivalence proof obligation failed")
 
 
+def _unique_limit_side(eq: Eq) -> str | None:
+    sides = [name for name in ("lhs", "rhs") if isinstance(getattr(eq, name), Limit)]
+    return sides[0] if len(sides) == 1 else None
+
+
+def _limit_args(limit: Limit):
+    body, var, point = limit.args[0], limit.args[1], limit.args[2]
+    direction = limit.args[3] if len(limit.args) > 3 else Symbol("+")
+    return body, var, point, direction
+
+
+def validate_limit_definition(from_expr, to_expr, args: dict, spec: dict[str, Any]) -> tuple[str, str]:
+    """to_expr must be from_expr with one Derivative replaced by its literal
+    difference quotient: Limit((f(var+h) - f(var))/h, h, 0) with a fresh h.
+
+    The body comparison is structural on purpose: a pre-simplified quotient
+    (e.g. 2*x + h) is algebraically equal but skips the rewrite steps this
+    rule exists to make visible, so it must arrive via rewrite edges instead.
+    """
+    if not (isinstance(from_expr, Eq) and isinstance(to_expr, Eq)):
+        return ("FAIL", "both endpoints must be Eq")
+    derivs = sorted(from_expr.atoms(Derivative), key=sp.default_sort_key)
+    if not derivs:
+        return ("FAIL", "from_expr contains no unevaluated Derivative")
+    new_limits = [lim for lim in to_expr.atoms(Limit) if lim not in from_expr.atoms(Limit)]
+    if len(new_limits) != 1:
+        return ("FAIL", "to_expr must introduce exactly one new Limit")
+    limit = new_limits[0]
+    body, lvar, point, _direction = _limit_args(limit)
+    if point != 0:
+        return ("FAIL", "difference-quotient limit must approach 0")
+    if not isinstance(lvar, Symbol):
+        return ("FAIL", "limit variable must be a Symbol")
+    if from_expr.has(lvar):
+        return ("FAIL", f"limit variable {lvar} must be fresh (it already appears in from_expr)")
+    stripped_body = strip_symbol_assumptions(body)
+    for deriv in derivs:
+        if len(deriv.variables) != 1:
+            continue
+        var = deriv.variables[0]
+        e = deriv.expr
+        expected_body = (e.subs(var, var + lvar) - e) / lvar
+        expected_body = strip_symbol_assumptions(expected_body)
+        if stripped_body != expected_body and strip_symbol_assumptions(sp.together(body)) != expected_body:
+            continue
+        expected = strip_symbol_assumptions(from_expr.xreplace({deriv: limit}))
+        if expected == strip_symbol_assumptions(to_expr):
+            return ("PASS", f"replaced {deriv} by its literal difference quotient in {lvar} -> 0")
+    return (
+        "FAIL",
+        "to_expr must be from_expr with one Derivative replaced by the literal "
+        "difference quotient Limit((f(var+h) - f(var))/h, h, 0); do not pre-expand or pre-cancel",
+    )
+
+
+def validate_limit_rewrite(from_expr, to_expr, args: dict, spec: dict[str, Any]) -> tuple[str, str]:
+    """Rewrite only the body of a Limit; variable, point, direction, and the
+    other equation side must stay fixed. Bodies must be equal as symbolic
+    expressions (equality on a punctured neighborhood, so removable points
+    such as cancelling h from (2*x*h + h**2)/h are allowed)."""
+    if not (isinstance(from_expr, Eq) and isinstance(to_expr, Eq)):
+        return ("FAIL", "both endpoints must be Eq")
+    side = _unique_limit_side(from_expr)
+    if side is None:
+        return ("FAIL", "from_expr must have exactly one side that is an unevaluated Limit")
+    other = "rhs" if side == "lhs" else "lhs"
+    to_side = getattr(to_expr, side)
+    if not isinstance(to_side, Limit):
+        return ("FAIL", f"the {side} of to_expr must remain an unevaluated Limit")
+    if not _eq_zero(getattr(to_expr, other) - getattr(from_expr, other)):
+        return ("FAIL", "the non-limit side must stay unchanged")
+    f_body, f_var, f_point, f_dir = _limit_args(getattr(from_expr, side))
+    t_body, t_var, t_point, t_dir = _limit_args(to_side)
+    if strip_symbol_assumptions(t_var) != strip_symbol_assumptions(f_var):
+        return ("FAIL", "limit variable must stay unchanged")
+    if not _eq_zero(t_point - f_point):
+        return ("FAIL", "limit point must stay unchanged")
+    if str(t_dir) != str(f_dir):
+        return ("FAIL", "limit direction must stay unchanged")
+    if strip_symbol_assumptions(f_body) == strip_symbol_assumptions(t_body):
+        return ("FAIL", "rewrite made no change")
+    if _eq_zero(f_body - t_body):
+        return ("PASS", "limit bodies are equal on a punctured neighborhood of the limit point")
+    return ("FAIL", "limit bodies are not symbolically equal")
+
+
+def validate_limit_evaluate(from_expr, to_expr, args: dict, spec: dict[str, Any]) -> tuple[str, str]:
+    """Evaluate a Limit by direct substitution. Only valid when the body is
+    continuous at the point: the substitution must be defined and must agree
+    with the computed limit. A 0/0 form fails -- cancel inside the limit first."""
+    if not (isinstance(from_expr, Eq) and isinstance(to_expr, Eq)):
+        return ("FAIL", "both endpoints must be Eq")
+    side = _unique_limit_side(from_expr)
+    if side is None:
+        return ("FAIL", "from_expr must have exactly one side that is an unevaluated Limit")
+    other = "rhs" if side == "lhs" else "lhs"
+    if not _eq_zero(getattr(to_expr, other) - getattr(from_expr, other)):
+        return ("FAIL", "the non-limit side must stay unchanged")
+    to_side = getattr(to_expr, side)
+    if to_side.has(Limit):
+        return ("FAIL", f"the {side} of to_expr must be the evaluated limit, not another Limit")
+    limit = getattr(from_expr, side)
+    body, var, point, _direction = _limit_args(limit)
+    try:
+        substituted = body.subs(var, point)
+    except Exception as e:
+        return ("FAIL", f"could not substitute the limit point: {type(e).__name__}: {e}")
+    if substituted.has(sp.nan, sp.zoo, sp.oo, sp.S.NegativeInfinity):
+        return (
+            "FAIL",
+            "body is not continuous at the limit point (substitution is undefined); "
+            "rewrite/cancel inside the limit first",
+        )
+    try:
+        computed = limit.doit()
+    except Exception as e:
+        return ("FAIL", f"could not certify the limit value: {type(e).__name__}: {e}")
+    if computed.has(Limit):
+        return ("FAIL", "could not certify the limit value (limit did not evaluate)")
+    if not _eq_zero(computed - substituted):
+        return ("FAIL", "direct substitution does not agree with the limit; the body is not continuous at the point")
+    if _eq_zero(to_side - substituted):
+        return ("PASS", f"evaluated limit by substitution at {var} = {point} (continuity certified)")
+    return ("FAIL", f"to_expr's {side} must equal the limit value {substituted}")
+
+
 CONTRACT_VALIDATORS = {
     "sidewise": validate_sidewise,
     "substitute": validate_substitute,
     "principal_sqrt": validate_principal_sqrt,
     "swap_sides": validate_swap_sides,
     "symbolic_equivalence": validate_symbolic_equivalence,
+    "limit_definition": validate_limit_definition,
+    "limit_rewrite": validate_limit_rewrite,
+    "limit_evaluate": validate_limit_evaluate,
 }
 
 

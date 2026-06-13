@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "derive the minimum drop height h = 5R/2 for a ball completing a vertical loop, given (1) centripetal: m*g = m*v^2/R and (2) energy: (1/2)*m*v^2 + m*g*(2R) = m*g*h",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "FAIL",
+    "target_goal_reached": "PASS",
+    "overall": "FAIL"
+  },
+  "rationale": "The substitution v^2 -> g*R uses a consequence of given (1) centripetal m*g = m*v^2/R, but that fact never appears as a visible node; only the energy equation is shown.",
+  "notes": "",
+  "label_provenance": "seed"
+}

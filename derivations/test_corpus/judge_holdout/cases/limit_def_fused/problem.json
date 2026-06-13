@@ -1,0 +1,23 @@
+{
+  "root_node": "n0",
+  "goal_node": "n1",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(Derivative(x**2, x), Limit(((x + Symbol('h'))**2 - x**2)/Symbol('h'), Symbol('h'), 0), evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(Derivative(x**2, x), 2*x, evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n1",
+      "rule": "evaluate_limit",
+      "rule_args": {}
+    }
+  ],
+  "id": "limit_def_fused"
+}

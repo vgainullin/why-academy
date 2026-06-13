@@ -1,0 +1,35 @@
+{
+  "root_node": "n0",
+  "goal_node": "n2",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(Mul(Integer(2), Add(x, Integer(3)), evaluate=False), Integer(10), evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(2*x, 4, evaluate=False)"
+    },
+    {
+      "id": "n2",
+      "sympy_srepr": "Eq(x, 2, evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n1",
+      "rule": "expand_expression",
+      "rule_args": {}
+    },
+    {
+      "from": "n1",
+      "to": "n2",
+      "rule": "divide_both_sides",
+      "rule_args": {
+        "divisor": "2"
+      }
+    }
+  ],
+  "id": "fused_distribute_subtract"
+}

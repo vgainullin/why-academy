@@ -102,6 +102,40 @@ canvas failures, not only judge failures. The next iteration records
 This lets the system distinguish acceptance, improvement, same-gate movement,
 and regression before any addendum is considered for reuse or promotion.
 
+## Judge Hardening
+
+The pedagogical judge is the one non-deterministic acceptance gate, so a single
+LLM call must not be the sole arbiter of whether a graph ships as curriculum.
+Two mechanisms harden it:
+
+- **Adversarial second pass** (`prompts/judge_adversarial.md`): when the primary
+  judge returns PASS, a second model is prompted specifically to refute that
+  PASS against the same rubric, ideally on a different engine so errors
+  decorrelate (config default: DeepSeek primary, Claude adversarial). A
+  validated refutation flips the verdict to FAIL. An adversarial pass that
+  cannot run fails **closed** (`overall: ERROR`) unless
+  `adversarial_judge.fail_mode` is `open` -- a PASS that skipped its second gate
+  is never silently accepted. Everything routes through `judge.py`, so all
+  callers get the same hardened gate.
+
+- **Human-labeled holdout** (`test_corpus/judge_holdout/`): the verifier is
+  checked by its own tests; this corpus checks the judge. The calibration
+  harness mirrors production gate ordering -- it runs the verifier first and
+  only measures the judge on graphs that actually reach it (verifier-rejected
+  graphs are reported separately and cannot be judge false-passes). The metric
+  that gates judge/prompt changes is **false passes**: cases a human labeled
+  FAIL that the judge passed.
+
+```bash
+scripts/judge_calibration.sh                 # primary judge alone
+scripts/judge_calibration.sh --adversarial   # the verdict the pipeline uses
+```
+
+Thresholds (`judge_calibration` config section) default to zero false passes
+and >= 80% overall agreement. Seed labels measure consistency with the harness
+author, not ground truth; flip each case's `label_provenance` to
+`human_confirmed` after review to make the verdict meaningful.
+
 ## Trust Boundary
 
 Generated graph expressions are untrusted input. `sympy_eval.py` intentionally

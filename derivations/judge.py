@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Pedagogical quality judge.
+"""Pedagogical quality judge with an adversarial second pass.
 
-Invokes a cheap LLM model against the rubric in prompts/judge_eval.md.
-Reads the problem JSON, renders each node to LaTeX, builds the graph block, fills
-the prompt's <<TARGET>> and <<GRAPH>> placeholders, calls the configured engine, parses the
-returned JSON, and writes <problem>.judge.json next to the problem.
+Primary pass: the configured engine/model evaluates the graph against the
+rubric in prompts/judge_eval.md (deepseek-* models dispatch to
+deepseek_judge.py; both backends write the same sidecar schema).
 
-Exit code: 0 iff `overall` is "PASS"; 1 if FAIL; 2 on any wrapper error (claude
-non-zero, JSON unparseable, etc.) -- wrapper errors are distinct from FAIL so
-inner.sh can decide whether to treat them as gate failures.
+Adversarial pass: when the primary verdict is PASS and adversarial_judge is
+enabled in the pipeline config, a second model is prompted to refute the PASS
+(prompts/judge_adversarial.md), ideally on a different engine so errors
+decorrelate. A validated refutation flips `overall` to FAIL. If the
+adversarial pass cannot run, the verdict fails closed (`overall` ERROR)
+unless adversarial_judge.fail_mode is "open" -- a PASS that skipped its
+second gate must not be silently accepted.
+
+Exit code: 0 iff final `overall` is PASS; 1 if FAIL (including refuted);
+2 on wrapper errors (engine failure, unparseable JSON, adversarial error in
+fail-closed mode).
 """
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,7 +32,9 @@ from to_canvas import eq_to_latex, parse  # noqa: E402
 from config import load_config  # noqa: E402
 from llm_cli import LLMEngineError, QuotaExhaustedError, run_prompt, step_engine  # noqa: E402
 
-JUDGE_VERSION = "0.2"
+JUDGE_VERSION = "0.3"
+ADVERSARIAL_VERSION = "0.1"
+RUBRIC_KEYS = ("one_rule_per_edge", "given_facts_visible", "target_goal_reached")
 
 
 def render_graph(problem: dict) -> str:
@@ -62,98 +72,204 @@ def _extract_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
+def adversarial_settings(cfg: dict) -> dict:
+    section = dict(cfg.get("adversarial_judge") or {})
+    return {
+        "enabled": bool(section.get("enabled", False)),
+        "engine": os.environ.get("ADVERSARIAL_JUDGE_ENGINE") or section.get("engine", "claude"),
+        "model": os.environ.get("ADVERSARIAL_JUDGE_MODEL") or section.get("model", "sonnet"),
+        "budget": str(section.get("budget_usd", cfg.get("budgets_usd", {}).get("judge", 1))),
+        "timeout": str(section.get("timeout_s", cfg.get("timeouts_s", {}).get("judge", 180))),
+        "fail_mode": section.get("fail_mode", "closed"),
+    }
+
+
+def validate_refutation(parsed: dict) -> tuple[bool, str]:
+    """A refutation must be well-formed before it may flip a verdict, and a
+    malformed uphold must not silently count as upheld either."""
+    refuted = parsed.get("refuted")
+    if not isinstance(refuted, bool):
+        return False, "refuted must be a JSON boolean"
+    if refuted:
+        if parsed.get("criterion") not in RUBRIC_KEYS:
+            return False, f"refutation must name one rubric criterion from {list(RUBRIC_KEYS)}"
+        reason = parsed.get("reason")
+        if not (isinstance(reason, str) and reason.strip()):
+            return False, "refutation must include a non-empty reason"
+    return True, ""
+
+
+def apply_adversarial(record: dict, adv: dict) -> dict:
+    """Merge an adversarial result into a primary judge record.
+
+    refuted -> overall FAIL; error in fail-closed mode -> overall ERROR
+    (never silently keep a PASS that skipped its second gate)."""
+    out = dict(record)
+    out["primary_overall"] = record.get("overall")
+    out["adversarial"] = adv
+    status = adv.get("status")
+    if status == "refuted":
+        out["overall"] = "FAIL"
+    elif status == "error" and adv.get("fail_mode", "closed") == "closed":
+        out["overall"] = "ERROR"
+    return out
+
+
+def run_adversarial_judge(problem: dict, target: str, record: dict, settings: dict) -> dict:
+    base = {
+        "adversarial_version": ADVERSARIAL_VERSION,
+        "engine": settings["engine"],
+        "model": settings["model"],
+        "fail_mode": settings["fail_mode"],
+    }
+    template = (ROOT / "prompts" / "judge_adversarial.md").read_text()
+    prompt = (
+        template.replace("<<TARGET>>", target)
+        .replace("<<GRAPH>>", render_graph(problem))
+        .replace("<<PRIMARY_VERDICTS>>", json.dumps(record.get("verdicts"), indent=2))
+    )
+    try:
+        result = run_prompt(
+            prompt,
+            engine=settings["engine"],
+            model=settings["model"],
+            budget=settings["budget"],
+            timeout_s=settings["timeout"],
+        )
+    except (QuotaExhaustedError, LLMEngineError) as e:
+        return {**base, "status": "error", "error": f"{type(e).__name__}: {e}"}
+    if result.returncode != 0:
+        return {
+            **base,
+            "status": "error",
+            "error": f"{settings['engine']} exited {result.returncode}",
+            "stderr_tail": result.stderr[-300:],
+        }
+    try:
+        parsed = _extract_json(result.stdout)
+    except Exception as e:
+        return {
+            **base,
+            "status": "error",
+            "error": f"could not parse adversarial JSON: {e}",
+            "raw_tail": result.stdout[-300:],
+        }
+    ok, why = validate_refutation(parsed)
+    if not ok:
+        return {**base, "status": "error", "error": f"malformed adversarial verdict: {why}", "parsed": parsed}
+    if parsed["refuted"]:
+        return {**base, "status": "refuted", "criterion": parsed["criterion"], "reason": parsed["reason"].strip()}
+    return {**base, "status": "upheld", "reason": str(parsed.get("reason", "")).strip()}
+
+
+def _run_primary_deepseek(problem_path: Path, target: str, model: str, timeout: str, out_suffix: str) -> int:
+    cmd = [
+        sys.executable,
+        str(ROOT / "deepseek_judge.py"),
+        str(problem_path),
+        "--target",
+        target,
+        "--model",
+        model,
+        "--out-suffix",
+        out_suffix,
+    ]
+    try:
+        result = subprocess.run(cmd, timeout=int(timeout) + 30)
+    except subprocess.TimeoutExpired:
+        print(f"[judge] deepseek timed out after {timeout}s", file=sys.stderr)
+        return 2
+    return result.returncode
+
+
 def main() -> int:
     cfg, cfg_version = load_config()
     ap = argparse.ArgumentParser()
     ap.add_argument("problem", help="path to derivations/problems/<id>.json")
     ap.add_argument("--target", required=True, help="original target passed to the inner-loop run")
-    ap.add_argument("--engine", default=step_engine(cfg, "judge"), help="LLM engine: claude or codex")
-    ap.add_argument("--model", default=cfg["models"]["judge"], help="claude model alias")
+    ap.add_argument("--engine", default=step_engine(cfg, "judge"), help="LLM engine: claude, codex, or deepseek")
+    ap.add_argument("--model", default=cfg["models"]["judge"], help="model alias")
     ap.add_argument("--budget", default=str(cfg["budgets_usd"]["judge"]), help="--max-budget-usd")
     ap.add_argument("--timeout", default=str(cfg["timeouts_s"]["judge"]), help="seconds")
+    ap.add_argument("--out-suffix", default=".judge.json")
+    ap.add_argument("--no-adversarial", action="store_true",
+                    help="skip the adversarial second pass (e.g. to calibrate the primary judge alone)")
     args = ap.parse_args()
 
     problem_path = Path(args.problem)
     problem = json.loads(problem_path.read_text())
     pid = problem["id"]
+    sidecar = problem_path.with_name(problem_path.stem + args.out_suffix)
 
     if args.engine == "deepseek" or args.model.startswith("deepseek"):
-        cmd = [
-            sys.executable,
-            str(ROOT / "deepseek_judge.py"),
-            str(problem_path),
-            "--target",
-            args.target,
-            "--model",
-            args.model,
-            "--out-suffix",
-            ".judge.json",
-        ]
-        try:
-            result = subprocess.run(cmd, timeout=int(args.timeout) + 30)
-        except subprocess.TimeoutExpired:
-            print(f"[judge] deepseek timed out after {args.timeout}s", file=sys.stderr)
+        rc = _run_primary_deepseek(problem_path, args.target, args.model, args.timeout, args.out_suffix)
+        if rc not in (0, 1) or not sidecar.exists():
             return 2
-        return result.returncode
+        record = json.loads(sidecar.read_text())
+        record["config_version"] = cfg_version
+    else:
+        template = (ROOT / "prompts" / "judge_eval.md").read_text()
+        prompt = template.replace("<<TARGET>>", args.target).replace("<<GRAPH>>", render_graph(problem))
+        try:
+            result = run_prompt(
+                prompt,
+                engine=args.engine,
+                model=args.model,
+                budget=args.budget,
+                timeout_s=args.timeout,
+            )
+        except QuotaExhaustedError as e:
+            print(f"[judge] quota exhausted: {e}", file=sys.stderr)
+            return 2
+        except LLMEngineError as e:
+            print(f"[judge] {e}", file=sys.stderr)
+            return 2
+        if result.returncode != 0:
+            print(f"[judge] {args.engine} exited {result.returncode}", file=sys.stderr)
+            print(result.stderr[-500:], file=sys.stderr)
+            return 2
+        raw = result.stdout
+        try:
+            parsed_json = _extract_json(raw)
+        except Exception as e:
+            print(f"[judge] could not parse JSON from {args.engine} output: {e}", file=sys.stderr)
+            print(f"[judge] raw output (last 500 chars):\n{raw[-500:]}", file=sys.stderr)
+            return 2
+        record = {
+            "problem_id": pid,
+            "judge_version": JUDGE_VERSION,
+            "config_version": cfg_version,
+            "backend": args.engine,
+            "model": args.model,
+            "target": args.target,
+            "verdicts": {k: parsed_json.get(k) for k in RUBRIC_KEYS},
+            "overall": parsed_json.get("overall", "FAIL"),
+        }
 
-    template = (ROOT / "prompts" / "judge_eval.md").read_text()
-    prompt = template.replace("<<TARGET>>", args.target).replace("<<GRAPH>>", render_graph(problem))
-
-    try:
-        result = run_prompt(
-            prompt,
-            engine=args.engine,
-            model=args.model,
-            budget=args.budget,
-            timeout_s=args.timeout,
-        )
-    except QuotaExhaustedError as e:
-        print(f"[judge] quota exhausted: {e}", file=sys.stderr)
-        return 2
-    except LLMEngineError as e:
-        print(f"[judge] {e}", file=sys.stderr)
-        return 2
-
-    if result.returncode != 0:
-        print(f"[judge] {args.engine} exited {result.returncode}", file=sys.stderr)
-        print(result.stderr[-500:], file=sys.stderr)
-        return 2
-
-    raw = result.stdout
-    try:
-        parsed_json = _extract_json(raw)
-    except Exception as e:
-        print(f"[judge] could not parse JSON from claude output: {e}", file=sys.stderr)
-        print(f"[judge] raw output (last 500 chars):\n{raw[-500:]}", file=sys.stderr)
-        return 2
-
-    overall = parsed_json.get("overall", "FAIL")
-
-    record = {
-        "problem_id": pid,
-        "judge_version": JUDGE_VERSION,
-        "config_version": cfg_version,
-        "backend": args.engine,
-        "model": args.model,
-        "target": args.target,
-        "verdicts": {
-            k: parsed_json.get(k)
-            for k in ("one_rule_per_edge", "given_facts_visible", "target_goal_reached")
-        },
-        "overall": overall,
-    }
-    sidecar = problem_path.with_name(problem_path.stem + ".judge.json")
+    settings = adversarial_settings(cfg)
+    run_adv = settings["enabled"] and not args.no_adversarial
+    if not run_adv:
+        record["adversarial"] = {"status": "disabled" if not settings["enabled"] else "skipped"}
+    elif record.get("overall") == "PASS":
+        adv = run_adversarial_judge(problem, args.target, record, settings)
+        record = apply_adversarial(record, adv)
+    else:
+        record["adversarial"] = {"status": "not_run", "reason": "primary verdict was not PASS"}
     sidecar.write_text(json.dumps(record, indent=2))
 
     print(f"JUDGE: {pid}")
-    print(f"  one_rule_per_edge:    {parsed_json.get('one_rule_per_edge', {}).get('verdict', '?'):6s}  "
-          f"{parsed_json.get('one_rule_per_edge', {}).get('reason', '')}")
-    print(f"  given_facts_visible:  {parsed_json.get('given_facts_visible', {}).get('verdict', '?'):6s}  "
-          f"{parsed_json.get('given_facts_visible', {}).get('reason', '')}")
-    print(f"  target_goal_reached:  {parsed_json.get('target_goal_reached', {}).get('verdict', '?'):6s}  "
-          f"{parsed_json.get('target_goal_reached', {}).get('reason', '')}")
+    for k in RUBRIC_KEYS:
+        v = record.get("verdicts", {}).get(k) or {}
+        print(f"  {k:22s}{v.get('verdict', '?'):6s}  {v.get('reason', '')}")
+    adv = record.get("adversarial", {})
+    if adv.get("status") in ("refuted", "upheld", "error"):
+        detail = adv.get("reason") or adv.get("error") or ""
+        print(f"  adversarial:          {adv['status'].upper():6s}  {detail}")
+    overall = record.get("overall", "FAIL")
     print(f"  OVERALL:              {overall}")
 
+    if overall == "ERROR":
+        return 2
     return 0 if overall == "PASS" else 1
 
 

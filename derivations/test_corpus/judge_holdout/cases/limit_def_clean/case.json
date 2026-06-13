@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "derive d/dx(x^2) = 2x from the limit definition of the derivative",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "SKIP",
+    "target_goal_reached": "PASS",
+    "overall": "PASS"
+  },
+  "rationale": "Difference quotient expanded, cancelled, then evaluated by substitution -- one rule per edge, exact goal.",
+  "notes": "",
+  "label_provenance": "seed"
+}

@@ -525,20 +525,14 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                 continue
             break
 
-        # judge -- dispatch based on model name: deepseek-* -> DeepSeek API,
-        # everything else -> Claude `judge.py`. Both write to the same sidecar
-        # filename so downstream code doesn't have to know which backend ran.
-        if judge_engine == "deepseek" or judge_model.startswith("deepseek"):
-            judge_res = _run_py("derivations/deepseek_judge.py",
-                                str(iter_dir / "problem.json"),
-                                "--target", target, "--model", judge_model,
-                                "--out-suffix", ".judge.json")
-        else:
-            judge_res = _run_py("derivations/judge.py",
-                                str(iter_dir / "problem.json"),
-                                "--target", target,
-                                "--engine", judge_engine,
-                                "--model", judge_model)
+        # judge -- judge.py dispatches deepseek-* models internally and runs
+        # the adversarial second pass on PASS verdicts (config: adversarial_judge),
+        # so every caller goes through the same hardened gate.
+        judge_res = _run_py("derivations/judge.py",
+                            str(iter_dir / "problem.json"),
+                            "--target", target,
+                            "--engine", judge_engine,
+                            "--model", judge_model)
         (iter_dir / "judge.log").write_text(judge_res.stdout + judge_res.stderr)
         judge_sidecar = iter_dir / "problem.judge.json"
         overall = _judge_overall(judge_sidecar)

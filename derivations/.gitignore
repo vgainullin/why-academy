@@ -1,1 +1,7 @@
 .venv/
+test_corpus/judge_holdout/reports/
+test_corpus/judge_holdout/cases/*/problem.verifier.json
+test_corpus/judge_holdout/cases/*/problem.canvas_check.json
+test_corpus/judge_holdout/cases/*/problem.canvas.json
+test_corpus/judge_holdout/cases/*/problem.target_check.json
+test_corpus/judge_holdout/cases/*/problem.judge*.json

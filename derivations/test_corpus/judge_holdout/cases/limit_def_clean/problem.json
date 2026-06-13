@@ -1,0 +1,43 @@
+{
+  "root_node": "n0",
+  "goal_node": "n3",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(Derivative(x**2, x), Limit(((x + Symbol('h'))**2 - x**2)/Symbol('h'), Symbol('h'), 0), evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(Derivative(x**2, x), Limit((2*x*Symbol('h') + Symbol('h')**2)/Symbol('h'), Symbol('h'), 0), evaluate=False)"
+    },
+    {
+      "id": "n2",
+      "sympy_srepr": "Eq(Derivative(x**2, x), Limit(2*x + Symbol('h'), Symbol('h'), 0), evaluate=False)"
+    },
+    {
+      "id": "n3",
+      "sympy_srepr": "Eq(Derivative(x**2, x), 2*x, evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n1",
+      "rule": "expand_within_limit",
+      "rule_args": {}
+    },
+    {
+      "from": "n1",
+      "to": "n2",
+      "rule": "cancel_within_limit",
+      "rule_args": {}
+    },
+    {
+      "from": "n2",
+      "to": "n3",
+      "rule": "evaluate_limit",
+      "rule_args": {}
+    }
+  ],
+  "id": "limit_def_clean"
+}

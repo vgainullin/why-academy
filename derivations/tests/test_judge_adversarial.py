@@ -98,6 +98,15 @@ class AdversarialSettingsTests(unittest.TestCase):
         finally:
             del os.environ["ADVERSARIAL_JUDGE_MODEL"]
 
+    def test_env_can_request_engine_default_model(self) -> None:
+        import os
+        os.environ["ADVERSARIAL_JUDGE_MODEL"] = "default"
+        try:
+            s = judge.adversarial_settings({"adversarial_judge": {"enabled": True, "model": "opus"}})
+            self.assertIsNone(s["model"])
+        finally:
+            del os.environ["ADVERSARIAL_JUDGE_MODEL"]
+
 
 class ProductionJudgeRoutingTests(unittest.TestCase):
     def test_legacy_evolution_script_routes_through_judge_wrapper(self) -> None:

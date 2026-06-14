@@ -212,6 +212,38 @@ def run_prompt(
         _check_quota((normalized.stdout or "") + (normalized.stderr or ""), quota_patterns)
         return normalized
 
+    if engine == "openrouter":
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise LLMEngineError("OPENROUTER_API_KEY not set")
+        selected_model = model or os.environ.get("OPENROUTER_MODEL")
+        if not selected_model:
+            raise LLMEngineError("OpenRouter model not set; pass --model or set OPENROUTER_MODEL")
+        base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+            resp = client.chat.completions.create(
+                model=selected_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+        except Exception as e:
+            return subprocess.CompletedProcess(
+                args=["openrouter", selected_model],
+                returncode=1,
+                stdout="",
+                stderr=f"{type(e).__name__}: {e}",
+            )
+        raw = resp.choices[0].message.content or ""
+        _check_quota(raw, quota_patterns)
+        return subprocess.CompletedProcess(
+            args=["openrouter", selected_model],
+            returncode=0,
+            stdout=raw,
+            stderr="",
+        )
+
     raise LLMEngineError(f"unknown LLM engine: {engine!r}")
 
 

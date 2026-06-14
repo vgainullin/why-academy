@@ -74,10 +74,15 @@ def _extract_json(text: str) -> dict:
 
 def adversarial_settings(cfg: dict) -> dict:
     section = dict(cfg.get("adversarial_judge") or {})
+    model_override = os.environ.get("ADVERSARIAL_JUDGE_MODEL")
+    if model_override is not None and model_override.strip().lower() in ("", "default", "none"):
+        model = None
+    else:
+        model = model_override or section.get("model", "sonnet")
     return {
         "enabled": bool(section.get("enabled", False)),
         "engine": os.environ.get("ADVERSARIAL_JUDGE_ENGINE") or section.get("engine", "claude"),
-        "model": os.environ.get("ADVERSARIAL_JUDGE_MODEL") or section.get("model", "sonnet"),
+        "model": model,
         "budget": str(section.get("budget_usd", cfg.get("budgets_usd", {}).get("judge", 1))),
         "timeout": str(section.get("timeout_s", cfg.get("timeouts_s", {}).get("judge", 180))),
         "fail_mode": section.get("fail_mode", "closed"),

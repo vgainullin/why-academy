@@ -10,6 +10,7 @@ source "$ROOT/scripts/_derivation_python.sh"
   derivations/graph_normalize.py \
   derivations/json_inner.py \
   derivations/inner_evolve.py \
+  derivations/introspective_log_review.py \
   derivations/rule_contracts.py \
   derivations/canvas_check.py \
   derivations/target_check.py \

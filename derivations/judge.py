@@ -87,15 +87,24 @@ def adversarial_settings(cfg: dict) -> dict:
 def validate_refutation(parsed: dict) -> tuple[bool, str]:
     """A refutation must be well-formed before it may flip a verdict, and a
     malformed uphold must not silently count as upheld either."""
+    if not isinstance(parsed, dict):
+        return False, "adversarial verdict must be a JSON object"
     refuted = parsed.get("refuted")
     if not isinstance(refuted, bool):
         return False, "refuted must be a JSON boolean"
+    reason = parsed.get("reason")
+    if not isinstance(reason, str):
+        return False, "reason must be a JSON string"
     if refuted:
         if parsed.get("criterion") not in RUBRIC_KEYS:
             return False, f"refutation must name one rubric criterion from {list(RUBRIC_KEYS)}"
-        reason = parsed.get("reason")
-        if not (isinstance(reason, str) and reason.strip()):
+        if not reason.strip():
             return False, "refutation must include a non-empty reason"
+    else:
+        if parsed.get("criterion") is not None:
+            return False, "upheld verdict must set criterion to null"
+        if reason.strip():
+            return False, "upheld verdict must leave reason empty"
     return True, ""
 
 

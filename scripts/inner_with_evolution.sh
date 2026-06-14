@@ -230,13 +230,8 @@ PYEOF
 
   # Judge
   set +e
-  if [[ "$JUDGE_ENGINE" == "deepseek" || "$JUDGE_MODEL" == deepseek* ]]; then
-    "$PY" derivations/deepseek_judge.py "$ITER_DIR/problem.json" --target "$TARGET" --model "$JUDGE_MODEL" --out-suffix ".judge.json" \
-      > "$ITER_DIR/judge.log" 2>&1
-  else
-    "$PY" derivations/judge.py "$ITER_DIR/problem.json" --target "$TARGET" --engine "$JUDGE_ENGINE" --model "$JUDGE_MODEL" \
-      > "$ITER_DIR/judge.log" 2>&1
-  fi
+  "$PY" derivations/judge.py "$ITER_DIR/problem.json" --target "$TARGET" --engine "$JUDGE_ENGINE" --model "$JUDGE_MODEL" \
+    > "$ITER_DIR/judge.log" 2>&1
   JUDGE_EXIT=$?
   set -e
 

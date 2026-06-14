@@ -22,6 +22,18 @@ class ValidateRefutationTests(unittest.TestCase):
         ok, _ = judge.validate_refutation({"refuted": False, "criterion": None, "reason": ""})
         self.assertTrue(ok)
 
+    def test_uphold_with_criterion_rejected(self) -> None:
+        ok, why = judge.validate_refutation(
+            {"refuted": False, "criterion": "target_goal_reached", "reason": ""})
+        self.assertFalse(ok)
+        self.assertIn("criterion", why)
+
+    def test_uphold_with_reason_rejected(self) -> None:
+        ok, why = judge.validate_refutation(
+            {"refuted": False, "criterion": None, "reason": "No concrete violation."})
+        self.assertFalse(ok)
+        self.assertIn("reason", why)
+
     def test_non_bool_refuted_rejected(self) -> None:
         ok, why = judge.validate_refutation({"refuted": "yes"})
         self.assertFalse(ok)
@@ -85,6 +97,13 @@ class AdversarialSettingsTests(unittest.TestCase):
             self.assertEqual(s["model"], "haiku")
         finally:
             del os.environ["ADVERSARIAL_JUDGE_MODEL"]
+
+
+class ProductionJudgeRoutingTests(unittest.TestCase):
+    def test_legacy_evolution_script_routes_through_judge_wrapper(self) -> None:
+        script = (ROOT / "scripts" / "inner_with_evolution.sh").read_text()
+        self.assertIn("derivations/judge.py", script)
+        self.assertNotIn("derivations/deepseek_judge.py", script)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,8 @@ code instead of asking the model to emit final graph edges directly.
 - Treatment worktree: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment`
 - Treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_002`
 - Treatment JSONL: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/logs/epoch_001/batch_tactic_real_pilot_20260615_002.jsonl`
+- Expanded treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_003`
+- Fresh JSON control batch: `derivations/_evolutions/batches/tactic_control_json_pilot_20260615_001`
 
 ## Treatment
 
@@ -96,3 +98,45 @@ Required proof before full A/B:
 - real pilot on `derivations/targets/e2e_smoke.txt`
 - side-by-side comparison against the existing control batch
 
+## Expanded Executor Result
+
+The next iteration added deterministic `solve_for_expression` and
+`substitute_into_equation` support plus verifier contracts for both rules.
+
+Treatment pilot `tactic_real_pilot_20260615_003` passed both targets:
+
+| Target | Result | Notes |
+| --- | --- | --- |
+| `solve x + 2 = 5 for x` | PASS | 1 verified edge |
+| vertical loop height | PASS | 4 verified edges: solve, substitute, simplify, solve |
+
+The vertical-loop treatment graph had:
+
+- verifier: 4 PASS edges, 0 FAIL/ERROR
+- target check: PASS, with both givens matched
+- primary judge: DeepSeek PASS
+- adversarial judge: OpenRouter Claude upheld
+- unsupported tactics: none
+
+Fresh JSON control `tactic_control_json_pilot_20260615_001` also passed both
+targets, but the vertical-loop graph used one `substitute_expression` edge from
+the energy equation directly to the already-combined `5*m*g*R/2 = m*g*h` form.
+That edge bundled substitution with simplification. The primary and adversarial
+judges both missed this and accepted the graph.
+
+Updated interpretation:
+
+- The treatment did not show acceptance lift on the tiny two-target pilot because
+  the fresh control was also accepted.
+- It did show material quality lift: the treatment accepted graph preserved the
+  one-operation-per-edge decomposition, while the accepted control graph still
+  contained the fused substitution/simplification pitfall.
+- This is evidence that typed tactic execution can reduce false-pass risk even
+  when the judge fails to detect the same issue.
+
+Next required experiment before merge:
+
+- Run a larger side-by-side workload, not just `e2e_smoke.txt`.
+- Score accepted graphs for fused substitution/simplification and fused
+  side-operation/orientation changes, not only acceptance.
+- Treat accepted-but-fused control outputs as false passes.

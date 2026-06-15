@@ -16,6 +16,8 @@ code instead of asking the model to emit final graph edges directly.
 - Expanded treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_003`
 - Corrected treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_004`
 - Fresh JSON control batch: `derivations/_evolutions/batches/tactic_control_json_pilot_20260615_001`
+- Larger JSON control batch: `derivations/_evolutions/batches/ab_control_json_queue_20260615_001`
+- Larger tactic treatment batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/ab_tactic_queue_20260615_001`
 
 ## Treatment
 
@@ -148,3 +150,56 @@ Next required experiment before merge:
 - Score accepted graphs for fused substitution/simplification and fused
   side-operation/orientation changes, not only acceptance.
 - Treat accepted-but-fused control outputs as false passes.
+
+## Larger Queue Result
+
+The larger side-by-side workload used `derivations/targets/queue.txt` with the
+same engines, `parallel=2`, and `max_iter=3`.
+
+| Batch | Mode | Accepted | Notes |
+| --- | --- | ---: | --- |
+| `ab_control_json_queue_20260615_001` | JSON control | 4/10 | 5 verifier failures, 1 judge failure |
+| `ab_tactic_queue_20260615_001` | tactic treatment | 4/10 | 0 verifier edge failures; failures moved to tactic schema/coverage/execution gaps |
+
+Target-level difference:
+
+- Both passed targets 000-002.
+- Control passed target 007, but treatment failed it at target check.
+- Treatment passed target 008 on the first iteration, while control failed target
+  008 at judge after the verifier accepted the graph.
+- Both failed targets 003-006 and 009.
+
+Key quality result:
+
+- Control accepted one graph with fused substitution/simplification: target 007,
+  edge `n0->n2`, `substitute_value`, expected `Eq(m*(-omega**2*x), -k*x)` but
+  accepted `Eq(-m*omega**2*x, -k*x)`.
+- Treatment accepted zero fused substitution/simplification graphs.
+- Treatment target 008 passed with a decomposed tactic sequence:
+  `solve_for_expression`, `substitute_into_equation`, `simplify_expression`,
+  `divide_both_sides`, `swap_sides`.
+- Control target 008's final graph was verifier-clean but judge-rejected because
+  edge `n4->n5` fused substitution with arithmetic simplification.
+
+Failure aggregate:
+
+- Control verifier failed rules included `factor_expression`,
+  `take_square_root`, `simplify_expression`,
+  `limit_definition_of_derivative`, `rewrite_within_limit`,
+  `multiply_both_sides`, `substitute_value`, `divide_both_sides`, and
+  `take_positive_square_root`.
+- Treatment had no verifier failed rules in this run.
+- Treatment unsupported/gap tactics included `factor_difference_of_squares`,
+  `take_square_root_both_sides`, `cancel_common_factor`, `evaluate_limit`,
+  `expand_expression`, and `take_principal_square_root_both_sides`.
+
+Interpretation after the larger workload:
+
+- Acceptance rate is neutral on this queue: 4/10 vs 4/10.
+- Pedagogical graph quality improved: accepted tactic graphs avoided the fused
+  substitution/simplification false-pass candidate seen in accepted control.
+- The treatment is not merge-ready as a universal replacement because it
+  regressed target 007 and has clear coverage gaps.
+- The next system step should be a first-class accepted-graph quality scorer and
+  targeted tactic coverage for square roots/factoring/limit rewrites, evaluated
+  in the same side-by-side harness.

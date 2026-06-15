@@ -96,6 +96,34 @@ Build a canonical proof-graph layer:
 
 Then run fixed benchmark cohorts so we can separate real learning from churn.
 
+## Experiment Gates
+
+Every system alteration should move through reusable headless-agent gates before
+it spends real workload calls:
+
+- code-review gate
+- test-gate design
+- integration design
+- implementation
+- postbuild review
+- pilot runner
+- A/B analysis
+
+The role specs live in `derivations/experiment_agent_roles/`. Render a gate
+packet with:
+
+```bash
+scripts/experiment_agents.sh render \
+  --experiment-id tactic_inner_mode \
+  --hypothesis "typed tactic plans plus deterministic execution reduce fused-edge failures" \
+  --worktree /path/to/experiment/worktree \
+  --evidence /path/to/batch_metrics.json \
+  --evidence /path/to/introspection.json
+```
+
+The generated prompts are written under
+`derivations/_evolutions/experiment_agents/<experiment_id>/`.
+
 ## Related
 
 - `derivations/DISTILLATION.md`: distillation and worker contract

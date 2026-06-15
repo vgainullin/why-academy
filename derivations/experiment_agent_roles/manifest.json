@@ -1,0 +1,72 @@
+{
+  "schema_version": "experiment_agent_manifest.v1",
+  "description": "Reusable headless-agent gates for hypothesis-driven derivation experiments.",
+  "groups": {
+    "prebuild": [
+      "code_review_gate",
+      "test_gate_design",
+      "integration_design"
+    ],
+    "build": [
+      "implementation"
+    ],
+    "postbuild": [
+      "postbuild_code_review",
+      "pilot_runner",
+      "ab_analysis"
+    ],
+    "all": [
+      "code_review_gate",
+      "test_gate_design",
+      "integration_design",
+      "implementation",
+      "postbuild_code_review",
+      "pilot_runner",
+      "ab_analysis"
+    ]
+  },
+  "roles": {
+    "code_review_gate": {
+      "template": "code_review_gate.md",
+      "agent_type": "explorer",
+      "phase": "prebuild",
+      "output": "findings ordered by severity and a safe-to-build verdict"
+    },
+    "test_gate_design": {
+      "template": "test_gate_design.md",
+      "agent_type": "explorer",
+      "phase": "prebuild",
+      "output": "test checklist, smoke commands, and blockers"
+    },
+    "integration_design": {
+      "template": "integration_design.md",
+      "agent_type": "explorer",
+      "phase": "prebuild",
+      "output": "integration plan, artifacts, failure statuses, and run commands"
+    },
+    "implementation": {
+      "template": "implementation.md",
+      "agent_type": "worker",
+      "phase": "build",
+      "output": "bounded code changes, tests run, and limitations"
+    },
+    "postbuild_code_review": {
+      "template": "postbuild_code_review.md",
+      "agent_type": "explorer",
+      "phase": "postbuild",
+      "output": "merge/workload readiness findings"
+    },
+    "pilot_runner": {
+      "template": "pilot_runner.md",
+      "agent_type": "worker",
+      "phase": "postbuild",
+      "output": "local smoke and small pilot results"
+    },
+    "ab_analysis": {
+      "template": "ab_analysis.md",
+      "agent_type": "explorer",
+      "phase": "postbuild",
+      "output": "A/B comparison report and verdict against the hypothesis"
+    }
+  }
+}

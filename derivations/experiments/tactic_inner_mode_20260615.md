@@ -14,6 +14,7 @@ code instead of asking the model to emit final graph edges directly.
 - Treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_002`
 - Treatment JSONL: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/logs/epoch_001/batch_tactic_real_pilot_20260615_002.jsonl`
 - Expanded treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_003`
+- Corrected treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_004`
 - Fresh JSON control batch: `derivations/_evolutions/batches/tactic_control_json_pilot_20260615_001`
 
 ## Treatment
@@ -103,16 +104,23 @@ Required proof before full A/B:
 The next iteration added deterministic `solve_for_expression` and
 `substitute_into_equation` support plus verifier contracts for both rules.
 
-Treatment pilot `tactic_real_pilot_20260615_003` passed both targets:
+Treatment pilot `tactic_real_pilot_20260615_003` passed both targets, but code
+review found that it allowed `solve_for_expression` for bare symbol `h`. That
+made `solve_for_expression` too powerful: it could collapse final divide/swap
+isolation into one macro edge. The treatment was tightened so
+`solve_for_expression` is allowed only for compound expressions such as `v**2`;
+bare symbols must use sidewise tactics.
+
+Corrected treatment pilot `tactic_real_pilot_20260615_004` passed both targets:
 
 | Target | Result | Notes |
 | --- | --- | --- |
 | `solve x + 2 = 5 for x` | PASS | 1 verified edge |
-| vertical loop height | PASS | 4 verified edges: solve, substitute, simplify, solve |
+| vertical loop height | PASS | 7 verified edges: divide, multiply, swap, substitute, simplify, divide, swap |
 
 The vertical-loop treatment graph had:
 
-- verifier: 4 PASS edges, 0 FAIL/ERROR
+- verifier: 7 PASS edges, 0 FAIL/ERROR
 - target check: PASS, with both givens matched
 - primary judge: DeepSeek PASS
 - adversarial judge: OpenRouter Claude upheld

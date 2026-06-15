@@ -19,6 +19,17 @@ MANIFEST_PATH = ROLE_DIR / "manifest.json"
 DEFAULT_OUT_ROOT = ROOT / "_evolutions" / "experiment_agents"
 PLACEHOLDER_RE = re.compile(r"{{[A-Z0-9_]+}}")
 
+HEADLESS_CONTRACT = """\
+## Headless Contract
+
+- Do not request permissions or approvals.
+- Do not run commands that require escalation or interactive confirmation.
+- If a needed command would require approval, skip it and report the exact
+  command, why it was needed, and what evidence is missing.
+- Do not commit unless explicitly asked.
+
+"""
+
 
 @dataclass(frozen=True)
 class RenderContext:
@@ -76,7 +87,7 @@ def render_template(text: str, ctx: RenderContext) -> str:
     unresolved = sorted(set(PLACEHOLDER_RE.findall(out)))
     if unresolved:
         raise ValueError(f"unresolved placeholders: {unresolved}")
-    return out
+    return HEADLESS_CONTRACT + out
 
 
 def render_role(manifest: dict[str, Any], role_id: str, ctx: RenderContext) -> tuple[str, dict[str, Any]]:

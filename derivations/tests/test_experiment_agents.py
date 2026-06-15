@@ -40,6 +40,7 @@ class ExperimentAgentsTests(unittest.TestCase):
         for role_id in ea.expand_roles(manifest, ["all"]):
             prompt, metadata = ea.render_role(manifest, role_id, ctx)
             self.assertNotRegex(prompt, ea.PLACEHOLDER_RE)
+            self.assertIn("Do not request permissions or approvals.", prompt)
             self.assertIn("typed tactics reduce fused edges", prompt)
             self.assertIn("/tmp/batch_metrics.json", prompt)
             self.assertEqual(role_id, metadata["role_id"])
@@ -70,6 +71,7 @@ class ExperimentAgentsTests(unittest.TestCase):
             ])
             for role in packet["roles"]:
                 prompt = Path(role["prompt_path"]).read_text()
+                self.assertIn("If a needed command would require approval, skip it", prompt)
                 self.assertIn("/tmp/worktree", prompt)
                 self.assertIn("/tmp/evidence.json", prompt)
 

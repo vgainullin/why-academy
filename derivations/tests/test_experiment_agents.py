@@ -21,9 +21,14 @@ class ExperimentAgentsTests(unittest.TestCase):
         self.assertIn("prebuild", manifest["groups"])
         self.assertIn("build", manifest["groups"])
         self.assertIn("postbuild", manifest["groups"])
+        self.assertIn("reporting", manifest["groups"])
         self.assertEqual(
             ea.expand_roles(manifest, ["prebuild"]),
             ["code_review_gate", "test_gate_design", "integration_design"],
+        )
+        self.assertEqual(
+            ea.expand_roles(manifest, ["reporting"]),
+            ["report_writer", "report_review_gate"],
         )
 
     def test_all_role_templates_render_without_unresolved_placeholders(self) -> None:
@@ -35,6 +40,7 @@ class ExperimentAgentsTests(unittest.TestCase):
             worktree="/tmp/worktree",
             prototype_worktree="/tmp/prototype",
             evidence_paths=["/tmp/batch_metrics.json", "/tmp/introspection.json"],
+            report_path="derivations/experiments/test_report.md",
         )
 
         for role_id in ea.expand_roles(manifest, ["all"]):
@@ -43,6 +49,8 @@ class ExperimentAgentsTests(unittest.TestCase):
             self.assertIn("Do not request permissions or approvals.", prompt)
             self.assertIn("typed tactics reduce fused edges", prompt)
             self.assertIn("/tmp/batch_metrics.json", prompt)
+            if role_id in {"report_writer", "report_review_gate"}:
+                self.assertIn("derivations/experiments/test_report.md", prompt)
             self.assertEqual(role_id, metadata["role_id"])
 
     def test_render_packet_writes_self_contained_prompts(self) -> None:
@@ -54,6 +62,7 @@ class ExperimentAgentsTests(unittest.TestCase):
                 worktree="/tmp/worktree",
                 prototype_worktree="",
                 evidence_paths=["/tmp/evidence.json"],
+                report_path="derivations/experiments/exp1.md",
             )
             packet = ea.write_packet(
                 ctx,
@@ -65,6 +74,7 @@ class ExperimentAgentsTests(unittest.TestCase):
             self.assertTrue(packet_path.exists())
             loaded = json.loads(packet_path.read_text())
             self.assertEqual(loaded["schema_version"], "experiment_agent_packet.v1")
+            self.assertEqual(loaded["report_path"], "derivations/experiments/exp1.md")
             self.assertEqual([r["role_id"] for r in packet["roles"]], [
                 "code_review_gate",
                 "implementation",
@@ -74,6 +84,27 @@ class ExperimentAgentsTests(unittest.TestCase):
                 self.assertIn("If a needed command would require approval, skip it", prompt)
                 self.assertIn("/tmp/worktree", prompt)
                 self.assertIn("/tmp/evidence.json", prompt)
+
+    def test_reporting_prompts_enforce_report_only_workflow(self) -> None:
+        manifest = ea.load_manifest()
+        ctx = ea.RenderContext(
+            experiment_id="reporting",
+            hypothesis="reports are agent-generated and reviewed",
+            repo_root=ROOT,
+            worktree="/tmp/worktree",
+            prototype_worktree="",
+            evidence_paths=["/tmp/comparison.json", "/tmp/ab_output.json"],
+            report_path="derivations/experiments/reporting.md",
+        )
+
+        writer, _ = ea.render_role(manifest, "report_writer", ctx)
+        reviewer, _ = ea.render_role(manifest, "report_review_gate", ctx)
+
+        self.assertIn("Edit only `derivations/experiments/reporting.md`", writer)
+        self.assertIn("Every factual claim must cite an artifact path", writer)
+        self.assertIn("Do not edit files.", reviewer)
+        self.assertIn("unsupported claims", reviewer)
+        self.assertIn("report_supported: yes|no", reviewer)
 
 
 if __name__ == "__main__":

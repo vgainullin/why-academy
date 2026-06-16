@@ -39,6 +39,7 @@ class RenderContext:
     worktree: str
     prototype_worktree: str
     evidence_paths: list[str]
+    report_path: str = ""
 
 
 def load_manifest() -> dict[str, Any]:
@@ -73,6 +74,7 @@ def evidence_block(paths: list[str]) -> str:
 
 
 def render_template(text: str, ctx: RenderContext) -> str:
+    report_path = ctx.report_path or f"derivations/experiments/{ctx.experiment_id}.md"
     values = {
         "EXPERIMENT_ID": ctx.experiment_id,
         "HYPOTHESIS": ctx.hypothesis,
@@ -80,6 +82,7 @@ def render_template(text: str, ctx: RenderContext) -> str:
         "WORKTREE": ctx.worktree,
         "PROTOTYPE_WORKTREE": ctx.prototype_worktree,
         "EVIDENCE_PATHS": evidence_block(ctx.evidence_paths),
+        "REPORT_PATH": report_path,
     }
     out = text
     for key, value in values.items():
@@ -124,6 +127,7 @@ def write_packet(ctx: RenderContext, roles: list[str], out_dir: Path) -> dict[st
         "repo_root": str(ctx.repo_root),
         "worktree": ctx.worktree,
         "prototype_worktree": ctx.prototype_worktree,
+        "report_path": ctx.report_path or f"derivations/experiments/{ctx.experiment_id}.md",
         "evidence_paths": ctx.evidence_paths,
         "roles": rendered_roles,
     }
@@ -155,6 +159,7 @@ def cmd_render(args: argparse.Namespace) -> int:
         worktree=args.worktree,
         prototype_worktree=args.prototype_worktree or "",
         evidence_paths=args.evidence or [],
+        report_path=args.report_path or "",
     )
     packet = write_packet(ctx, roles, out_dir)
     print(json.dumps({
@@ -178,6 +183,8 @@ def main() -> int:
     render.add_argument("--hypothesis", required=True)
     render.add_argument("--worktree", required=True)
     render.add_argument("--prototype-worktree", default="")
+    render.add_argument("--report-path", default="",
+                        help="markdown report path for report-writer/review roles")
     render.add_argument("--evidence", action="append", default=[])
     render.add_argument("--role", action="append", default=None,
                         help="role or group to render; default: prebuild")

@@ -15,6 +15,10 @@
       "pilot_runner",
       "ab_analysis"
     ],
+    "reporting": [
+      "report_writer",
+      "report_review_gate"
+    ],
     "all": [
       "code_review_gate",
       "test_gate_design",
@@ -22,7 +26,9 @@
       "implementation",
       "postbuild_code_review",
       "pilot_runner",
-      "ab_analysis"
+      "ab_analysis",
+      "report_writer",
+      "report_review_gate"
     ]
   },
   "roles": {
@@ -67,6 +73,18 @@
       "agent_type": "explorer",
       "phase": "postbuild",
       "output": "A/B comparison report and verdict against the hypothesis"
+    },
+    "report_writer": {
+      "template": "report_writer.md",
+      "agent_type": "worker",
+      "phase": "reporting",
+      "output": "markdown experiment report grounded in supplied artifacts"
+    },
+    "report_review_gate": {
+      "template": "report_review_gate.md",
+      "agent_type": "explorer",
+      "phase": "reporting",
+      "output": "claim-support findings and report readiness verdict"
     }
   }
 }

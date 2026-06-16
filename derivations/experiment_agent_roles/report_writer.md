@@ -44,6 +44,10 @@ The report must include:
 
 - Every factual claim must cite an artifact path from the evidence list or a
   direct file path discovered under those artifacts.
+- Prior report-review artifacts are revision feedback, not experiment evidence:
+  use them to fix the draft, but do not list them as report evidence, cite them
+  for experiment claims, or add "fresh review missing" claims unless this task is
+  explicitly a meta-review report.
 - Separate observed results from inference.
 - Do not smooth over failed, missing, or malformed runs.
 - Do not claim causality from a single uncontrolled run.

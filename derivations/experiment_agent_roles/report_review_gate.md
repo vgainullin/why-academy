@@ -37,6 +37,11 @@ Check:
 - Include file/path references for unsupported or contradicted claims.
 - Do not rewrite the report.
 - Treat missing evidence as a finding, not as an assumption to fill.
+- This run is the current review gate; do not fail a report solely because no
+  separate fresh review artifact already exists.
+- If the evidence includes older report-review artifacts, treat them as
+  historical feedback unless the report cites them as current experiment
+  evidence.
 
 ## Required Output
 

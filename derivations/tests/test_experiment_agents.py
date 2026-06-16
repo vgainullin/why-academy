@@ -102,8 +102,10 @@ class ExperimentAgentsTests(unittest.TestCase):
 
         self.assertIn("Edit only `derivations/experiments/reporting.md`", writer)
         self.assertIn("Every factual claim must cite an artifact path", writer)
+        self.assertIn("Prior report-review artifacts are revision feedback", writer)
         self.assertIn("Do not edit files.", reviewer)
         self.assertIn("unsupported claims", reviewer)
+        self.assertIn("This run is the current review gate", reviewer)
         self.assertIn("report_supported: yes|no", reviewer)
 
 

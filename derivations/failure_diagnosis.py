@@ -193,6 +193,34 @@ def diagnose_iter(iter_dir: Path, gate: str | None = None) -> dict:
                 "raw_preview": str(parse_error.get("raw", ""))[:1200],
             },
         }
+    rule_plan_error = _read_json(iter_dir / "rule_plan_parse_error.json")
+    if rule_plan_error:
+        return {
+            "gate": gate,
+            "failure_class": "rule_plan_invalid",
+            "rule": None,
+            "details": rule_plan_error.get("error", ""),
+            "severity": "blocking",
+            "repair_scope": "prompt",
+            "source_path": str(iter_dir / "rule_plan_parse_error.json"),
+            "raw": {
+                "error": rule_plan_error.get("error"),
+                "raw_preview": str(rule_plan_error.get("raw", ""))[:1200],
+            },
+        }
+    executor_error = _read_json(iter_dir / "rule_executor_error.json")
+    if executor_error:
+        failure_class = executor_error.get("failure_class", "rule_executor_fail")
+        return {
+            "gate": gate,
+            "failure_class": failure_class,
+            "rule": None,
+            "details": executor_error.get("error", ""),
+            "severity": "blocking",
+            "repair_scope": "executor" if failure_class == "rule_executor_coverage_gap" else "prompt",
+            "source_path": str(iter_dir / "rule_executor_error.json"),
+            "raw": executor_error,
+        }
     return {
         "gate": gate,
         "failure_class": "runtime_failure",

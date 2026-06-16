@@ -34,6 +34,41 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
         judge_path = iter_dir / "problem.judge.json"
         target_check_path = iter_dir / "problem.target_check.json"
         if not problem_path.exists() or not verifier_path.exists():
+            status = (iter_dir / "status.txt").read_text().strip() if (iter_dir / "status.txt").exists() else "missing"
+            treatment_error = json.loads((iter_dir / "rule_executor_error.json").read_text()) if (iter_dir / "rule_executor_error.json").exists() else None
+            if status in ("rule_plan_invalid", "rule_executor_coverage_gap", "rule_executor_fail", "substitution_structural_fail"):
+                records.append({
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "run_id": f"{batch_checkpoint['batch_id']}_t{target_idx:03d}_{iter_dir.name}",
+                    "batch_id": batch_checkpoint["batch_id"],
+                    "target_index": target_idx,
+                    "iter": int(iter_dir.name.replace("iter_", "")),
+                    "epoch": batch_checkpoint["epoch"],
+                    "prompt_version": batch_checkpoint["prompt_version"],
+                    "validator_library_version": batch_checkpoint["validator_version"],
+                    "config_version": batch_checkpoint.get("config_version", "v1"),
+                    "engine": batch_checkpoint.get("inner_engine", "claude"),
+                    "model": batch_checkpoint.get("inner_model", "unknown"),
+                    "inner_mode": batch_checkpoint.get("inner_mode"),
+                    "experiment_id": batch_checkpoint.get("experiment_id"),
+                    "treatment_id": batch_checkpoint.get("treatment_id"),
+                    "target": target,
+                    "problem_id": None,
+                    "verifier_version": None,
+                    "n_nodes": 0,
+                    "n_edges": 0,
+                    "node_truth": {"TRUE": 0, "FALSE": 0, "ERROR": 0, "NA": 0},
+                    "edge_summary": {"PASS": 0, "FAIL": 0, "UNCOVERED": 0, "WEAK_PASS": 0, "ERROR": 0},
+                    "edge_results": [],
+                    "canvas_check": None,
+                    "judge_eval": None,
+                    "target_check": None,
+                    "treatment_failure": {
+                        "status": status,
+                        "failure_class": treatment_error.get("failure_class") if treatment_error else status,
+                        "error": treatment_error.get("error") if treatment_error else "",
+                    },
+                })
             continue
         problem = json.loads(problem_path.read_text())
         verifier = json.loads(verifier_path.read_text())
@@ -53,6 +88,9 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
             "config_version": batch_checkpoint.get("config_version", "v1"),
             "engine": batch_checkpoint.get("inner_engine", "claude"),
             "model": batch_checkpoint.get("inner_model", "unknown"),
+            "inner_mode": batch_checkpoint.get("inner_mode"),
+            "experiment_id": batch_checkpoint.get("experiment_id"),
+            "treatment_id": batch_checkpoint.get("treatment_id"),
             "target": target,
             "problem_id": problem["id"],
             "verifier_version": verifier["verifier_version"],

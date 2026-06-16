@@ -5,6 +5,7 @@ Usage:
   scripts/batch.sh derivations/targets/queue.txt                # evolution mode (default now)
   scripts/batch.sh --no-evolution derivations/targets/queue.txt # fall back to inner.sh per-target
   BATCH_PARALLEL=8 scripts/batch.sh derivations/targets/queue.txt
+  scripts/batch.sh --inner-mode rule_executor --allow-treatment-failures derivations/targets/queue.txt
 
 Evolution mode (default): batch.py owns an engine-specific pool of size
 --parallel. Claude uses long-running sessions for cache reuse. Codex uses
@@ -19,12 +20,24 @@ import concurrent.futures
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "derivations"))
+
+TREATMENT_FAILURE_STATUSES = {
+    "rule_plan_invalid",
+    "rule_executor_coverage_gap",
+    "rule_executor_fail",
+    "substitution_structural_fail",
+}
+
+
+def env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def read_targets(path: Path) -> list[str]:
@@ -40,6 +53,37 @@ def read_targets(path: Path) -> list[str]:
 def current_epoch() -> int:
     state = json.loads((ROOT / "derivations" / "state.json").read_text())
     return int(state["epoch"])
+
+
+def treatment_failure_status(metrics: dict) -> str | None:
+    reason = metrics.get("failure_reason")
+    if not reason:
+        return None
+    return re.sub(r"_iter_\d+$", "", str(reason))
+
+
+def batch_exit_code(results: list[tuple[str, int, object]], *,
+                    evolution_mode: bool,
+                    inner_mode: str | None,
+                    allow_treatment_failures: bool) -> tuple[int, dict[str, int]]:
+    failures = [(target, rc, payload) for target, rc, payload in results if rc != 0]
+    if not failures:
+        return 0, {}
+    if not (evolution_mode and inner_mode == "rule_executor" and allow_treatment_failures):
+        return 1, {}
+
+    expected: dict[str, int] = {}
+    unexpected = 0
+    for _target, _rc, payload in failures:
+        status = treatment_failure_status(payload) if isinstance(payload, dict) else None
+        if status in TREATMENT_FAILURE_STATUSES:
+            expected[status] = expected.get(status, 0) + 1
+        else:
+            unexpected += 1
+    if unexpected:
+        expected["unexpected"] = unexpected
+        return 1, expected
+    return 0, expected
 
 
 def run_one_legacy(target: str, out_dir: Path, *, batch_id: str,
@@ -62,7 +106,8 @@ def run_one_legacy(target: str, out_dir: Path, *, batch_id: str,
 def run_one_pooled(target: str, target_index: int, batch_id: str, pool,
                    max_iter: int, inner_engine: str, judge_engine: str,
                    evolve_engine: str, judge_model: str, evolve_model: str,
-                   inner_mode: str
+                   inner_mode: str, experiment_id: str | None,
+                   treatment_id: str | None
                    ) -> tuple[str, int, dict]:
     """Pooled path: in-thread process_target call sharing the worker pool."""
     from inner_evolve import process_target  # imported here so legacy path doesn't pay
@@ -73,6 +118,8 @@ def run_one_pooled(target: str, target_index: int, batch_id: str, pool,
                                  max_iter=max_iter,
                                  inner_engine=inner_engine,
                                  inner_mode=inner_mode,
+                                 experiment_id=experiment_id,
+                                 treatment_id=treatment_id,
                                  judge_engine=judge_engine,
                                  evolve_engine=evolve_engine,
                                  judge_model=judge_model,
@@ -104,9 +151,17 @@ def main() -> int:
                     help="max evolution iterations per target (evolution mode only)")
     ap.add_argument("--batch-id", default=None,
                     help="override the batch id (default: timestamp). Used to name the evolution workspace.")
-    ap.add_argument("--inner-mode", choices=["agent", "json"],
+    ap.add_argument("--inner-mode", choices=["agent", "json", "rule_executor"],
                     default=os.environ.get("INNER_MODE"),
                     help="inner generation mode. Default: json for Codex, agent for other engines.")
+    ap.add_argument("--experiment-id", default=os.environ.get("EXPERIMENT_ID"),
+                    help="optional experiment id recorded in checkpoint.json")
+    ap.add_argument("--treatment-id", default=os.environ.get("TREATMENT_ID"),
+                    help="optional treatment id recorded in checkpoint.json")
+    ap.add_argument("--allow-treatment-failures", action="store_true",
+                    default=env_flag("ALLOW_TREATMENT_FAILURES"),
+                    help=("rule_executor pilot mode: return success when all failed targets are "
+                          "explicit treatment failures or coverage gaps"))
     args = ap.parse_args()
     evolution_mode = not args.no_evolution
     inner_model = os.environ.get("INNER_MODEL", cfg["models"]["inner"])
@@ -137,6 +192,7 @@ def main() -> int:
         print(f"[batch] workspace: derivations/_evolutions/batches/{batch_id}/", file=sys.stderr)
 
     results = []
+    active_inner_mode: str | None = None
 
     if not evolution_mode:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as ex:
@@ -155,6 +211,7 @@ def main() -> int:
         # Pooled evolution path: one engine-specific pool shared across targets.
         inner_engine = step_engine(cfg, "inner")
         inner_mode = args.inner_mode or ("json" if inner_engine == "codex" else "agent")
+        active_inner_mode = inner_mode
         if inner_engine == "claude":
             from claude_worker import ClaudeWorkerPool
             pool = ClaudeWorkerPool(
@@ -186,7 +243,8 @@ def main() -> int:
                     ex.submit(run_one_pooled, t, i, batch_id, pool,
                               args.max_iter, inner_engine, step_engine(cfg, "judge"),
                               step_engine(cfg, "evolve"), judge_model,
-                              evolve_model, inner_mode): (i, t)
+                              evolve_model, inner_mode, args.experiment_id,
+                              args.treatment_id): (i, t)
                     for i, t in enumerate(targets)
                 }
                 for fut in concurrent.futures.as_completed(future_to_target):
@@ -222,7 +280,20 @@ def main() -> int:
     else:
         print(f"[batch] per-run logs: {batch_log_dir}", file=sys.stderr)
 
-    return 0 if n_ok == len(results) else 1
+    exit_code, allowed_counts = batch_exit_code(
+        results,
+        evolution_mode=evolution_mode,
+        inner_mode=active_inner_mode,
+        allow_treatment_failures=args.allow_treatment_failures,
+    )
+    if allowed_counts and exit_code == 0:
+        print(f"[batch] allowing treatment failures: {json.dumps(dict(sorted(allowed_counts.items())))}",
+              file=sys.stderr)
+    elif allowed_counts:
+        print(f"[batch] treatment failure allowance blocked by unexpected failures: "
+              f"{json.dumps(dict(sorted(allowed_counts.items())))}",
+              file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":

@@ -45,6 +45,15 @@ from json_inner import (  # noqa: E402
     render_json_prompt,
 )
 from llm_cli import QuotaExhaustedError as LLMQuotaExhaustedError  # noqa: E402
+from rule_executor import (  # noqa: E402
+    RuleExecutorError,
+    RuleExecutorCoverageGap,
+    RulePlanError,
+    execute_plan,
+    plan_from_response,
+    render_rule_executor_prompt,
+)
+from substitution_structural_check import check_problem  # noqa: E402
 from transition_score import write_transition  # noqa: E402
 
 
@@ -117,6 +126,8 @@ def _clear_problem_sidecars(iter_dir: Path) -> None:
         "problem.canvas.json",
         "problem.raw.json",
         "problem.raw.verifier.json",
+        "problem.raw.substitution_check.json",
+        "problem.substitution_check.json",
     ):
         (iter_dir / name).unlink(missing_ok=True)
 
@@ -235,6 +246,8 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                    *, max_iter: int = 3,
                    inner_engine: str = "claude",
                    inner_mode: str = "agent",
+                   experiment_id: str | None = None,
+                   treatment_id: str | None = None,
                    judge_engine: str = "claude",
                    evolve_engine: str = "claude",
                    judge_model: str = "sonnet",
@@ -277,6 +290,8 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
             "max_iter": max_iter,
             "inner_via": f"{inner_engine}_worker_pool",
             "inner_mode": inner_mode,
+            "experiment_id": experiment_id,
+            "treatment_id": treatment_id or ("rule_executor" if inner_mode == "rule_executor" else None),
             "inner_engine": inner_engine,
             "inner_model": getattr(pool, "model", "unknown"),
             "judge_engine": judge_engine,
@@ -286,6 +301,10 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
             "validator_dirs": os.environ.get("DERIVATION_VALIDATOR_DIRS", ""),
             "validator_prepend": os.environ.get("DERIVATION_VALIDATOR_PREPEND", ""),
             "prompt_addenda": os.environ.get("DERIVATION_PROMPT_ADDENDA", ""),
+            "rule_executor_version": "rule_executor.v1" if inner_mode == "rule_executor" else None,
+            "substitution_structural_check_version": (
+                "substitution_structural_check.v1" if inner_mode == "rule_executor" else None
+            ),
         }, indent=2))
 
     (target_dir / "target.json").write_text(json.dumps({
@@ -297,6 +316,8 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
 
     if inner_mode == "json":
         canonical_prompt = PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation_json.md"
+    elif inner_mode == "rule_executor":
+        canonical_prompt = PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation_rule_plan.md"
     else:
         canonical_prompt = PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md"
     base_prompt_text = canonical_prompt.read_text()
@@ -308,7 +329,7 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
         repaired_prompt_path.write_text(base_prompt_text)
         (target_dir / "prompt_addenda_sources.json").write_text(json.dumps(prompt_addenda_sources, indent=2))
         variant_prompt_path = repaired_prompt_path
-    seed = find_seed_variant(target, current_batch_id=batch_id)
+    seed = None if inner_mode == "rule_executor" else find_seed_variant(target, current_batch_id=batch_id)
     if seed:
         seed_variant_path = target_dir / "seed_variant.md"
         if inner_mode == "json":
@@ -342,6 +363,8 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
         rendered = (iter_dir / "variant.md").read_text()
         if inner_mode == "json":
             rendered = render_json_prompt(rendered, target=target, problem_id=problem_id)
+        elif inner_mode == "rule_executor":
+            rendered = render_rule_executor_prompt(rendered, target=target, problem_id=problem_id)
         else:
             rendered = rendered.replace("<<TARGET>>", target).replace("<<PROBLEM_ID>>", problem_id)
         (iter_dir / "rendered_prompt.md").write_text(rendered)
@@ -396,6 +419,82 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                     continue
                 break
             (iter_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n")
+        elif inner_mode == "rule_executor":
+            raw_text = response.get("text", "")
+            (iter_dir / "rule_plan.raw.txt").write_text(raw_text)
+            try:
+                plan = plan_from_response(raw_text, problem_id=problem_id)
+            except RulePlanError as e:
+                (iter_dir / "rule_plan_parse_error.json").write_text(json.dumps({
+                    "error": str(e),
+                    "raw": raw_text,
+                }, indent=2))
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps({
+                    "failure_class": "rule_plan_invalid",
+                    "error": str(e),
+                    "raw_preview": raw_text[:1200],
+                }, indent=2))
+                (iter_dir / "status.txt").write_text("rule_plan_invalid")
+                fail_reason = f"rule_plan_invalid_iter_{it}"
+                _write_transition_if_possible(target_dir, it)
+                if it + 1 < max_iter:
+                    diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")
+                    ok, reason = _evolve_next_variant(target, target_dir, iter_dir, it,
+                                                      diagnosis_path, evolve_engine, evolve_model,
+                                                      pool=pool)
+                    if not ok:
+                        fail_reason = reason
+                        break
+                    variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
+                    continue
+                break
+            (iter_dir / "rule_plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+            try:
+                problem, executor_report = execute_plan(plan, problem_id=problem_id)
+            except RuleExecutorCoverageGap as e:
+                (iter_dir / "problem.rule_executor.json").write_text(json.dumps(e.report, indent=2) + "\n")
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps({
+                    "failure_class": e.failure_class,
+                    "error": str(e),
+                    "report": e.report,
+                }, indent=2))
+                (iter_dir / "status.txt").write_text("rule_executor_coverage_gap")
+                fail_reason = f"rule_executor_coverage_gap_iter_{it}"
+                _write_transition_if_possible(target_dir, it)
+                if it + 1 < max_iter:
+                    diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")
+                    ok, reason = _evolve_next_variant(target, target_dir, iter_dir, it,
+                                                      diagnosis_path, evolve_engine, evolve_model,
+                                                      pool=pool)
+                    if not ok:
+                        fail_reason = reason
+                        break
+                    variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
+                    continue
+                break
+            except RuleExecutorError as e:
+                (iter_dir / "problem.rule_executor.json").write_text(json.dumps(e.report, indent=2) + "\n")
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps({
+                    "failure_class": e.failure_class,
+                    "error": str(e),
+                    "report": e.report,
+                }, indent=2))
+                (iter_dir / "status.txt").write_text("rule_executor_fail")
+                fail_reason = f"rule_executor_fail_iter_{it}"
+                _write_transition_if_possible(target_dir, it)
+                if it + 1 < max_iter:
+                    diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")
+                    ok, reason = _evolve_next_variant(target, target_dir, iter_dir, it,
+                                                      diagnosis_path, evolve_engine, evolve_model,
+                                                      pool=pool)
+                    if not ok:
+                        fail_reason = reason
+                        break
+                    variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
+                    continue
+                break
+            (iter_dir / "problem.rule_executor.json").write_text(json.dumps(executor_report, indent=2) + "\n")
+            (iter_dir / "problem.json").write_text(json.dumps(problem, indent=2) + "\n")
         else:
             # The LLM was instructed to write the problem to derivations/problems/<id>.json.
             # If it didn't, that's a generation failure.
@@ -413,6 +512,30 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
 
         _clear_problem_sidecars(iter_dir)
         shutil.copy(iter_dir / "problem.json", iter_dir / "problem.raw.json")
+
+        if inner_mode == "rule_executor":
+            substitution_report = check_problem(json.loads((iter_dir / "problem.json").read_text()))
+            (iter_dir / "problem.raw.substitution_check.json").write_text(json.dumps(substitution_report, indent=2))
+            if substitution_report["status"] != "PASS":
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps({
+                    "failure_class": "substitution_structural_fail",
+                    "error": "raw substitution edge failed immediate structural check",
+                    "report": substitution_report,
+                }, indent=2))
+                (iter_dir / "status.txt").write_text("substitution_structural_fail")
+                fail_reason = f"substitution_structural_fail_iter_{it}"
+                _write_transition_if_possible(target_dir, it)
+                if it + 1 < max_iter:
+                    diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")
+                    ok, reason = _evolve_next_variant(target, target_dir, iter_dir, it,
+                                                      diagnosis_path, evolve_engine, evolve_model,
+                                                      pool=pool)
+                    if not ok:
+                        fail_reason = reason
+                        break
+                    variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
+                    continue
+                break
 
         # Verify the raw generated graph first. Normalization is a presentation
         # pre-pass for canvas/target/judge, not a way to hide invalid edges.
@@ -482,6 +605,30 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                 variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
                 continue
             break
+
+        if inner_mode == "rule_executor":
+            substitution_report = check_problem(json.loads((iter_dir / "problem.json").read_text()))
+            (iter_dir / "problem.substitution_check.json").write_text(json.dumps(substitution_report, indent=2))
+            if substitution_report["status"] != "PASS":
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps({
+                    "failure_class": "substitution_structural_fail",
+                    "error": "normalized substitution edge failed immediate structural check",
+                    "report": substitution_report,
+                }, indent=2))
+                (iter_dir / "status.txt").write_text("substitution_structural_fail")
+                fail_reason = f"substitution_structural_fail_iter_{it}"
+                _write_transition_if_possible(target_dir, it)
+                if it + 1 < max_iter:
+                    diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")
+                    ok, reason = _evolve_next_variant(target, target_dir, iter_dir, it,
+                                                      diagnosis_path, evolve_engine, evolve_model,
+                                                      pool=pool)
+                    if not ok:
+                        fail_reason = reason
+                        break
+                    variant_prompt_path = target_dir / f"iter_{it + 1:02d}" / "variant.md"
+                    continue
+                break
 
         # canvas_check
         canvas_res = _run_py("derivations/canvas_check.py", str(iter_dir / "problem.json"))

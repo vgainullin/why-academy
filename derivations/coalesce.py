@@ -16,9 +16,23 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
+
+from substitution_structural_check import check_problem
 
 ROOT = Path(__file__).resolve().parent
-CANONICAL = ROOT / "prompts" / "generate_derivation.md"
+CANONICAL_BY_MODE = {
+    "agent": ROOT / "prompts" / "generate_derivation.md",
+    "json": ROOT / "prompts" / "generate_derivation_json.md",
+    "rule_executor": ROOT / "prompts" / "generate_derivation_rule_plan.md",
+}
+
+TREATMENT_FAILURE_STATUSES = {
+    "rule_plan_invalid",
+    "rule_executor_coverage_gap",
+    "rule_executor_fail",
+    "substitution_structural_fail",
+}
 
 ADDENDUM_BLOCK_RE = re.compile(r"(?ms)^## Addendum[^\n]*$.*?(?=^## Addendum|\Z)")
 ADDENDUM_HEADER_RE = re.compile(r"^## Addendum.*?:\s*(.+?)$", re.MULTILINE)
@@ -65,6 +79,44 @@ def read_transition(iter_dir: Path) -> dict:
         return {"verdict": "unreadable", "score": 0.0}
 
 
+def read_json(path: Path, default: Any = None) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return default
+
+
+def read_status(iter_dir: Path) -> str:
+    path = iter_dir / "status.txt"
+    return path.read_text().strip() if path.exists() else "missing"
+
+
+def canonical_for_checkpoint(checkpoint: dict) -> Path:
+    inner_mode = checkpoint.get("inner_mode") or "agent"
+    return CANONICAL_BY_MODE.get(inner_mode, CANONICAL_BY_MODE["agent"])
+
+
+def is_treatment_checkpoint(checkpoint: dict) -> bool:
+    return bool(checkpoint.get("treatment_id")) or checkpoint.get("inner_mode") == "rule_executor"
+
+
+def substitution_report_for_iter(iter_dir: Path) -> dict | None:
+    problem = read_json(iter_dir / "problem.json")
+    if problem:
+        try:
+            return check_problem(problem)
+        except Exception as e:
+            return {
+                "status": "ERROR",
+                "n_inspected": 0,
+                "failures": [],
+                "parse_errors": [{"error": f"{type(e).__name__}: {e}"}],
+            }
+    return read_json(iter_dir / "problem.substitution_check.json")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("batch_dir", help="derivations/_evolutions/batches/<batch_id>/")
@@ -77,7 +129,11 @@ def main() -> int:
         print(f"[coalesce] no such batch dir: {batch_dir}", file=sys.stderr)
         return 1
 
-    canonical_text = CANONICAL.read_text()
+    checkpoint = read_json(batch_dir / "checkpoint.json", {}) or {}
+    canonical_path = canonical_for_checkpoint(checkpoint)
+    canonical_text = canonical_path.read_text()
+    treatment_batch = is_treatment_checkpoint(checkpoint)
+    promotion_disabled = treatment_batch
     targets = sorted((batch_dir / "targets").glob("target_*"))
 
     n_total = len(targets)
@@ -88,6 +144,17 @@ def main() -> int:
     addenda_by_any_target: dict[int, list[dict]] = {}
     target_outcomes: dict[int, dict] = {}
     failure_reasons: dict[str, int] = {}
+    iter_status_counts: dict[str, int] = {}
+    treatment_failure_counts: dict[str, int] = {}
+    substitution_summary = {
+        "n_iters_with_problem": 0,
+        "n_inspected_edges": 0,
+        "n_failed_edges": 0,
+        "n_iters_with_failed_edges": 0,
+        "n_accepted_inspected_edges": 0,
+        "n_accepted_failed_edges": 0,
+        "n_accepted_iters_with_failed_edges": 0,
+    }
 
     for tdir in targets:
         mp = tdir / "target_metrics.json"
@@ -101,6 +168,19 @@ def main() -> int:
             "n_iterations": m.get("n_iterations"),
         }
         for iter_dir in sorted(tdir.glob("iter_*")):
+            status = read_status(iter_dir)
+            iter_status_counts[status] = iter_status_counts.get(status, 0) + 1
+            if status in TREATMENT_FAILURE_STATUSES:
+                treatment_failure_counts[status] = treatment_failure_counts.get(status, 0) + 1
+            substitution_report = substitution_report_for_iter(iter_dir)
+            if substitution_report:
+                substitution_summary["n_iters_with_problem"] += 1
+                inspected = int(substitution_report.get("n_inspected", 0) or 0)
+                failures = len(substitution_report.get("failures", []) or [])
+                substitution_summary["n_inspected_edges"] += inspected
+                substitution_summary["n_failed_edges"] += failures
+                if substitution_report.get("status") != "PASS":
+                    substitution_summary["n_iters_with_failed_edges"] += 1
             variant_path = iter_dir / "variant.md"
             if variant_path.exists():
                 transition = read_transition(iter_dir)
@@ -118,6 +198,14 @@ def main() -> int:
                 addenda_by_accepted_target[ti] = extract_addenda(variant_path.read_text(), canonical_text)
             else:
                 addenda_by_accepted_target[ti] = []
+            accepted_substitution_report = substitution_report_for_iter(iter_dir)
+            if accepted_substitution_report:
+                accepted_inspected = int(accepted_substitution_report.get("n_inspected", 0) or 0)
+                accepted_failures = len(accepted_substitution_report.get("failures", []) or [])
+                substitution_summary["n_accepted_inspected_edges"] += accepted_inspected
+                substitution_summary["n_accepted_failed_edges"] += accepted_failures
+                if accepted_substitution_report.get("status") != "PASS":
+                    substitution_summary["n_accepted_iters_with_failed_edges"] += 1
         else:
             reason = m.get("failure_reason") or "unknown"
             failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
@@ -160,6 +248,12 @@ def main() -> int:
 
     metrics = {
         "batch_id": batch_dir.name,
+        "experiment_id": checkpoint.get("experiment_id"),
+        "treatment_id": checkpoint.get("treatment_id"),
+        "inner_mode": checkpoint.get("inner_mode"),
+        "is_treatment_batch": treatment_batch,
+        "canonical_prompt": str(canonical_path.relative_to(ROOT)),
+        "promotion_disabled": promotion_disabled,
         "n_targets": n_total,
         "n_accepted": n_accepted,
         "first_try_pass_rate": first_try_pass_rate,
@@ -171,6 +265,9 @@ def main() -> int:
         "consistency_score": consistency,
         "composite_score": composite,
         "failure_reasons": failure_reasons,
+        "iter_status_counts": dict(sorted(iter_status_counts.items())),
+        "treatment_failure_counts": dict(sorted(treatment_failure_counts.items())),
+        "substitution_structural": substitution_summary,
     }
     (batch_dir / "batch_metrics.json").write_text(json.dumps(metrics, indent=2))
 
@@ -193,6 +290,11 @@ def main() -> int:
     report = [
         f"# Batch coalesce report: {batch_dir.name}",
         "",
+        f"- Inner mode: {checkpoint.get('inner_mode') or 'unknown'}",
+        f"- Experiment id: {checkpoint.get('experiment_id') or '-'}",
+        f"- Treatment id: {checkpoint.get('treatment_id') or '-'}",
+        f"- Canonical prompt: `{str(canonical_path.relative_to(ROOT))}`",
+        f"- Promotion disabled: {'yes' if promotion_disabled else 'no'}",
         f"- Targets: {n_total}",
         f"- Accepted: {n_accepted}/{n_total} ({convergence_rate * 100:.0f}%)",
         f"- First-try pass: {n_first_try}/{n_total} ({first_try_pass_rate * 100:.0f}%)",
@@ -202,8 +304,16 @@ def main() -> int:
         f"- Transition addendum clusters: {len(transition_cluster)}",
         f"- Consistency score: {consistency:.2f}",
         f"- Composite score: {composite:.2f}",
+        f"- Treatment failures: {sum(treatment_failure_counts.values())}",
+        f"- Failed substitution edges in accepted graphs: "
+        f"{substitution_summary['n_accepted_failed_edges']}",
         "",
     ]
+    if treatment_failure_counts:
+        report.append("Treatment failure statuses:")
+        for r, c in sorted(treatment_failure_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            report.append(f"- {r}: {c}")
+        report.append("")
     if failure_reasons:
         report.append("Failure reasons (non-accepted targets):")
         for r, c in sorted(failure_reasons.items(), key=lambda kv: -kv[1]):
@@ -258,7 +368,19 @@ def main() -> int:
         f"Composite score: {composite:.2f}",
         "",
     ]
-    if not promote:
+    if promotion_disabled:
+        proposal.append("**Promotion disabled for this batch.**")
+        proposal.append("")
+        proposal.append(
+            "This batch is marked as a treatment path; coalesce metrics are written for review, "
+            "but treatment prompt addenda must not be promoted into `derivations/prompts/generate_derivation.md`."
+        )
+        proposal.append("")
+        if promote or watch:
+            proposal.append("Observed addendum clusters (review only):")
+            for key, entries, n_t in promote + watch:
+                proposal.append(f"- `{key}` - {n_t} target{'s' if n_t != 1 else ''}")
+    elif not promote:
         proposal.append("**No conservative-eligible promotions in this batch.**")
         proposal.append("")
         if watch:

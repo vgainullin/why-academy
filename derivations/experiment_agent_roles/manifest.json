@@ -13,7 +13,8 @@
     "postbuild": [
       "postbuild_code_review",
       "pilot_runner",
-      "ab_analysis"
+      "ab_analysis",
+      "next_step_derivation"
     ],
     "reporting": [
       "report_writer",
@@ -27,6 +28,7 @@
       "postbuild_code_review",
       "pilot_runner",
       "ab_analysis",
+      "next_step_derivation",
       "report_writer",
       "report_review_gate"
     ]
@@ -73,6 +75,12 @@
       "agent_type": "explorer",
       "phase": "postbuild",
       "output": "A/B comparison report and verdict against the hypothesis"
+    },
+    "next_step_derivation": {
+      "template": "next_step_derivation.md",
+      "agent_type": "explorer",
+      "phase": "postbuild",
+      "output": "next hypothesis, test plan, stop conditions, and handoff gates"
     },
     "report_writer": {
       "template": "report_writer.md",

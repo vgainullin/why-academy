@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -92,6 +94,10 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def tail(text: str, limit: int) -> str:
+    return (text or "")[-limit:]
 
 
 def _codex_base_cmd(cwd_path: Path, sandbox: str) -> list[str]:
@@ -220,13 +226,31 @@ def run_prompt(
         if not selected_model:
             raise LLMEngineError("OpenRouter model not set; pass --model or set OPENROUTER_MODEL")
         base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        payload = json.dumps({
+            "model": selected_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+        }).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        if os.environ.get("OPENROUTER_SITE_URL"):
+            headers["HTTP-Referer"] = os.environ["OPENROUTER_SITE_URL"]
+        if os.environ.get("OPENROUTER_APP_NAME"):
+            headers["X-Title"] = os.environ["OPENROUTER_APP_NAME"]
+        req = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-            resp = client.chat.completions.create(
-                model=selected_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            return subprocess.CompletedProcess(
+                args=["openrouter", selected_model],
+                returncode=1,
+                stdout=body,
+                stderr=f"HTTPError {e.code}: {tail(body, 2000)}",
             )
         except Exception as e:
             return subprocess.CompletedProcess(
@@ -235,7 +259,16 @@ def run_prompt(
                 stdout="",
                 stderr=f"{type(e).__name__}: {e}",
             )
-        raw = resp.choices[0].message.content or ""
+        try:
+            data = json.loads(body)
+            raw = data["choices"][0]["message"].get("content") or ""
+        except Exception as e:
+            return subprocess.CompletedProcess(
+                args=["openrouter", selected_model],
+                returncode=1,
+                stdout=body,
+                stderr=f"{type(e).__name__}: {e}; body_tail={tail(body, 2000)}",
+            )
         _check_quota(raw, quota_patterns)
         return subprocess.CompletedProcess(
             args=["openrouter", selected_model],

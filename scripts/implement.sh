@@ -62,6 +62,20 @@ if [[ $LLM_EXIT -ne 0 ]]; then
 	exit $LLM_EXIT
 fi
 
+# Bump validator_version in state.json (was previously done by the LLM;
+# moved here so the LLM never touches state.json directly).
+"$PY" -c '
+import json, re, sys
+p = "derivations/state.json"
+d = json.load(open(p))
+old = d["validator_version"]
+m = re.match(r"v?(\d+)", old)
+new = f"v{int(m.group(1)) + 1}"
+d["validator_version"] = new
+json.dump(d, open(p, "w"), indent=2)
+print(f"[implement] validator_version: {old} -> {new}", file=sys.stderr)
+'
+
 # Surface the implementation report
 echo "---" >&2
 tail -30 "$CONSOLE"

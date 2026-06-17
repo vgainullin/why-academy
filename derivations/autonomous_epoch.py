@@ -299,7 +299,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
 
         if lift >= min_lift and (not regressed or not revert_on_regress):
             print(f"  -> PROMOTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
-            # validator_version was already bumped by implement.sh; nothing more to do
+            # validator_version was bumped by implement.sh after LLM success; nothing more to do
         else:
             print(f"  -> REVERTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
             # Revert validator code AND state.json to exact pre-implementation state.

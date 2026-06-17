@@ -75,11 +75,7 @@ REVERTED:   <which file>
 
 The proposal's "Risk" section should have anticipated this; if it didn't, the proposal needs revision.
 
-### 5. Bump `validator_version`
-
-Read `derivations/state.json`, increment `validator_version` (e.g. `v1` → `v2`), write back. The next inner-loop run records the new version in its jsonl.
-
-### 6. Report
+### 5. Report
 
 ```
 IMPLEMENTED: <rule_name>
@@ -87,13 +83,14 @@ KIND:        <kind>
 FILE:        derivations/validators/<rule>.py  (N lines)
 TESTS:       derivations/test_corpus/<rule>/  (P positive, N negative)
 HOLDOUT:     PASS (no regression vs previous epoch)
-VERSION:     <old> -> <new>
 ```
+
+The `validator_version` bump in `derivations/state.json` is handled by the implement.sh wrapper after this task completes successfully. Do not modify `state.json`.
 
 ## Hard constraints
 
 - **One proposal per invocation.** Do not chain multiple implementations.
-- **Do NOT modify** `verify.py`, `canvas_check.py`, `judge.py`, `to_canvas.py`, `sympy_eval.py`, or any file under `prompts/`. The proposal scope is the validator and its test corpus; everything else is out of scope.
+- **Do NOT modify** `verify.py`, `canvas_check.py`, `judge.py`, `to_canvas.py`, `sympy_eval.py`, `state.json`, or any file under `prompts/`. The proposal scope is the validator and its test corpus; everything else is out of scope.
 - **Do NOT add scope beyond the proposal.** If the proposal lists 7 test cases, write 7. If you think 3 more would help, surface that in your report as a follow-up suggestion — don't silently add them.
 - **Do NOT close the loop.** You implement; you do not run inner-loop generations or outer-loop epochs. The human reviews the implementation and decides when to run the next epoch.
 - **If anything is ambiguous, stop and report.** Forcing a guess at this step is exactly the failure mode the outer-loop gate exists to prevent.

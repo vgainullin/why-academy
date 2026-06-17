@@ -457,5 +457,100 @@ class WritePauseStateTests(unittest.TestCase):
         self.assertIn("paused_at", state)
 
 
+class ImplementVersionBumpTests(unittest.TestCase):
+    """Test the validator_version bump logic that was moved from the LLM to implement.sh."""
+
+    def _bump_version(self, state_json: dict) -> str:
+        """Replicate the bump logic from implement.sh in Python for testing."""
+        import re
+        old = state_json["validator_version"]
+        m = re.match(r"v?(\d+)", old)
+        new = f"v{int(m.group(1)) + 1}"
+        state_json["validator_version"] = new
+        return new
+
+    def test_bump_v1_to_v2(self) -> None:
+        d = {"validator_version": "v1"}
+        new = self._bump_version(d)
+        self.assertEqual(new, "v2")
+        self.assertEqual(d["validator_version"], "v2")
+
+    def test_bump_v9_to_v10(self) -> None:
+        d = {"validator_version": "v9"}
+        new = self._bump_version(d)
+        self.assertEqual(new, "v10")
+
+    def test_bump_strips_v_prefix(self) -> None:
+        d = {"validator_version": "5"}
+        new = self._bump_version(d)
+        self.assertEqual(new, "v6")
+
+    def test_bump_preserves_other_fields(self) -> None:
+        d = {"epoch": 3, "validator_version": "v2", "config_version": "v5", "prompt_version": "v1"}
+        self._bump_version(d)
+        self.assertEqual(d["epoch"], 3)
+        self.assertEqual(d["config_version"], "v5")
+        self.assertEqual(d["prompt_version"], "v1")
+        self.assertEqual(d["validator_version"], "v3")
+
+
+class NonDestructiveArtifactHandlingTests(unittest.TestCase):
+    """Stale canonical artifacts should be moved aside, not deleted."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.problems_dir = self.tmp / "derivations" / "problems"
+        self.problems_dir.mkdir(parents=True)
+        self.iter_dir = self.tmp / "iter_00"
+        self.iter_dir.mkdir()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_move_stale_artifacts_to_prior_dir(self) -> None:
+        import shutil as sh
+        problem_id = "evo_test_t000_i00"
+        problem_file = self.problems_dir / f"{problem_id}.json"
+        problem_file.write_text('{"old": true}')
+        verifier_file = self.problems_dir / f"{problem_id}.verifier.json"
+        verifier_file.write_text('{"edges": []}')
+
+        prior_dir = self.iter_dir / ".prior"
+        for stale in self.problems_dir.glob(f"{problem_id}.*"):
+            prior_dir.mkdir(exist_ok=True)
+            sh.move(str(stale), str(prior_dir / stale.name))
+
+        self.assertFalse(problem_file.exists())
+        self.assertFalse(verifier_file.exists())
+        self.assertTrue((prior_dir / f"{problem_id}.json").exists())
+        self.assertTrue((prior_dir / f"{problem_id}.verifier.json").exists())
+
+    def test_no_stale_artifacts_no_prior_dir(self) -> None:
+        problem_id = "evo_test_t000_i00"
+        prior_dir = self.iter_dir / ".prior"
+        for stale in self.problems_dir.glob(f"{problem_id}.*"):
+            prior_dir.mkdir(exist_ok=True)
+            sh.move(str(stale), str(prior_dir / stale.name))
+        self.assertFalse(prior_dir.exists())
+
+
+class PromptForbidsStateJsonTests(unittest.TestCase):
+    """The implement_proposal.md prompt must forbid modifying state.json."""
+
+    def test_state_json_in_forbidden_list(self) -> None:
+        prompt = (DERIVATIONS / "prompts" / "implement_proposal.md").read_text()
+        self.assertIn("state.json", prompt)
+
+    def test_prompt_does_not_ask_llm_to_bump_version(self) -> None:
+        prompt = (DERIVATIONS / "prompts" / "implement_proposal.md").read_text()
+        # The old step 5 that told the LLM to bump validator_version should be gone
+        self.assertNotIn("Bump `validator_version`", prompt)
+        self.assertNotIn("increment `validator_version`", prompt)
+
+    def test_prompt_says_wrapper_handles_version(self) -> None:
+        prompt = (DERIVATIONS / "prompts" / "implement_proposal.md").read_text()
+        self.assertIn("implement.sh wrapper", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

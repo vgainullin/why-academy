@@ -570,9 +570,12 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
 
         problem_id = f"evo_{safe_bid}_t{target_index:03d}_i{it:02d}"
 
-        # Defensively clear any stale canonical artifacts under this id
+        # Move stale canonical artifacts aside (non-destructive) instead of
+        # deleting them. This preserves evidence from prior runs.
+        prior_dir = iter_dir / ".prior"
         for stale in (PROJECT_ROOT / "derivations" / "problems").glob(f"{problem_id}.*"):
-            stale.unlink(missing_ok=True)
+            prior_dir.mkdir(exist_ok=True)
+            shutil.move(str(stale), str(prior_dir / stale.name))
 
         rendered = (iter_dir / "variant.md").read_text()
         if inner_mode == "json":

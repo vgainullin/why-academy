@@ -856,10 +856,22 @@ main {
   margin-bottom: 10px;
 }
 
+.demo-score-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .demo-score-label {
   font-size: 0.86rem;
   font-weight: 700;
   color: #334155;
+}
+
+.demo-score-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
 }
 
 .demo-score-value {

@@ -3441,15 +3441,24 @@ plt.close('all')
     const top = document.createElement('div');
     top.className = 'demo-scoreboard-top';
 
+    const labelWrap = document.createElement('div');
+    labelWrap.className = 'demo-score-copy';
+
     const label = document.createElement('div');
     label.className = 'demo-score-label';
     label.textContent = (lesson.demo_mode && lesson.demo_mode.score_label) || 'Demo score';
+
+    const status = document.createElement('div');
+    status.className = 'demo-score-status';
+    status.dataset.demoProgressStatus = 'true';
 
     const score = document.createElement('div');
     score.className = 'demo-score-value';
     score.dataset.demoScoreValue = 'true';
 
-    top.appendChild(label);
+    labelWrap.appendChild(label);
+    labelWrap.appendChild(status);
+    top.appendChild(labelWrap);
     top.appendChild(score);
     wrap.appendChild(top);
 
@@ -3482,6 +3491,10 @@ plt.close('all')
     if (scoreEl) {
       scoreEl.textContent = score + ' / ' + maxScore + ' pts';
     }
+    const statusEl = demoProgressEl.querySelector('[data-demo-progress-status]');
+    if (statusEl) {
+      statusEl.textContent = doneCount + ' of ' + demoBlocks.length + ' challenges complete';
+    }
     const fill = demoProgressEl.querySelector('[data-demo-progress-fill]');
     if (fill) {
       fill.style.width = (maxScore ? Math.round((score / maxScore) * 100) : 0) + '%';
@@ -3498,7 +3511,9 @@ plt.close('all')
         chip.href = '#block-' + block.id;
         chip.className = 'demo-step-chip' + (completed ? ' done' : '') + (active ? ' active' : '');
         chip.textContent = String(block.demo_step || idx + 1);
-        chip.title = block.title + ' (' + getDemoBlockPoints(block) + ' pts)';
+        const chipTitle = (block.title || ('Challenge ' + (block.demo_step || idx + 1))) +
+          ' (' + getDemoBlockPoints(block) + ' pts)';
+        chip.setAttribute('title', chipTitle);
         stepper.appendChild(chip);
       });
     }
@@ -3511,12 +3526,18 @@ plt.close('all')
 
     if (completedBlockId && activeBlock && lesson.demo_mode.auto_advance) {
       const nextEl = document.getElementById('block-' + activeBlock.id);
-      if (nextEl) setTimeout(() => nextEl.scrollIntoView({ behavior: 'smooth', block: 'start' }), 650);
-    }
-
-    const progressLabel = demoProgressEl.querySelector('.demo-score-label');
-    if (progressLabel) {
-      progressLabel.textContent = doneCount + ' of ' + demoBlocks.length + ' challenges complete';
+      const completedEl = document.getElementById('block-' + completedBlockId);
+      if (nextEl && completedEl) {
+        const scrollAfterPulse = event => {
+          if (event.target === completedEl && event.animationName === 'demoCompletePulse') {
+            completedEl.removeEventListener('animationend', scrollAfterPulse);
+            nextEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        };
+        completedEl.addEventListener('animationend', scrollAfterPulse);
+      } else if (nextEl) {
+        nextEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
   }
 

@@ -2,10 +2,11 @@
 """Autonomous epoch runner.
 
 State machine that drives one full epoch end-to-end:
-  GENERATE  -> batch generation across the cohort
-  ANALYZE   -> outer loop drafts proposals
-  IMPLEMENT -> for each proposal, implement+closure_test+auto-promote-or-revert
-  CLOSE     -> holdout regression + bump epoch in state.json
+  GENERATE   -> batch generation across the cohort
+  ANALYZE    -> outer loop drafts proposals
+  EXPERIMENT -> optional A/B test of pipeline changes (control vs treatment)
+  IMPLEMENT  -> for each proposal, implement+closure_test+auto-promote-or-revert
+  CLOSE      -> holdout regression + bump epoch in state.json
 
 All thresholds, gates, and limits are config-driven (configs/v<N>.json runner section).
 
@@ -34,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
 
 
-PHASES = ["GENERATE", "ANALYZE", "IMPLEMENT", "CLOSE", "DONE"]
+PHASES = ["GENERATE", "ANALYZE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 RESUMABLE_PAUSE_STATES = {"PAUSED_QUOTA", "PAUSED_ERROR", "PAUSED_WALLCLOCK", "PAUSED_SIGNAL"}
 STATE_JSON = "derivations/state.json"
@@ -201,8 +202,209 @@ def phase_analyze(cfg: dict, state: dict) -> None:
                  f"epoch_{epoch_num():03d}"])
         if r.returncode != 0:
             print(f"[runner] ANALYZE failed rc={r.returncode}", file=sys.stderr)
-    state["phase"] = "IMPLEMENT"
+    state["phase"] = "EXPERIMENT"
     state["proposals_handled"] = state.get("proposals_handled", [])
+    save_state(cfg, state)
+
+
+# ── PHASE: EXPERIMENT ───────────────────────────────────────────────────
+def _experiment_targets(cfg: dict, state: dict, queue_path: Path) -> list[str]:
+    """Select up to max_targets targets for the A/B experiment."""
+    exp_cfg = cfg.get("runner", {}).get("experiment", {})
+    max_targets = int(exp_cfg.get("max_targets", 5))
+    targets = []
+    for line in queue_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            targets.append(line)
+            if len(targets) >= max_targets:
+                break
+    return targets
+
+
+def _write_experiment_queue(targets: list[str], batch_id: str) -> Path:
+    """Write a temp queue file for the experiment batches."""
+    queue_path = PROJECT_ROOT / "derivations" / "targets" / f".experiment_{batch_id}.txt"
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text(f"# Experiment queue for {batch_id}\n\n" + "\n".join(targets) + "\n")
+    return queue_path
+
+
+def _run_experiment_batch(batch_id: str, queue_path: Path, *, inner_mode: str,
+                          experiment_id: str, treatment_id: str | None = None,
+                          normalization_mode: str | None = None,
+                          allow_treatment_failures: bool = False) -> int:
+    """Run one batch (control or treatment) and return its exit code."""
+    cmd = [
+        str(PROJECT_ROOT / "scripts" / "batch.sh"),
+        "--batch-id", batch_id,
+        "--inner-mode", inner_mode,
+        "--experiment-id", experiment_id,
+        str(queue_path),
+    ]
+    if treatment_id:
+        cmd += ["--treatment-id", treatment_id]
+    if normalization_mode:
+        cmd += ["--normalization-mode", normalization_mode]
+    if allow_treatment_failures:
+        cmd += ["--allow-treatment-failures"]
+    r = run(cmd)
+    return r.returncode
+
+
+def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
+    """Optional A/B experiment: test a pipeline change (e.g. rule_executor) against control.
+
+    If experiment is not enabled in config, or no proposals from ANALYZE,
+    skip directly to IMPLEMENT.
+    """
+    exp_cfg = cfg.get("runner", {}).get("experiment", {})
+    if not exp_cfg.get("enabled", False):
+        print("[runner] EXPERIMENT: disabled in config; skipping to IMPLEMENT", file=sys.stderr)
+        state["phase"] = "IMPLEMENT"
+        save_state(cfg, state)
+        return
+
+    epoch = epoch_num()
+    epoch_dir = PROJECT_ROOT / "derivations" / "reports" / f"epoch_{epoch:03d}"
+
+    # Use the experiment_id from state, or create one
+    if "experiment_id" not in state:
+        state["experiment_id"] = f"epoch_{epoch:03d}_experiment_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        save_state(cfg, state)
+    exp_id = state["experiment_id"]
+
+    # If we already have a verdict, skip
+    verdict_path = epoch_dir / "experiment_verdict.json"
+    if verdict_path.exists():
+        print(f"[runner] EXPERIMENT: verdict exists; skipping to IMPLEMENT", file=sys.stderr)
+        state["phase"] = "IMPLEMENT"
+        save_state(cfg, state)
+        return
+
+    print(f"[runner] EXPERIMENT: experiment_id={exp_id}", file=sys.stderr)
+
+    # Select targets
+    targets = _experiment_targets(cfg, state, queue_path)
+    if len(targets) < 2:
+        print(f"[runner] EXPERIMENT: need >=2 targets, got {len(targets)}; skipping", file=sys.stderr)
+        state["phase"] = "IMPLEMENT"
+        save_state(cfg, state)
+        return
+
+    queue = _write_experiment_queue(targets, exp_id)
+
+    control_bid = f"{exp_id}_control"
+    treatment_bid = f"{exp_id}_treatment"
+    control_dir = PROJECT_ROOT / "derivations" / "_evolutions" / "batches" / control_bid
+    treatment_dir = PROJECT_ROOT / "derivations" / "_evolutions" / "batches" / treatment_bid
+
+    # Resume: skip batches that already completed
+    control_done = (control_dir / "checkpoint.json").exists() and \
+        any((control_dir / "targets").glob("target_*/target_metrics.json"))
+    treatment_done = (treatment_dir / "checkpoint.json").exists() and \
+        any((treatment_dir / "targets").glob("target_*/target_metrics.json"))
+
+    # 1. Control batch
+    if not control_done:
+        print(f"[runner] EXPERIMENT: running control batch ({exp_cfg.get('control_inner_mode', 'json')})", file=sys.stderr)
+        rc = _run_experiment_batch(control_bid, queue,
+                                   inner_mode=exp_cfg.get("control_inner_mode", "json"),
+                                   experiment_id=exp_id)
+        if rc == 75:
+            state["resume_phase"] = "EXPERIMENT"
+            _write_pause_state(cfg, state, "PAUSED_QUOTA", resume_phase="EXPERIMENT")
+            queue.unlink(missing_ok=True)
+            return
+        if rc in BATCH_FATAL_EXIT_CODES:
+            _write_pause_state(cfg, state, "PAUSED_ERROR",
+                               resume_phase="EXPERIMENT",
+                               error=f"control batch exited {rc}")
+            queue.unlink(missing_ok=True)
+            return
+    else:
+        print(f"[runner] EXPERIMENT: control batch already complete; skipping", file=sys.stderr)
+
+    # 2. Treatment batch
+    treatment_mode = exp_cfg.get("treatment_inner_mode", "rule_executor")
+    norm_mode = exp_cfg.get("treatment_normalization_mode", "preserve-executor-boundaries")
+    if not treatment_done:
+        print(f"[runner] EXPERIMENT: running treatment batch ({treatment_mode})", file=sys.stderr)
+        rc = _run_experiment_batch(treatment_bid, queue,
+                                   inner_mode=treatment_mode,
+                                   experiment_id=exp_id,
+                                   treatment_id="experiment_treatment",
+                                   normalization_mode=norm_mode,
+                                   allow_treatment_failures=True)
+        if rc == 75:
+            state["resume_phase"] = "EXPERIMENT"
+            _write_pause_state(cfg, state, "PAUSED_QUOTA", resume_phase="EXPERIMENT")
+            queue.unlink(missing_ok=True)
+            return
+        if rc in BATCH_FATAL_EXIT_CODES:
+            _write_pause_state(cfg, state, "PAUSED_ERROR",
+                               resume_phase="EXPERIMENT",
+                               error=f"treatment batch exited {rc}")
+            queue.unlink(missing_ok=True)
+            return
+    else:
+        print(f"[runner] EXPERIMENT: treatment batch already complete; skipping", file=sys.stderr)
+
+    # 3. A/B comparison
+    print(f"[runner] EXPERIMENT: running ab_compare", file=sys.stderr)
+    ab_py = PROJECT_ROOT / "derivations" / "ab_compare.py"
+    r = run([os.environ.get("DERIVATION_PYTHON") or sys.executable,
+             str(ab_py),
+             "--control", str(control_dir),
+             "--treatment", str(treatment_dir),
+             "--experiment-id", exp_id])
+    comparison_path = treatment_dir / "ab_comparison.json"
+    if r.returncode != 0 or not comparison_path.exists():
+        print(f"[runner] EXPERIMENT: ab_compare failed rc={r.returncode}; skipping", file=sys.stderr)
+        verdict = {
+            "experiment_id": exp_id,
+            "status": "comparison_failed",
+            "ab_compare_rc": r.returncode,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+    else:
+        comparison = json.loads(comparison_path.read_text())
+        paired = comparison.get("paired", {})
+        delta = paired.get("acceptance_delta", 0.0)
+        min_delta = float(exp_cfg.get("min_acceptance_delta", 0.0))
+        won = delta > min_delta
+
+        verdict = {
+            "experiment_id": exp_id,
+            "status": "treatment_won" if won else "control_won" if delta < 0 else "neutral",
+            "acceptance_delta": delta,
+            "control_acceptance_rate": paired.get("control_acceptance_rate"),
+            "treatment_acceptance_rate": paired.get("treatment_acceptance_rate"),
+            "first_try_pass_delta": paired.get("first_try_pass_delta"),
+            "n_pairs": paired.get("n_pairs"),
+            "both_accepted": paired.get("both_accepted"),
+            "treatment_only_accepted": paired.get("treatment_only_accepted"),
+            "control_only_accepted": paired.get("control_only_accepted"),
+            "both_failed": paired.get("both_failed"),
+            "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
+            "comparison_path": str(comparison_path),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
+        if won and exp_cfg.get("promote_on_win", False):
+            print(f"[runner] EXPERIMENT: treatment won (delta={delta:.2%}); promoting config", file=sys.stderr)
+            # Promote treatment settings as the new default for next epoch's GENERATE
+            state["promoted_experiment"] = {
+                "inner_mode": treatment_mode,
+                "normalization_mode": norm_mode,
+            }
+
+    epoch_dir.mkdir(parents=True, exist_ok=True)
+    verdict_path.write_text(json.dumps(verdict, indent=2))
+    print(f"[runner] EXPERIMENT: verdict={verdict['status']}  delta={verdict.get('acceptance_delta', 'n/a')}", file=sys.stderr)
+
+    queue.unlink(missing_ok=True)
+    state["phase"] = "IMPLEMENT"
     save_state(cfg, state)
 
 
@@ -227,14 +429,49 @@ def phase_implement(cfg: dict, state: dict) -> None:
             continue
         print(f"[runner] IMPLEMENT: {prop.name}", file=sys.stderr)
 
-        # Skip non-validator proposals (INVESTIGATE etc.)
+        # Skip non-actionable proposals (INVESTIGATE etc.)
         kind = ""
         for line in prop.read_text().splitlines():
             if line.startswith("**Kind**:"):
                 kind = line.split(":", 1)[1].strip()
                 break
+
+        # PROMPT_UPDATE proposals go through promote_prompt.sh, not implement.sh.
+        if kind == "PROMPT_UPDATE":
+            print(f"  -> PROMPT_UPDATE: promoting via promote_prompt.sh", file=sys.stderr)
+            pre_state_json = snapshot_state_json()
+            pre_prompt = (PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md").read_bytes()
+
+            def _revert_prompt() -> None:
+                restore_state_json(pre_state_json)
+                (PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md").write_bytes(pre_prompt)
+
+            r = run([str(PROJECT_ROOT / "scripts" / "promote_prompt.sh"), str(prop)])
+            if r.returncode == 75:
+                _revert_prompt()
+                state["resume_phase"] = "IMPLEMENT"
+                _write_pause_state(cfg, state, "PAUSED_QUOTA", resume_phase="IMPLEMENT")
+                return
+            if r.returncode != 0:
+                # promote_prompt.sh exits 2 (DENIED), 3 (no Promote section), 4 (no addenda),
+                # 5 (checkpoint exists). All are safe no-ops or explicit rejections.
+                print(f"  -> promote_prompt.sh rc={r.returncode}; marking handled", file=sys.stderr)
+                _revert_prompt()
+                handled.add(prop.name)
+                state["proposals_handled"] = sorted(handled)
+                save_state(cfg, state)
+                if stop_on_fail:
+                    break
+                continue
+
+            print(f"  -> PROMOTED prompt (promote_prompt.sh rc=0)", file=sys.stderr)
+            handled.add(prop.name)
+            state["proposals_handled"] = sorted(handled)
+            save_state(cfg, state)
+            continue
+
         if kind not in ("NEW_VALIDATOR", "STRENGTHEN_VALIDATOR", "WEAKEN_VALIDATOR"):
-            print(f"  -> skip kind={kind!r} (not a validator change)", file=sys.stderr)
+            print(f"  -> skip kind={kind!r} (not a validator or prompt change)", file=sys.stderr)
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
@@ -401,6 +638,8 @@ def main() -> int:
                 phase_generate(cfg, state, Path(args.queue))
             elif phase == "ANALYZE":
                 phase_analyze(cfg, state)
+            elif phase == "EXPERIMENT":
+                phase_experiment(cfg, state, Path(args.queue))
             elif phase == "IMPLEMENT":
                 phase_implement(cfg, state)
             elif phase == "CLOSE":

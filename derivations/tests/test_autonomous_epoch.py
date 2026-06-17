@@ -552,5 +552,413 @@ class PromptForbidsStateJsonTests(unittest.TestCase):
         self.assertIn("implement.sh wrapper", prompt)
 
 
+class ExperimentPhaseTests(unittest.TestCase):
+    """Tests for the EXPERIMENT phase: config gating, target selection, verdict logic."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.state_path = self.tmp / "_epoch_state.json"
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_json = self.tmp / "derivations" / "state.json"
+        self.state_json.parent.mkdir(parents=True, exist_ok=True)
+        self.state_json.write_text(json.dumps({
+            "epoch": 1, "prompt_version": "v1", "validator_version": "v2", "config_version": "v5"
+        }))
+        self.queue_path = self.tmp / "queue.txt"
+        self.queue_path.write_text("# test queue\nsolve x + 2 = 5 for x\nderive E = mc^2\nsolve 3x = 12\n")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_phase(self, cfg: dict, state: dict) -> dict:
+        def fake_save_state(c, s):
+            self.state_path.write_text(json.dumps(s))
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "_state_json_path", lambda: self.state_json), \
+             patch.object(ae, "save_state", side_effect=fake_save_state), \
+             patch.object(ae, "epoch_num", return_value=1):
+            ae.phase_experiment(cfg, state, self.queue_path)
+        return state
+
+    def test_disabled_skips_to_implement(self) -> None:
+        cfg = {"runner": {"experiment": {"enabled": False}}}
+        state = {"phase": "EXPERIMENT"}
+        self._run_phase(cfg, state)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+
+    def test_no_experiment_section_skips_to_implement(self) -> None:
+        cfg = {"runner": {}}
+        state = {"phase": "EXPERIMENT"}
+        self._run_phase(cfg, state)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+
+    def test_too_few_targets_skips(self) -> None:
+        queue = self.tmp / "small_queue.txt"
+        queue.write_text("# one target\nsolve x = 1\n")
+        cfg = {"runner": {"experiment": {"enabled": True, "max_targets": 5}}}
+        state = {"phase": "EXPERIMENT"}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "save_state", lambda c, s: self.state_path.write_text(json.dumps(s))), \
+             patch.object(ae, "epoch_num", return_value=1):
+            ae.phase_experiment(cfg, state, queue)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+
+    def test_existing_verdict_skips_to_implement(self) -> None:
+        cfg = {"runner": {"experiment": {"enabled": True, "max_targets": 5}}}
+        state = {"phase": "EXPERIMENT", "experiment_id": "test_exp"}
+        epoch_dir = self.tmp / "derivations" / "reports" / "epoch_001"
+        epoch_dir.mkdir(parents=True)
+        (epoch_dir / "experiment_verdict.json").write_text('{"status": "neutral"}')
+        self._run_phase(cfg, state)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+
+
+class ExperimentTargetSelectionTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.queue = self.tmp / "queue.txt"
+        self.queue.write_text(
+            "# header comment\n"
+            "solve x + 2 = 5 for x\n"
+            "derive E = mc^2\n"
+            "# mid comment\n"
+            "solve 3x = 12\n"
+            "factor x^2 - 9\n"
+            "derive v = u + at\n"
+        )
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_selects_up_to_max(self) -> None:
+        cfg = {"runner": {"experiment": {"max_targets": 3}}}
+        state = {}
+        targets = ae._experiment_targets(cfg, state, self.queue)
+        self.assertEqual(len(targets), 3)
+        self.assertNotIn("# header comment", targets)
+
+    def test_selects_all_if_fewer_than_max(self) -> None:
+        cfg = {"runner": {"experiment": {"max_targets": 10}}}
+        state = {}
+        targets = ae._experiment_targets(cfg, state, self.queue)
+        self.assertEqual(len(targets), 5)
+
+    def test_ignores_comments_and_blanks(self) -> None:
+        cfg = {"runner": {"experiment": {"max_targets": 100}}}
+        state = {}
+        targets = ae._experiment_targets(cfg, state, self.queue)
+        for t in targets:
+            self.assertFalse(t.startswith("#"))
+            self.assertTrue(t.strip())
+
+
+class ExperimentVerdictTests(unittest.TestCase):
+    """Test the verdict logic by mocking batch runs and ab_compare."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.state_path = self.tmp / "_epoch_state.json"
+        self.state_json = self.tmp / "derivations" / "state.json"
+        self.state_json.parent.mkdir(parents=True, exist_ok=True)
+        self.state_json.write_text(json.dumps({
+            "epoch": 1, "prompt_version": "v1", "validator_version": "v2", "config_version": "v5"
+        }))
+        self.queue_path = self.tmp / "queue.txt"
+        self.queue_path.write_text("# queue\nsolve x + 2 = 5\nderive E = mc^2\nsolve 3x = 12\n")
+        self.epoch_dir = self.tmp / "derivations" / "reports" / "epoch_001"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_with_mock_batches(self, cfg: dict, *, comparison_data: dict | None) -> dict:
+        state = {"phase": "EXPERIMENT"}
+
+        def fake_save_state(c, s):
+            self.state_path.write_text(json.dumps(s))
+
+        def fake_run(cmd, **kw):
+            result = MagicMock()
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "batch.sh" in cmd_str:
+                result.returncode = 0
+                # Simulate batch creating checkpoint + target_metrics
+                batch_id_idx = cmd.index("--batch-id") + 1 if "--batch-id" in cmd else -1
+                if batch_id_idx > 0:
+                    bid = cmd[batch_id_idx]
+                    bdir = self.tmp / "derivations" / "_evolutions" / "batches" / bid
+                    tdir = bdir / "targets" / "target_000"
+                    tdir.mkdir(parents=True, exist_ok=True)
+                    (bdir / "checkpoint.json").write_text(json.dumps({"batch_id": bid, "inner_mode": "json"}))
+                    (tdir / "target_metrics.json").write_text(json.dumps({"target_index": 0, "accepted": True}))
+                    (tdir / "target.json").write_text(json.dumps({"target": "solve x + 2 = 5"}))
+            elif "ab_compare.py" in cmd_str:
+                result.returncode = 0 if comparison_data else 2
+                if comparison_data:
+                    treatment_idx = cmd.index("--treatment") + 1 if "--treatment" in cmd else -1
+                    if treatment_idx > 0:
+                        tdir = Path(cmd[treatment_idx])
+                        (tdir / "ab_comparison.json").write_text(json.dumps(comparison_data))
+            else:
+                result.returncode = 0
+            return result
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "_state_json_path", lambda: self.state_json), \
+             patch.object(ae, "save_state", side_effect=fake_save_state), \
+             patch.object(ae, "epoch_num", return_value=1), \
+             patch.object(ae, "run", side_effect=fake_run):
+            ae.phase_experiment(cfg, state, self.queue_path)
+        return state
+
+    def test_treatment_won_verdict(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "control_inner_mode": "json",
+            "treatment_inner_mode": "rule_executor",
+            "treatment_normalization_mode": "preserve-executor-boundaries",
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": False,
+        }}}
+        comparison = {"paired": {
+            "acceptance_delta": 0.5,
+            "control_acceptance_rate": 0.25,
+            "treatment_acceptance_rate": 0.75,
+            "first_try_pass_delta": 0.5,
+            "n_pairs": 3,
+            "both_accepted": 1,
+            "treatment_only_accepted": 1,
+            "control_only_accepted": 0,
+            "both_failed": 1,
+        }}
+        state = self._run_with_mock_batches(cfg, comparison_data=comparison)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual(verdict["status"], "treatment_won")
+        self.assertEqual(verdict["acceptance_delta"], 0.5)
+        self.assertNotIn("promoted_experiment", state)
+
+    def test_promote_on_win_sets_promoted_experiment(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "control_inner_mode": "json",
+            "treatment_inner_mode": "rule_executor",
+            "treatment_normalization_mode": "preserve-executor-boundaries",
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": True,
+        }}}
+        comparison = {"paired": {
+            "acceptance_delta": 0.3,
+            "control_acceptance_rate": 0.3,
+            "treatment_acceptance_rate": 0.6,
+            "first_try_pass_delta": 0.3,
+            "n_pairs": 3,
+            "both_accepted": 1,
+            "treatment_only_accepted": 1,
+            "control_only_accepted": 0,
+            "both_failed": 1,
+        }}
+        state = self._run_with_mock_batches(cfg, comparison_data=comparison)
+        self.assertIn("promoted_experiment", state)
+        self.assertEqual(state["promoted_experiment"]["inner_mode"], "rule_executor")
+
+    def test_control_won_verdict(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": False,
+        }}}
+        comparison = {"paired": {
+            "acceptance_delta": -0.25,
+            "control_acceptance_rate": 0.75,
+            "treatment_acceptance_rate": 0.5,
+            "first_try_pass_delta": -0.25,
+            "n_pairs": 3,
+            "both_accepted": 1,
+            "treatment_only_accepted": 0,
+            "control_only_accepted": 1,
+            "both_failed": 1,
+        }}
+        state = self._run_with_mock_batches(cfg, comparison_data=comparison)
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual(verdict["status"], "control_won")
+        self.assertNotIn("promoted_experiment", state)
+
+    def test_neutral_verdict(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": False,
+        }}}
+        comparison = {"paired": {
+            "acceptance_delta": 0.0,
+            "control_acceptance_rate": 0.5,
+            "treatment_acceptance_rate": 0.5,
+            "first_try_pass_delta": 0.0,
+            "n_pairs": 3,
+            "both_accepted": 1,
+            "treatment_only_accepted": 0,
+            "control_only_accepted": 0,
+            "both_failed": 2,
+        }}
+        state = self._run_with_mock_batches(cfg, comparison_data=comparison)
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual(verdict["status"], "neutral")
+
+    def test_comparison_failure_verdict(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": False,
+        }}}
+        state = self._run_with_mock_batches(cfg, comparison_data=None)
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual(verdict["status"], "comparison_failed")
+
+    def test_quota_pause_during_control(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+        }}}
+        state = {"phase": "EXPERIMENT"}
+
+        def fake_save_state(c, s):
+            self.state_path.write_text(json.dumps(s))
+
+        def fake_run(cmd, **kw):
+            result = MagicMock()
+            result.returncode = 75  # quota
+            return result
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "_state_json_path", lambda: self.state_json), \
+             patch.object(ae, "save_state", side_effect=fake_save_state), \
+             patch.object(ae, "epoch_num", return_value=1), \
+             patch.object(ae, "run", side_effect=fake_run):
+            ae.phase_experiment(cfg, state, self.queue_path)
+        self.assertEqual(state["phase"], "PAUSED_QUOTA")
+        self.assertEqual(state["resume_phase"], "EXPERIMENT")
+
+
+class PhasesListTests(unittest.TestCase):
+
+    def test_experiment_in_phases(self) -> None:
+        self.assertIn("EXPERIMENT", ae.PHASES)
+
+    def test_phases_order(self) -> None:
+        idx = {p: i for i, p in enumerate(ae.PHASES)}
+        self.assertLess(idx["ANALYZE"], idx["EXPERIMENT"])
+        self.assertLess(idx["EXPERIMENT"], idx["IMPLEMENT"])
+
+
+class PromptUpdateProposalTests(unittest.TestCase):
+    """PROMPT_UPDATE proposals go through promote_prompt.sh, not implement.sh."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.state_json = self.tmp / "derivations" / "state.json"
+        self.state_json.parent.mkdir(parents=True, exist_ok=True)
+        self.state_json.write_text(json.dumps({
+            "epoch": 1, "prompt_version": "v1", "validator_version": "v2", "config_version": "v5"
+        }))
+        self.prompt_path = self.tmp / "derivations" / "prompts" / "generate_derivation.md"
+        self.prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        self.prompt_path.write_bytes(b"# original prompt\n")
+
+        self.reports_dir = self.tmp / "derivations" / "reports" / "epoch_001"
+        self.reports_dir.mkdir(parents=True)
+        self.proposal = self.reports_dir / "proposal_01_prompt_fix.md"
+        self.proposal.write_text("**Kind**: PROMPT_UPDATE\n**Affected rule**: none\n")
+
+        self.cfg = {
+            "runner": {
+                "auto_promote": {"min_lift_fraction": 0.4, "revert_on_holdout_regression": True},
+                "epoch": {"max_proposals_per_epoch": 5, "stop_on_first_failed_promotion": False},
+            }
+        }
+        self.state_path = self.tmp / "derivations" / "_epoch_state.json"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_phase(self, promote_rc: int) -> dict:
+        state = {"phase": "IMPLEMENT", "proposals_handled": []}
+
+        def fake_save_state(cfg, s):
+            self.state_path.write_text(json.dumps(s))
+
+        def fake_run(cmd, **kw):
+            result = MagicMock()
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "promote_prompt.sh" in cmd_str:
+                result.returncode = promote_rc
+                if promote_rc == 0:
+                    # Simulate prompt modification + version bump
+                    self.prompt_path.write_bytes(b"# original prompt\n\n## Addendum\nnew rule\n")
+                    d = json.loads(self.state_json.read_text())
+                    d["prompt_version"] = "v2"
+                    self.state_json.write_text(json.dumps(d, indent=2))
+            else:
+                result.returncode = 0
+            return result
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "run", side_effect=fake_run), \
+             patch.object(ae, "epoch_num", return_value=1), \
+             patch.object(ae, "_state_json_path", lambda: self.state_json), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "save_state", side_effect=fake_save_state):
+            ae.phase_implement(self.cfg, state)
+        return state
+
+    def test_successful_prompt_promotion(self) -> None:
+        state = self._run_phase(promote_rc=0)
+        self.assertIn("proposal_01_prompt_fix.md", state["proposals_handled"])
+        self.assertEqual(state["phase"], "CLOSE")
+        # Prompt was modified (not reverted)
+        self.assertIn(b"Addendum", self.prompt_path.read_bytes())
+
+    def test_denied_prompt_proposal_reverts(self) -> None:
+        # Simulate promote_prompt.sh modifying the prompt then returning DENIED (rc=2)
+        def fake_run(cmd, **kw):
+            result = MagicMock()
+            cmd_str = " ".join(str(c) for c in cmd)
+            if "promote_prompt.sh" in cmd_str:
+                self.prompt_path.write_bytes(b"# modified before denial\n")
+                d = json.loads(self.state_json.read_text())
+                d["prompt_version"] = "v2"
+                self.state_json.write_text(json.dumps(d, indent=2))
+                result.returncode = 2
+            else:
+                result.returncode = 0
+            return result
+
+        state = {"phase": "IMPLEMENT", "proposals_handled": []}
+
+        def fake_save_state(cfg, s):
+            self.state_path.write_text(json.dumps(s))
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "run", side_effect=fake_run), \
+             patch.object(ae, "epoch_num", return_value=1), \
+             patch.object(ae, "_state_json_path", lambda: self.state_json), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "save_state", side_effect=fake_save_state):
+            ae.phase_implement(self.cfg, state)
+
+        self.assertIn("proposal_01_prompt_fix.md", state["proposals_handled"])
+        self.assertEqual(self.prompt_path.read_bytes(), b"# original prompt\n")
+
+    def test_quota_pause_during_prompt_promotion(self) -> None:
+        state = self._run_phase(promote_rc=75)
+        self.assertEqual(state["phase"], "PAUSED_QUOTA")
+        self.assertEqual(state["resume_phase"], "IMPLEMENT")
+        # Prompt should be reverted
+        self.assertEqual(self.prompt_path.read_bytes(), b"# original prompt\n")
+
+
 if __name__ == "__main__":
     unittest.main()

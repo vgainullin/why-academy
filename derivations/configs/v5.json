@@ -74,6 +74,15 @@
       ],
       "schedule_wakeup_buffer_s": 60
     },
+    "experiment": {
+      "enabled": false,
+      "max_targets": 5,
+      "control_inner_mode": "json",
+      "treatment_inner_mode": "rule_executor",
+      "treatment_normalization_mode": "preserve-executor-boundaries",
+      "min_acceptance_delta": 0.0,
+      "promote_on_win": false
+    },
     "state_file": "derivations/_epoch_state.json"
   }
 }

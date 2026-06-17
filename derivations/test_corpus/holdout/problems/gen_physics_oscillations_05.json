@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_oscillations_05",
+  "category": "physics_oscillations",
+  "difficulty": "medium",
+  "target_text": "derive E = (1/2)*k*A^2 for the total mechanical energy of a mass-spring oscillator from E = (1/2)*m*v^2 + (1/2)*k*x^2 evaluated at the turning point x = A, v = 0",
+  "expected_goal_srepr": "Eq(Symbol('E'), Mul(Rational(1,2), Symbol('k'), Pow(Symbol('A'), Integer(2))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.16.5"
+}

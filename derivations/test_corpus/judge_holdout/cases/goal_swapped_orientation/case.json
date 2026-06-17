@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "PASS",
+    "target_goal_reached": "PASS",
+    "overall": "PASS"
+  },
+  "rationale": "Clean atomic chain; the goal node sqrt(k/m) = omega is the requested endpoint with sides swapped, which still reaches the target.",
+  "notes": "Sensitivity trap: a judge that fails this on orientation is over-strict (target_check.eq_matches accepts swapped sides).",
+  "label_provenance": "seed"
+}

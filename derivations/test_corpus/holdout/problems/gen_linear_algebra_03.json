@@ -1,0 +1,9 @@
+{
+  "id": "gen_linear_algebra_03",
+  "category": "linear_algebra",
+  "difficulty": "medium",
+  "target_text": "solve the 2x2 system x + y = 10 and x - y = 4 by addition; report x",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(7))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.4.1"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_limits_02",
+  "category": "calculus_limits",
+  "difficulty": "medium",
+  "target_text": "evaluate the limit as x approaches 0 of sin(x)/x = 1 using the squeeze theorem",
+  "expected_goal_srepr": "Eq(Limit(Mul(sin(Symbol('x')), Pow(Symbol('x'), Integer(-1))), Symbol('x'), Integer(0)), Integer(1))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.2.4"
+}

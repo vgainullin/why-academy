@@ -4,6 +4,23 @@ node_modules/
 *.swo
 *~
 .env
+__pycache__/
+*.pyc
+
+# Local/generated derivation pipeline artifacts
+derivations/.venv/
+derivations/.DS_Store
+derivations/**/.DS_Store
+derivations/**/__pycache__/
+derivations/**/*.pyc
+derivations/_evolutions/
+derivations/_epoch_state.json
+derivations/frontier/
+derivations/logs/
+derivations/problems/
+derivations/reports/
+derivations/test_corpus/holdout/results_epoch_*.json
+derivations/test_corpus/holdout/sidecars/
 
 # Internal docs — not for public repo
 why-academy-brief.md

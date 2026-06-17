@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "solve x + 2 = 5 for x",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "SKIP",
+    "target_goal_reached": "PASS",
+    "overall": "PASS"
+  },
+  "rationale": "Single atomic subtraction step reaching the exact requested goal; only one starting equation, so criterion 2 does not apply.",
+  "notes": "",
+  "label_provenance": "seed"
+}

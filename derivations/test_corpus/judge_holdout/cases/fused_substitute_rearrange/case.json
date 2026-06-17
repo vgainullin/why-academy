@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x",
+  "labels": {
+    "one_rule_per_edge": "FAIL",
+    "given_facts_visible": "PASS",
+    "target_goal_reached": "PASS",
+    "overall": "FAIL"
+  },
+  "rationale": "Edge n0 -> n2 is labeled substitute_expression but goes from m*xddot = -k*x straight to omega^2 = k/m: substitution, division by m, and cancellation of x are fused into one step. Both given facts are visible as nodes n0 and n1.",
+  "notes": "",
+  "label_provenance": "seed"
+}

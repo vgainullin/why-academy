@@ -1,0 +1,8 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "evaluate_limit",
+  "aliases": ["evaluate_limit_by_substitution", "take_limit"],
+  "kind": "limit_evaluate",
+  "args_prompt": "{}",
+  "safety": "only when the limit body is continuous at the point: direct substitution must be defined and must equal the limit; a 0/0 form fails -- cancel inside the limit first with cancel_within_limit"
+}

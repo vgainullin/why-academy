@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_mechanics_03",
+  "category": "physics_mechanics",
+  "difficulty": "medium",
+  "target_text": "derive v^2 = u^2 + 2*a*s by eliminating t between v = u + a*t and s = u*t + (1/2)*a*t^2",
+  "expected_goal_srepr": "Eq(Pow(Symbol('v'), Integer(2)), Add(Pow(Symbol('u'), Integer(2)), Mul(Integer(2), Symbol('a'), Symbol('s'))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.2.5"
+}

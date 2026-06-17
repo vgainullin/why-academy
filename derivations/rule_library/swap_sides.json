@@ -1,0 +1,7 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "swap_sides",
+  "kind": "swap_sides",
+  "args_prompt": "{}",
+  "safety": "only Eq(a, b) -> Eq(b, a)"
+}

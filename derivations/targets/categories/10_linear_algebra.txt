@@ -1,0 +1,5 @@
+# Linear algebra: 2x2 cases that fit sympy scalar machinery.
+# Matrix-valued srepr would need different verifier handling; keeping it scalar here.
+
+solve the 2x2 linear system 2x + y = 5 and x - y = 1 for x and y, by elimination
+derive Cramer's rule for a 2x2 system in scalar form: x = (e*d - b*f) / (a*d - b*c) and y = (a*f - e*c) / (a*d - b*c) where the system is a*x + b*y = e, c*x + d*y = f

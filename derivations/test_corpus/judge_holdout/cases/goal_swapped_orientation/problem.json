@@ -1,0 +1,77 @@
+{
+  "root_node": "n0",
+  "goal_node": "n6",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(m*Symbol('xddot'), -k*x, evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(Symbol('xddot'), -Symbol('omega')**2*x, evaluate=False)"
+    },
+    {
+      "id": "n2",
+      "sympy_srepr": "Eq(m*(-Symbol('omega')**2*x), -k*x, evaluate=False)"
+    },
+    {
+      "id": "n3",
+      "sympy_srepr": "Eq(m*Symbol('omega')**2, k, evaluate=False)"
+    },
+    {
+      "id": "n4",
+      "sympy_srepr": "Eq(Symbol('omega')**2, k/m, evaluate=False)"
+    },
+    {
+      "id": "n5",
+      "sympy_srepr": "Eq(Symbol('omega'), sqrt(k/m), evaluate=False)"
+    },
+    {
+      "id": "n6",
+      "sympy_srepr": "Eq(sqrt(k/m), Symbol('omega'), evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n2",
+      "rule": "substitute_expression",
+      "rule_args": {
+        "symbol": "Symbol('xddot')",
+        "replacement": "-Symbol('omega')**2*x"
+      }
+    },
+    {
+      "from": "n2",
+      "to": "n3",
+      "rule": "divide_both_sides",
+      "rule_args": {
+        "divisor": "-x"
+      }
+    },
+    {
+      "from": "n3",
+      "to": "n4",
+      "rule": "divide_both_sides",
+      "rule_args": {
+        "divisor": "m"
+      }
+    },
+    {
+      "from": "n4",
+      "to": "n5",
+      "rule": "take_positive_square_root",
+      "rule_args": {
+        "var": "Symbol('omega')",
+        "assume_nonnegative": true
+      }
+    },
+    {
+      "from": "n5",
+      "to": "n6",
+      "rule": "swap_sides",
+      "rule_args": {}
+    }
+  ],
+  "id": "goal_swapped_orientation"
+}

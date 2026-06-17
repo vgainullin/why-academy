@@ -1,0 +1,14 @@
+{
+  "id": "holdout_two_step_linear",
+  "root_node": "n0",
+  "goal_node": "n2",
+  "nodes": [
+    {"id": "n0", "sympy_srepr": "Eq(Add(Mul(Integer(2), Symbol('x')), Integer(6)), Integer(10))"},
+    {"id": "n1", "sympy_srepr": "Eq(Mul(Integer(2), Symbol('x')), Integer(4))"},
+    {"id": "n2", "sympy_srepr": "Eq(Symbol('x'), Integer(2))"}
+  ],
+  "edges": [
+    {"from": "n0", "to": "n1", "rule": "subtract_constant_from_both_sides", "rule_args": {"constant": 6}},
+    {"from": "n1", "to": "n2", "rule": "divide_both_sides", "rule_args": {"divisor": 2}}
+  ]
+}

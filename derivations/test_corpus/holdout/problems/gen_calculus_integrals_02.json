@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_integrals_02",
+  "category": "calculus_integrals",
+  "difficulty": "easy",
+  "target_text": "derive integral of x^2 dx = x^3/3 + C from the antiderivative of the power rule",
+  "expected_goal_srepr": "Eq(Integral(Pow(Symbol('x'), Integer(2)), Symbol('x')), Add(Mul(Rational(1,3), Pow(Symbol('x'), Integer(3))), Symbol('C')))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.5.1"
+}

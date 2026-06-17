@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_derivatives_05",
+  "category": "calculus_derivatives",
+  "difficulty": "hard",
+  "target_text": "derive d/dx(sin(x)) = cos(x) from the limit definition of the derivative using the angle-addition formula and the standard limits lim_{h->0} sin(h)/h = 1 and lim_{h->0} (1-cos(h))/h = 0",
+  "expected_goal_srepr": "Eq(Derivative(sin(Symbol('x')), Symbol('x')), cos(Symbol('x')))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.3.5"
+}

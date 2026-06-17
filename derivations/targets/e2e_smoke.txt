@@ -1,0 +1,3 @@
+# Small end-to-end smoke queue.
+solve x + 2 = 5 for x
+derive the minimum drop height h = 5R/2 for a ball completing a vertical loop, given (1) centripetal: m*g = m*v^2/R and (2) energy: (1/2)*m*v^2 + m*g*(2R) = m*g*h

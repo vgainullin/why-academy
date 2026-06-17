@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_derivatives_01",
+  "category": "calculus_derivatives",
+  "difficulty": "easy",
+  "target_text": "derive d/dx(c) = 0 for any constant c from the limit definition of the derivative",
+  "expected_goal_srepr": "Eq(Derivative(Symbol('c'), Symbol('x')), Integer(0))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.3.3"
+}

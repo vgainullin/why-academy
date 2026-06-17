@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_linear_03",
+  "category": "algebra_linear",
+  "difficulty": "easy",
+  "target_text": "solve 2x - 9 = 5 for x",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(7))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.2.4"
+}

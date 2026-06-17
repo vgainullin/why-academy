@@ -1,0 +1,8 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "limit_definition_of_derivative",
+  "aliases": ["apply_limit_definition_of_derivative"],
+  "kind": "limit_definition",
+  "args_prompt": "{}",
+  "safety": "replaces exactly one unevaluated Derivative(f, var) with the literal difference quotient Limit((f(var+h) - f(var))/h, h, 0) using a fresh limit symbol; the quotient must not be pre-expanded or pre-cancelled -- use rewrite_within_limit edges for that"
+}

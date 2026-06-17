@@ -1,0 +1,7 @@
+{
+  "schema_version": "rule_contract.v1",
+  "rule_name": "take_positive_square_root",
+  "kind": "principal_sqrt",
+  "args_prompt": "{ \"var\": \"Symbol('<name>')\", \"assume_nonnegative\": true }",
+  "safety": "only from Eq(var**2, radicand) to Eq(var, sqrt(radicand)); explicit nonnegative assumption is required"
+}

@@ -1,0 +1,9 @@
+# Calculus: derivatives via the limit definition
+# Tests Limit + Derivative parsing. Expect canvas_fail on chains where sympy
+# auto-cancels h/h, x^2-x^2, etc.
+
+derive d/dx(x) = 1 from the limit definition of the derivative
+derive d/dx(c) = 0 for constant c from the limit definition
+derive d/dx(x^2) = 2x from the limit definition of the derivative
+derive d/dx(x^3) = 3x^2 from the limit definition of the derivative
+derive d/dx(x^2 + 3x) = 2x + 3 from the limit definition (expand, simplify, take the limit)

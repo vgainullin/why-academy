@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_integrals_05",
+  "category": "calculus_integrals",
+  "difficulty": "hard",
+  "target_text": "derive integral of x^n dx = x^(n+1)/(n+1) + C for n != -1 from the antiderivative of the general power rule",
+  "expected_goal_srepr": "Eq(Integral(Pow(Symbol('x'), Symbol('n')), Symbol('x')), Add(Mul(Pow(Add(Symbol('n'), Integer(1)), Integer(-1)), Pow(Symbol('x'), Add(Symbol('n'), Integer(1)))), Symbol('C')))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.5.1"
+}

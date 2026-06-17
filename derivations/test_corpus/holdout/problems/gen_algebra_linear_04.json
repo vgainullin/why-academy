@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_linear_04",
+  "category": "algebra_linear",
+  "difficulty": "easy",
+  "target_text": "solve 5x + 3 = 2x + 18 for x by collecting like terms",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(5))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Elementary Algebra 2e Ch.2.4"
+}

@@ -1,0 +1,9 @@
+{
+  "id": "gen_algebra_factoring_05",
+  "category": "algebra_factoring",
+  "difficulty": "medium",
+  "target_text": "factor x^3 + 1 as a sum of cubes",
+  "expected_goal_srepr": "Eq(Add(Pow(Symbol('x'), Integer(3)), Integer(1)), Mul(Add(Symbol('x'), Integer(1)), Add(Pow(Symbol('x'), Integer(2)), Mul(Integer(-1), Symbol('x')), Integer(1))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Intermediate Algebra 2e Ch.6.4"
+}

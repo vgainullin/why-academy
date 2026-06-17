@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "solve 3x - 5 = 10 for x",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "SKIP",
+    "target_goal_reached": "PASS",
+    "overall": "PASS"
+  },
+  "rationale": "Two atomic steps (add 5, divide by 3), exact goal reached.",
+  "notes": "",
+  "label_provenance": "seed"
+}

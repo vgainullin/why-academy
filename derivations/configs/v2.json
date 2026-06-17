@@ -1,0 +1,37 @@
+{
+  "description": "All-Sonnet config. Used during pipeline testing to cut cost ~5x vs v1 while we exercise the loop on cohort_v1+. Sonnet is strong enough to generate clean trivial-to-moderate derivations; trade-off is fewer first-try passes on harder targets (quadratic formula, multi-given physics).",
+  "models": {
+    "inner":     "sonnet",
+    "judge":     "sonnet",
+    "evolve":    "sonnet",
+    "outer":     "sonnet",
+    "implement": "sonnet"
+  },
+  "engines": {
+    "inner":     "claude",
+    "judge":     "claude",
+    "evolve":    "claude",
+    "outer":     "claude",
+    "implement": "claude"
+  },
+  "budgets_usd": {
+    "inner":     1,
+    "judge":     1,
+    "evolve":    1,
+    "outer":     3,
+    "implement": 2
+  },
+  "timeouts_s": {
+    "inner":      600,
+    "judge":      180,
+    "evolve":     120,
+    "outer":      900,
+    "implement": 1200
+  },
+  "evolution": {
+    "max_iter": 3
+  },
+  "batch": {
+    "parallel": 4
+  }
+}

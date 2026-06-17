@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_integrals_04",
+  "category": "calculus_integrals",
+  "difficulty": "medium",
+  "target_text": "compute the definite integral from 1 to 2 of x^2 dx = 7/3 using the antiderivative and the fundamental theorem of calculus",
+  "expected_goal_srepr": "Eq(Integral(Pow(Symbol('x'), Integer(2)), Tuple(Symbol('x'), Integer(1), Integer(2))), Rational(7,3))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.5.3"
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "solve 2(x + 3) = 10 for x",
+  "labels": {
+    "one_rule_per_edge": "FAIL",
+    "given_facts_visible": "SKIP",
+    "target_goal_reached": "PASS",
+    "overall": "FAIL"
+  },
+  "rationale": "Edge n0 -> n1 is labeled expand_expression but goes from 2(x+3)=10 to 2x=4: it expands AND subtracts 6 from both sides in one step.",
+  "notes": "",
+  "label_provenance": "seed"
+}

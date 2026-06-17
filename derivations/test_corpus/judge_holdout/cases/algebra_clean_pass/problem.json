@@ -1,0 +1,25 @@
+{
+  "root_node": "n0",
+  "goal_node": "n1",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(x + 2, 5, evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(x, 3, evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n1",
+      "rule": "subtract_constant_from_both_sides",
+      "rule_args": {
+        "constant": "2"
+      }
+    }
+  ],
+  "id": "algebra_clean_pass"
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "judge_holdout.v1",
+  "target": "derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x",
+  "labels": {
+    "one_rule_per_edge": "PASS",
+    "given_facts_visible": "PASS",
+    "target_goal_reached": "FAIL",
+    "overall": "FAIL"
+  },
+  "rationale": "Every edge is a single rule and both givens are visible, but the goal node stops at omega^2 = k/m; the target asks for omega = sqrt(k/m).",
+  "notes": "",
+  "label_provenance": "seed"
+}

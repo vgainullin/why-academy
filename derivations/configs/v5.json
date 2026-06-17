@@ -1,0 +1,88 @@
+{
+  "description": "Adds the adversarial second judge and judge calibration thresholds. PASS verdicts from the primary (DeepSeek) judge are re-reviewed by an OpenRouter Claude-family adversarial pass on a different engine so errors decorrelate; adversarial wrapper errors fail closed. Builds on v4.",
+  "models": {
+    "inner":     "",
+    "judge":     "deepseek-v4-flash",
+    "evolve":    "",
+    "outer":     "",
+    "implement": ""
+  },
+  "engines": {
+    "inner":     "codex",
+    "judge":     "deepseek",
+    "evolve":    "codex",
+    "outer":     "codex",
+    "implement": "codex"
+  },
+  "budgets_usd": {
+    "inner":     1,
+    "judge":     1,
+    "evolve":    1,
+    "outer":     3,
+    "implement": 2
+  },
+  "timeouts_s": {
+    "inner":      600,
+    "judge":      180,
+    "evolve":     120,
+    "outer":      900,
+    "implement": 1200
+  },
+  "adversarial_judge": {
+    "enabled": true,
+    "engine": "openrouter",
+    "model": "anthropic/claude-sonnet-4.6",
+    "budget_usd": 1,
+    "timeout_s": 180,
+    "fail_mode": "closed"
+  },
+  "judge_calibration": {
+    "max_false_pass": 0,
+    "min_overall_agreement": 0.8
+  },
+  "evolution": {
+    "max_iter": 3
+  },
+  "batch": {
+    "parallel": 4
+  },
+  "runner": {
+    "auto_promote": {
+      "policy": "per_proposal",
+      "min_lift_fraction": 0.4,
+      "require_zero_holdout_regression": true,
+      "revert_on_holdout_regression": true
+    },
+    "closure_test": {
+      "max_targets_per_proposal": 8,
+      "min_targets_required": 3,
+      "parallel": 3
+    },
+    "epoch": {
+      "max_proposals_per_epoch": 5,
+      "stop_on_first_failed_promotion": false,
+      "max_cost_usd_per_epoch": 20,
+      "max_wall_clock_s_per_epoch": 7200
+    },
+    "quota_pause": {
+      "behavior": "exit",
+      "detect_patterns": [
+        "You've hit your limit",
+        "Rate limit exceeded",
+        "rate_limit_exceeded",
+        "Anthropic API quota exceeded"
+      ],
+      "schedule_wakeup_buffer_s": 60
+    },
+    "experiment": {
+      "enabled": false,
+      "max_targets": 5,
+      "control_inner_mode": "json",
+      "treatment_inner_mode": "rule_executor",
+      "treatment_normalization_mode": "preserve-executor-boundaries",
+      "min_acceptance_delta": 0.0,
+      "promote_on_win": false
+    },
+    "state_file": "derivations/_epoch_state.json"
+  }
+}

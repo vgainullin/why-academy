@@ -60,7 +60,9 @@ Lessons are authored as structured JSON files inside `lessons/`. You can load a 
 
 ## Derivation Distillation
 
-The `derivations/` pipeline processes collected derivation histories into a failure-labeled corpus, emitting deterministic frontier and contribution-job records:
+The `derivations/` pipeline is offline research infrastructure for turning unreliable generated derivations into verified curriculum artifacts and labeled failure data.
+
+It fits the project by keeping student-facing verification deterministic while using LLMs only as proposal engines. Accepted graphs can become lesson material; rejected graphs become evidence for better rules, prompts, and validators.
 
 ```bash
 scripts/distill.sh frontier
@@ -68,5 +70,4 @@ scripts/distill.sh jobs --limit 10
 scripts/distill.sh summarize-batch <batch_id>
 ```
 
-See `derivations/DISTILLATION.md` for the pipeline contract.
-
+See `derivations/README.md` for the problem statement and current blockers, and `derivations/DISTILLATION.md` for the pipeline contract.

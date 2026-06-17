@@ -1,0 +1,7 @@
+# Physics: oscillations and circular motion
+# Already exercised t007-t009 in the v1 batch; adding two more to deepen coverage.
+
+derive omega = sqrt(k/m) for a mass-spring system from m*xddot = -k*x and the trial-solution result xddot = -omega^2 * x
+derive T = 2*pi*sqrt(L/g) for a simple pendulum from the small-angle equation of motion thetaddot = -(g/L)*theta and the trial solution thetaddot = -omega^2 * theta
+derive the minimum drop height h = 5R/2 for a ball completing a vertical loop, given (1) centripetal: m*g = m*v^2/R and (2) energy: (1/2)*m*v^2 + m*g*(2R) = m*g*h
+derive the period-frequency relation T = 2*pi/omega from omega = 2*pi*f and T = 1/f

@@ -1,0 +1,9 @@
+{
+  "id": "gen_calculus_integrals_03",
+  "category": "calculus_integrals",
+  "difficulty": "medium",
+  "target_text": "compute the definite integral from 0 to 1 of x dx = 1/2 using the antiderivative and the fundamental theorem of calculus",
+  "expected_goal_srepr": "Eq(Integral(Symbol('x'), Tuple(Symbol('x'), Integer(0), Integer(1))), Rational(1,2))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax Calculus Vol.1 Ch.5.3"
+}

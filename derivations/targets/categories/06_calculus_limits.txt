@@ -1,0 +1,7 @@
+# Calculus: classic limits
+# Direct manipulation of limit expressions; many will canvas_fail due to
+# sympy auto-evaluating the limit.
+
+evaluate the limit as x approaches 0 of sin(x)/x using the standard result that this limit equals 1
+evaluate the limit as x approaches 0 of (1 - cos(x))/x^2 = 1/2 using a half-angle identity
+evaluate the limit as x approaches infinity of (1 + 1/n)^n = E using the standard definition of E

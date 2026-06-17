@@ -1,0 +1,9 @@
+{
+  "id": "gen_physics_mechanics_01",
+  "category": "physics_mechanics",
+  "difficulty": "easy",
+  "target_text": "derive v = u + a*t from the constant-acceleration definition a = dv/dt by integrating from initial velocity u at t = 0",
+  "expected_goal_srepr": "Eq(Symbol('v'), Add(Symbol('u'), Mul(Symbol('a'), Symbol('t'))))",
+  "acceptable_alternate_goals": [],
+  "source": "OpenStax College Physics 2e Ch.2.5"
+}

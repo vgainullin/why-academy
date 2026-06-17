@@ -1,0 +1,67 @@
+{
+  "description": "Adds the runner section for autonomous e2e mode. All thresholds, gates, and quota-handling are config-driven. Builds on v3 (DeepSeek judge + Sonnet inner/evolve).",
+  "models": {
+    "inner":     "sonnet",
+    "judge":     "deepseek-v4-flash",
+    "evolve":    "sonnet",
+    "outer":     "sonnet",
+    "implement": "sonnet"
+  },
+  "engines": {
+    "inner":     "claude",
+    "judge":     "deepseek",
+    "evolve":    "claude",
+    "outer":     "claude",
+    "implement": "claude"
+  },
+  "budgets_usd": {
+    "inner":     1,
+    "judge":     1,
+    "evolve":    1,
+    "outer":     3,
+    "implement": 2
+  },
+  "timeouts_s": {
+    "inner":      600,
+    "judge":      180,
+    "evolve":     120,
+    "outer":      900,
+    "implement": 1200
+  },
+  "evolution": {
+    "max_iter": 3
+  },
+  "batch": {
+    "parallel": 4
+  },
+  "runner": {
+    "auto_promote": {
+      "policy": "per_proposal",
+      "min_lift_fraction": 0.4,
+      "require_zero_holdout_regression": true,
+      "revert_on_holdout_regression": true
+    },
+    "closure_test": {
+      "max_targets_per_proposal": 8,
+      "min_targets_required": 3,
+      "parallel": 3
+    },
+    "epoch": {
+      "max_proposals_per_epoch": 5,
+      "stop_on_first_failed_promotion": false,
+      "max_cost_usd_per_epoch": 20,
+      "max_wall_clock_s_per_epoch": 7200
+    },
+    "quota_pause": {
+      "behavior": "exit",
+      "detect_patterns": [
+        "You've hit your limit",
+        "Rate limit exceeded",
+        "rate_limit_exceeded",
+        "Anthropic API quota exceeded"
+      ],
+      "schedule_wakeup_buffer_s": 60
+    },
+    "state_file": "derivations/_epoch_state.json"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "root_node": "n0",
+  "goal_node": "n4",
+  "nodes": [
+    {
+      "id": "n0",
+      "sympy_srepr": "Eq(Rational(1,2)*m*v**2 + m*Symbol('g')*(2*Symbol('R')), m*Symbol('g')*Symbol('h'), evaluate=False)"
+    },
+    {
+      "id": "n1",
+      "sympy_srepr": "Eq(Add(Mul(Rational(1,2), m, Symbol('g'), Symbol('R')), Mul(Integer(2), m, Symbol('g'), Symbol('R')), evaluate=False), m*Symbol('g')*Symbol('h'), evaluate=False)"
+    },
+    {
+      "id": "n2",
+      "sympy_srepr": "Eq(Rational(5,2)*m*Symbol('g')*Symbol('R'), m*Symbol('g')*Symbol('h'), evaluate=False)"
+    },
+    {
+      "id": "n3",
+      "sympy_srepr": "Eq(Rational(5,2)*Symbol('R'), Symbol('h'), evaluate=False)"
+    },
+    {
+      "id": "n4",
+      "sympy_srepr": "Eq(Symbol('h'), Rational(5,2)*Symbol('R'), evaluate=False)"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n0",
+      "to": "n1",
+      "rule": "substitute_value",
+      "rule_args": {
+        "symbol": "v**2",
+        "replacement": "Symbol('g')*Symbol('R')"
+      }
+    },
+    {
+      "from": "n1",
+      "to": "n2",
+      "rule": "simplify_expression",
+      "rule_args": {}
+    },
+    {
+      "from": "n2",
+      "to": "n3",
+      "rule": "divide_both_sides",
+      "rule_args": {
+        "divisor": "m*Symbol('g')"
+      }
+    },
+    {
+      "from": "n3",
+      "to": "n4",
+      "rule": "swap_sides",
+      "rule_args": {}
+    }
+  ],
+  "id": "missing_given_node"
+}

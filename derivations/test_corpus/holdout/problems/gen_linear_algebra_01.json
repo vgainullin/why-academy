@@ -1,0 +1,11 @@
+{
+  "id": "gen_linear_algebra_01",
+  "category": "linear_algebra",
+  "difficulty": "easy",
+  "target_text": "solve the 2x2 linear system 2x + y = 7 and x - y = 2 for x by elimination",
+  "expected_goal_srepr": "Eq(Symbol('x'), Integer(3))",
+  "acceptable_alternate_goals": [
+    "Eq(Integer(3), Symbol('x'))"
+  ],
+  "source": "OpenStax Intermediate Algebra 2e Ch.4.1"
+}

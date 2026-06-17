@@ -19,6 +19,7 @@
   // ── State ──
   let lesson = null;
   const blockState = {}; // blockId -> { completed, ... }
+  let demoProgressEl = null;
 
   // ── Boot ──
   document.addEventListener('DOMContentLoaded', async () => {
@@ -67,8 +68,18 @@
 
   // ── Render Lesson ──
   function renderLesson() {
+    Object.keys(blockState).forEach(k => delete blockState[k]);
+    const staleDemoProgress = document.querySelector('.demo-scoreboard');
+    if (staleDemoProgress) staleDemoProgress.remove();
+    demoProgressEl = null;
+    document.body.classList.toggle('demo-mode', isDemoLesson());
+
     const header = document.getElementById('lesson-header');
     header.innerHTML = '<h2>' + esc(lesson.title) + '</h2><p>' + esc(lesson.description) + '</p>';
+    if (isDemoLesson()) {
+      demoProgressEl = renderDemoProgress();
+      header.insertAdjacentElement('afterend', demoProgressEl);
+    }
 
     const container = document.getElementById('blocks-container');
     container.innerHTML = '';
@@ -76,6 +87,7 @@
       const el = renderBlock(block);
       container.appendChild(el);
     });
+    updateDemoProgress();
 
     // Wait for KaTeX auto-render to be available (loaded with defer)
     function tryRenderKaTeX() {
@@ -93,11 +105,25 @@
     wrapper.className = 'block block-' + block.type;
     wrapper.id = 'block-' + block.id;
     blockState[block.id] = { completed: false };
+    if (isDemoScoredBlock(block)) {
+      wrapper.classList.add('demo-challenge-block');
+      wrapper.dataset.demoBlockId = block.id;
+    }
 
     const label = document.createElement('span');
     label.className = 'block-label block-label-' + block.type;
     label.textContent = block.type;
     wrapper.appendChild(label);
+
+    if (isDemoScoredBlock(block)) {
+      const meta = document.createElement('div');
+      meta.className = 'demo-challenge-meta';
+      meta.innerHTML =
+        '<span class="demo-challenge-step">Challenge ' + esc(String(block.demo_step || '')) + '</span>' +
+        '<span class="demo-difficulty">' + esc(block.demo_difficulty || 'Derive') + '</span>' +
+        '<span class="demo-points">' + getDemoBlockPoints(block) + ' pts</span>';
+      wrapper.appendChild(meta);
+    }
 
     if (block.title) {
       const title = document.createElement('h3');
@@ -3238,9 +3264,25 @@ plt.close('all')
     // Pre-canonicalize valid forms once for fast SymPy lookup.
     const validForms = (block.valid_forms || []).map(canonicalizeLatex);
     const targetCanon = canonicalizeLatex(block.target_equation || '');
+    const hasExplicitTargetForms = Array.isArray(block.target_forms) && block.target_forms.length > 0;
+    const targetForms = (hasExplicitTargetForms ? block.target_forms : [])
+      .map(canonicalizeLatex)
+      .filter(Boolean);
     // Index of the target inside validForms (or -1 if not present); used to
     // detect "the student wrote the target" purely by index match.
     const targetIdx = validForms.indexOf(targetCanon);
+
+    function latexKey(s) {
+      return (s || '').replace(/\s+/g, '').toLowerCase();
+    }
+
+    function isTargetForm(canon, matchIdx) {
+      if (hasExplicitTargetForms) {
+        const key = latexKey(canon);
+        return targetForms.some(form => latexKey(form) === key);
+      }
+      return targetIdx >= 0 && matchIdx === targetIdx;
+    }
 
     function renderLinesPanel() {
       linesEl.innerHTML = '';
@@ -3325,7 +3367,7 @@ plt.close('all')
           if (matchIdx >= 0) {
             line.status = 'ok';
             line.matchedFormIdx = matchIdx;
-            if (targetIdx >= 0 && matchIdx === targetIdx) anyMatchedTarget = true;
+            if (isTargetForm(canon, matchIdx)) anyMatchedTarget = true;
           } else {
             line.status = 'unmatched';
           }
@@ -3374,22 +3416,155 @@ plt.close('all')
     return div;
   }
 
+  // ── Demo lesson score/progress ──
+  function isDemoLesson() {
+    return lesson && lesson.demo_mode && lesson.demo_mode.enabled;
+  }
+
+  function isDemoScoredBlock(block) {
+    return isDemoLesson() && block && Number.isFinite(Number(block.demo_points));
+  }
+
+  function getDemoBlocks() {
+    if (!lesson || !lesson.blocks) return [];
+    return lesson.blocks.filter(isDemoScoredBlock);
+  }
+
+  function getDemoBlockPoints(block) {
+    return Math.max(0, Number(block.demo_points) || 0);
+  }
+
+  function renderDemoProgress() {
+    const wrap = document.createElement('div');
+    wrap.className = 'demo-scoreboard';
+
+    const top = document.createElement('div');
+    top.className = 'demo-scoreboard-top';
+
+    const labelWrap = document.createElement('div');
+    labelWrap.className = 'demo-score-copy';
+
+    const label = document.createElement('div');
+    label.className = 'demo-score-label';
+    label.textContent = (lesson.demo_mode && lesson.demo_mode.score_label) || 'Demo score';
+
+    const status = document.createElement('div');
+    status.className = 'demo-score-status';
+    status.dataset.demoProgressStatus = 'true';
+
+    const score = document.createElement('div');
+    score.className = 'demo-score-value';
+    score.dataset.demoScoreValue = 'true';
+
+    labelWrap.appendChild(label);
+    labelWrap.appendChild(status);
+    top.appendChild(labelWrap);
+    top.appendChild(score);
+    wrap.appendChild(top);
+
+    const bar = document.createElement('div');
+    bar.className = 'demo-progress-bar';
+    const fill = document.createElement('div');
+    fill.className = 'demo-progress-fill';
+    fill.dataset.demoProgressFill = 'true';
+    bar.appendChild(fill);
+    wrap.appendChild(bar);
+
+    const steps = document.createElement('div');
+    steps.className = 'demo-stepper';
+    steps.dataset.demoStepper = 'true';
+    wrap.appendChild(steps);
+
+    return wrap;
+  }
+
+  function updateDemoProgress(completedBlockId) {
+    if (!isDemoLesson() || !demoProgressEl) return;
+    const demoBlocks = getDemoBlocks();
+    const maxScore = demoBlocks.reduce((sum, b) => sum + getDemoBlockPoints(b), 0);
+    const score = demoBlocks.reduce((sum, b) => {
+      return sum + (blockState[b.id] && blockState[b.id].completed ? getDemoBlockPoints(b) : 0);
+    }, 0);
+    const doneCount = demoBlocks.filter(b => blockState[b.id] && blockState[b.id].completed).length;
+
+    const scoreEl = demoProgressEl.querySelector('[data-demo-score-value]');
+    if (scoreEl) {
+      scoreEl.textContent = score + ' / ' + maxScore + ' pts';
+    }
+    const statusEl = demoProgressEl.querySelector('[data-demo-progress-status]');
+    if (statusEl) {
+      statusEl.textContent = doneCount + ' of ' + demoBlocks.length + ' challenges complete';
+    }
+    const fill = demoProgressEl.querySelector('[data-demo-progress-fill]');
+    if (fill) {
+      fill.style.width = (maxScore ? Math.round((score / maxScore) * 100) : 0) + '%';
+    }
+
+    const activeBlock = demoBlocks.find(b => !blockState[b.id] || !blockState[b.id].completed);
+    const stepper = demoProgressEl.querySelector('[data-demo-stepper]');
+    if (stepper) {
+      stepper.innerHTML = '';
+      demoBlocks.forEach((block, idx) => {
+        const chip = document.createElement('a');
+        const completed = blockState[block.id] && blockState[block.id].completed;
+        const active = activeBlock && block.id === activeBlock.id;
+        chip.href = '#block-' + block.id;
+        chip.className = 'demo-step-chip' + (completed ? ' done' : '') + (active ? ' active' : '');
+        chip.textContent = String(block.demo_step || idx + 1);
+        const chipTitle = (block.title || ('Challenge ' + (block.demo_step || idx + 1))) +
+          ' (' + getDemoBlockPoints(block) + ' pts)';
+        chip.setAttribute('title', chipTitle);
+        stepper.appendChild(chip);
+      });
+    }
+
+    document.querySelectorAll('.demo-challenge-block').forEach(el => {
+      const id = el.dataset.demoBlockId;
+      el.classList.toggle('demo-current', !!(activeBlock && id === activeBlock.id));
+      el.classList.toggle('demo-just-completed', id === completedBlockId);
+    });
+
+    if (completedBlockId && activeBlock && lesson.demo_mode.auto_advance) {
+      const nextEl = document.getElementById('block-' + activeBlock.id);
+      const completedEl = document.getElementById('block-' + completedBlockId);
+      if (nextEl && completedEl) {
+        const scrollAfterPulse = event => {
+          if (event.target === completedEl && event.animationName === 'demoCompletePulse') {
+            completedEl.removeEventListener('animationend', scrollAfterPulse);
+            nextEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        };
+        completedEl.addEventListener('animationend', scrollAfterPulse);
+      } else if (nextEl) {
+        nextEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  }
+
   // ── Helpers ──
   function markComplete(blockId, containerEl) {
+    if (blockState[blockId] && blockState[blockId].completed) return;
     blockState[blockId].completed = true;
     const wrapper = containerEl.closest('.block');
     if (wrapper) wrapper.classList.add('completed');
+    const block = lesson.blocks.find(b => b.id === blockId);
 
     const badge = document.createElement('div');
     badge.className = 'block-complete-badge';
-    badge.innerHTML = '&#10003; Complete';
+    if (isDemoScoredBlock(block)) {
+      badge.classList.add('demo-score-earned');
+      badge.innerHTML = '&#10003; Complete <strong>+' + getDemoBlockPoints(block) + ' pts</strong>';
+    } else {
+      badge.innerHTML = '&#10003; Complete';
+    }
     containerEl.appendChild(badge);
 
+    updateDemoProgress(blockId);
     checkLessonComplete();
   }
 
   function checkLessonComplete() {
-    const completable = lesson.blocks.filter(b => b.type !== 'read');
+    const completable = isDemoLesson() ? getDemoBlocks() : lesson.blocks.filter(b => b.type !== 'read');
     const allDone = completable.every(b => blockState[b.id] && blockState[b.id].completed);
     if (allDone) {
       const container = document.getElementById('blocks-container');
@@ -3399,7 +3574,12 @@ plt.close('all')
         banner.className = 'derive-complete';
         banner.style.marginTop = '24px';
         banner.style.fontSize = '1.2rem';
-        banner.innerHTML = '&#127942; Lesson Complete: ' + esc(lesson.title);
+        if (isDemoLesson()) {
+          const maxScore = getDemoBlocks().reduce((sum, b) => sum + getDemoBlockPoints(b), 0);
+          banner.innerHTML = '&#127942; Demo complete: ' + maxScore + ' / ' + maxScore + ' pts';
+        } else {
+          banner.innerHTML = '&#127942; Lesson Complete: ' + esc(lesson.title);
+        }
         container.appendChild(banner);
         banner.scrollIntoView({ behavior: 'smooth' });
       }

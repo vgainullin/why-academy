@@ -1,0 +1,142 @@
+{
+  "lesson_id": "DEMO-CANVAS",
+  "title": "Interactive Derivation Canvas Demo",
+  "description": "A short recording-ready sequence of handwritten derivations that ramps from algebra to physics and keeps a running score.",
+  "prerequisites": [],
+  "demo_mode": {
+    "enabled": true,
+    "score_label": "Demo score",
+    "auto_advance": true
+  },
+  "blocks": [
+    {
+      "id": "DEMO-INTRO",
+      "type": "read",
+      "title": "Derivation sprint",
+      "content_html": "<p>Four handwritten challenges build into one clean physics result. Each canvas reads your lines, marks valid equations, and adds points when you reach the target.</p><p>The sequence starts with a one-line algebra move, then isolates a square-root quantity, then derives a spring launch speed, then finishes with the loop-the-loop threshold.</p>"
+    },
+    {
+      "id": "DEMO-LINEAR",
+      "type": "canvas-derive",
+      "title": "Calibrate the canvas",
+      "demo_step": 1,
+      "demo_difficulty": "Warm-up",
+      "demo_points": 50,
+      "prompt": "Start from the calibration equation and isolate x.",
+      "starting_equation": "x + 3 = 10",
+      "target_equation": "x = 7",
+      "target_forms": [
+        "x = 7",
+        "7 = x"
+      ],
+      "valid_forms": [
+        "x + 3 = 10",
+        "x = 10 - 3",
+        "x = 7",
+        "7 = x"
+      ],
+      "vars": ["x"],
+      "hints": [
+        "Undo the +3 by subtracting 3 from both sides.",
+        "10 - 3 = 7."
+      ]
+    },
+    {
+      "id": "DEMO-KINETIC",
+      "type": "canvas-derive",
+      "title": "Unlock a square root",
+      "demo_step": 2,
+      "demo_difficulty": "Algebra",
+      "demo_points": 75,
+      "prompt": "A later physics problem will need speed from energy. Solve the kinetic-energy equation for v.",
+      "starting_equation": "E = \\frac{1}{2} m v^2",
+      "target_equation": "v = \\sqrt{\\frac{2E}{m}}",
+      "target_forms": [
+        "v = \\sqrt{\\frac{2E}{m}}",
+        "v = \\sqrt{2E/m}"
+      ],
+      "valid_forms": [
+        "E = \\frac{1}{2} m v^2",
+        "2E = m v^2",
+        "\\frac{2E}{m} = v^2",
+        "v^2 = \\frac{2E}{m}",
+        "v = \\sqrt{\\frac{2E}{m}}",
+        "v = \\sqrt{2E/m}"
+      ],
+      "vars": ["E", "m", "v"],
+      "hints": [
+        "Multiply both sides by 2.",
+        "Divide by m so v^2 is alone.",
+        "Use the positive square root for speed."
+      ]
+    },
+    {
+      "id": "DEMO-SPRING",
+      "type": "canvas-derive",
+      "title": "Spring launch speed",
+      "demo_step": 3,
+      "demo_difficulty": "Energy",
+      "demo_points": 100,
+      "prompt": "Now use the same square-root move to derive the launch speed from a compressed spring.",
+      "starting_equation": "\\frac{1}{2} k A^2 = \\frac{1}{2} m v^2",
+      "target_equation": "v = A\\sqrt{\\frac{k}{m}}",
+      "target_forms": [
+        "v = A\\sqrt{\\frac{k}{m}}",
+        "v = A \\sqrt{k/m}",
+        "v = \\sqrt{\\frac{k A^2}{m}}"
+      ],
+      "valid_forms": [
+        "\\frac{1}{2} k A^2 = \\frac{1}{2} m v^2",
+        "k A^2 = m v^2",
+        "\\frac{k A^2}{m} = v^2",
+        "v^2 = \\frac{k A^2}{m}",
+        "v = \\sqrt{\\frac{k A^2}{m}}",
+        "v = A\\sqrt{\\frac{k}{m}}",
+        "v = A \\sqrt{k/m}"
+      ],
+      "vars": ["k", "A", "m", "v"],
+      "hints": [
+        "Cancel the 1/2 on both sides first.",
+        "Divide by m to isolate v^2.",
+        "Take the positive square root. Since A is an amplitude, use A > 0."
+      ]
+    },
+    {
+      "id": "DEMO-LOOP",
+      "type": "canvas-derive",
+      "title": "Loop-the-loop threshold",
+      "demo_step": 4,
+      "demo_difficulty": "Challenge",
+      "demo_points": 150,
+      "prompt": "Finish with the classic loop threshold. At the top of the loop, gravity supplies the centripetal force: mg = m v^2 / R. Energy from height h becomes kinetic energy plus height 2R at the top. Derive the minimum h.",
+      "starting_equation": "mg = \\frac{m v^2}{R}",
+      "target_equation": "h = \\frac{5R}{2}",
+      "target_forms": [
+        "h = \\frac{5R}{2}",
+        "h = \\frac{5}{2}R",
+        "h = 2.5R"
+      ],
+      "valid_forms": [
+        "mg = \\frac{m v^2}{R}",
+        "g = \\frac{v^2}{R}",
+        "v^2 = gR",
+        "\\frac{1}{2} m v^2 + m g (2R) = m g h",
+        "\\frac{1}{2} v^2 + 2 g R = g h",
+        "\\frac{1}{2} (gR) + 2gR = gh",
+        "\\frac{1}{2} gR + 2gR = gh",
+        "\\frac{5}{2} g R = g h",
+        "\\frac{5}{2} R = h",
+        "h = \\frac{5R}{2}",
+        "h = \\frac{5}{2} R",
+        "h = 2.5 R"
+      ],
+      "vars": ["m", "g", "v", "R", "h"],
+      "hints": [
+        "Use the force equation first to get v^2 = gR.",
+        "At the top, the ball is at height 2R, so its potential energy is mg(2R).",
+        "Use 1/2 m v^2 + mg(2R) = mgh.",
+        "Substitute v^2 = gR, then cancel m and g."
+      ]
+    }
+  ]
+}

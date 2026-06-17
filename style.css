@@ -834,6 +834,195 @@ main {
   border-color: #bbf7d0;
 }
 
+/* === Demo Lesson Scoreboard === */
+.demo-scoreboard {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.10);
+  backdrop-filter: blur(10px);
+}
+
+.demo-scoreboard-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.demo-score-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.demo-score-label {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.demo-score-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.demo-score-value {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.demo-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #0f766e, #16a34a);
+  transition: width 0.35s ease;
+}
+
+.demo-stepper {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.demo-step-chip {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.demo-step-chip.active {
+  color: #1d4ed8;
+  border-color: #2563eb;
+  background: #eff6ff;
+  transform: scale(1.08);
+}
+
+.demo-step-chip.done {
+  color: #166534;
+  border-color: #86efac;
+  background: #dcfce7;
+}
+
+.demo-challenge-block {
+  position: relative;
+  border-color: #dbeafe;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.demo-challenge-block::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: #bfdbfe;
+}
+
+.demo-challenge-block.demo-current {
+  border-color: #60a5fa;
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.10);
+}
+
+.demo-challenge-block.demo-current::before {
+  background: linear-gradient(180deg, #2563eb, #0f766e);
+}
+
+.demo-challenge-block.demo-just-completed {
+  animation: demoCompletePulse 0.65s ease;
+}
+
+@keyframes demoCompletePulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.01); }
+  100% { transform: scale(1); }
+}
+
+.demo-challenge-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+
+.demo-challenge-step,
+.demo-difficulty,
+.demo-points {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.demo-challenge-step {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.demo-difficulty {
+  color: #854d0e;
+  background: #fef3c7;
+}
+
+.demo-points,
+.demo-score-earned strong {
+  color: #166534;
+}
+
+.demo-points {
+  background: #dcfce7;
+}
+
+@media (max-width: 640px) {
+  .demo-scoreboard {
+    padding: 12px;
+  }
+  .demo-scoreboard-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .demo-step-chip {
+    width: 28px;
+    height: 28px;
+  }
+}
+
 /* === Pyodide Loading (top sticky bar with progress) === */
 #pyodide-status {
   position: fixed;
@@ -1503,6 +1692,18 @@ main {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   border-color: var(--accent);
+}
+.lesson-card-demo {
+  border-color: #93c5fd;
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(255, 255, 255, 0.96));
+}
+.lesson-card-demo .lesson-card-num {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.lesson-card-demo .lesson-card-cta {
+  color: #0f766e;
 }
 .lesson-card-meta {
   display: flex;

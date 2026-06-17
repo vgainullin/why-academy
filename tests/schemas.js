@@ -5,6 +5,14 @@ const BaseBlockSchema = z.object({
   type: z.string(),
 });
 
+const NonEmptyStringArraySchema = z.array(z.string().min(1)).min(1);
+
+const DemoModeSchema = z.object({
+  enabled: z.boolean(),
+  score_label: z.string().min(1).optional(),
+  auto_advance: z.boolean().optional(),
+}).passthrough();
+
 const ReadBlockSchema = BaseBlockSchema.extend({
   type: z.literal('read'),
   title: z.string(),
@@ -133,7 +141,9 @@ const CanvasDeriveBlockSchema = BaseBlockSchema.extend({
   title: z.string(),
   prompt: z.string(),
   starting_equation: z.string(),
-  target_equation: z.string()
+  target_equation: z.string(),
+  valid_forms: NonEmptyStringArraySchema.optional(),
+  target_forms: NonEmptyStringArraySchema.optional(),
 }).passthrough();
 
 const HandwriteBlockSchema = BaseBlockSchema.extend({
@@ -165,5 +175,44 @@ export const LessonSchema = z.object({
   lesson_id: z.string(),
   title: z.string(),
   description: z.string(),
+  demo_mode: DemoModeSchema.optional(),
   blocks: z.array(AnyBlockSchema),
-}).passthrough();
+}).passthrough().superRefine((lesson, ctx) => {
+  if (!lesson.demo_mode || !lesson.demo_mode.enabled) return;
+
+  lesson.blocks.forEach((block, index) => {
+    if (block.type !== 'canvas-derive') return;
+
+    if (!Number.isFinite(Number(block.demo_step))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks', index, 'demo_step'],
+        message: 'demo canvas blocks require numeric demo_step',
+      });
+    }
+
+    if (!Number.isFinite(Number(block.demo_points))) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks', index, 'demo_points'],
+        message: 'demo canvas blocks require numeric demo_points',
+      });
+    }
+
+    if (!Array.isArray(block.valid_forms) || block.valid_forms.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks', index, 'valid_forms'],
+        message: 'demo canvas blocks require valid_forms',
+      });
+    }
+
+    if (!Array.isArray(block.target_forms) || block.target_forms.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks', index, 'target_forms'],
+        message: 'demo canvas blocks require target_forms',
+      });
+    }
+  });
+});

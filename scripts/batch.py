@@ -121,6 +121,62 @@ def batch_resume_preflight(
     return None
 
 
+def batch_engine_preflight(cfg: dict, engines: dict[str, str]) -> str | None:
+    from llm_cli import LLMEngineError, reject_local_claude_engine  # type: ignore
+
+    checked = dict(engines)
+    adv = dict(cfg.get("adversarial_judge") or {})
+    if adv.get("enabled", False):
+        checked["adversarial_judge"] = (
+            os.environ.get("ADVERSARIAL_JUDGE_ENGINE")
+            or adv.get("engine")
+            or "openrouter"
+        )
+
+    for label, engine in checked.items():
+        try:
+            reject_local_claude_engine(engine, label=label)
+        except LLMEngineError as e:
+            return str(e)
+    return None
+
+
+def write_batch_preflight_error(batch_id: str, *, failure_class: str, error: str) -> None:
+    batch_dir = ROOT / "derivations" / "_evolutions" / "batches" / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    (batch_dir / "preflight_error.json").write_text(json.dumps({
+        "failure_class": failure_class,
+        "error": error,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }, indent=2))
+
+
+def run_pool_preflight(batch_id: str, pool) -> tuple[bool, str | None]:
+    preflight = getattr(pool, "preflight", None)
+    if not callable(preflight):
+        return True, None
+
+    batch_dir = ROOT / "derivations" / "_evolutions" / "batches" / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = preflight()
+    except Exception as e:
+        error = f"{type(e).__name__}: {e}"
+        write_batch_preflight_error(
+            batch_id,
+            failure_class="worker_pool_preflight_failed",
+            error=error,
+        )
+        return False, error
+
+    (batch_dir / "preflight.json").write_text(json.dumps({
+        "status": "PASS",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "result": result,
+    }, indent=2))
+    return True, None
+
+
 def run_one_legacy(target: str, out_dir: Path, *, batch_id: str,
                    target_index: int) -> tuple[str, int, str]:
     """Legacy --no-evolution path: spawn inner.sh per target."""
@@ -250,6 +306,19 @@ def main() -> int:
         print(f"[batch] inner_mode={inner_mode}", file=sys.stderr)
         print(f"[batch] normalization_mode={args.normalization_mode}", file=sys.stderr)
         print(f"[batch] workspace: derivations/_evolutions/batches/{batch_id}/", file=sys.stderr)
+        engine_error = batch_engine_preflight(cfg, {
+            "inner": inner_engine,
+            "judge": judge_engine,
+            "evolve": evolve_engine,
+        })
+        if engine_error:
+            write_batch_preflight_error(
+                batch_id,
+                failure_class="engine_preflight_failed",
+                error=engine_error,
+            )
+            print(f"[batch] preflight failed: {engine_error}", file=sys.stderr)
+            return 2
 
     results = []
     active_inner_mode: str | None = None
@@ -300,6 +369,10 @@ def main() -> int:
             )
         try:
             print(f"[batch] worker pool: size={args.parallel}  inner_engine={inner_engine}  inner_model={inner_model}", file=sys.stderr)
+            ok, preflight_error = run_pool_preflight(batch_id, pool)
+            if not ok:
+                print(f"[batch] worker pool preflight failed: {preflight_error}", file=sys.stderr)
+                return 70
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as ex:
                 from claude_worker import QuotaExhaustedError as ClaudeQuotaExhaustedError
                 from llm_cli import QuotaExhaustedError as LLMQuotaExhaustedError

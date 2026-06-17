@@ -9,7 +9,7 @@
 # Aborts on:
 #   - verify FAIL  (math is wrong; not fixable via prompt evolution)
 #   - canvas FAIL  (sympy auto-simplification or render bug; ditto)
-#   - claude error / timeout / missing graph id
+#   - engine error / timeout / missing graph id
 #   - MAX_ITER hit without judge PASS
 #
 # Env:
@@ -17,9 +17,9 @@
 #   TARGET_INDEX     0-based target index within the batch (default 0)
 #   MAX_ITER         default 3
 #   INNER_MODEL      default opus
-#   INNER_ENGINE     default claude
-#   JUDGE_MODEL      default sonnet
-#   EVOLVE_MODEL     default sonnet
+#   INNER_ENGINE     default codex
+#   JUDGE_MODEL      default deepseek-v4-flash
+#   EVOLVE_MODEL     default codex default model
 #   INNER_BUDGET     default 3
 #   INNER_TIMEOUT    default 600
 
@@ -35,11 +35,11 @@ BATCH_ID="${BATCH_ID:-$(date +%Y%m%d_%H%M%S)_solo}"
 TARGET_INDEX="${TARGET_INDEX:-0}"
 MAX_ITER="${MAX_ITER:-$CONFIG_EVOLUTION_MAX_ITER}"
 INNER_MODEL="${INNER_MODEL:-$CONFIG_MODELS_INNER}"
-INNER_ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-claude}}"
+INNER_ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-codex}}"
 JUDGE_MODEL="${JUDGE_MODEL:-$CONFIG_MODELS_JUDGE}"
-JUDGE_ENGINE="${JUDGE_ENGINE:-${CONFIG_ENGINES_JUDGE:-claude}}"
+JUDGE_ENGINE="${JUDGE_ENGINE:-${CONFIG_ENGINES_JUDGE:-deepseek}}"
 EVOLVE_MODEL="${EVOLVE_MODEL:-$CONFIG_MODELS_EVOLVE}"
-EVOLVE_ENGINE="${EVOLVE_ENGINE:-${CONFIG_ENGINES_EVOLVE:-claude}}"
+EVOLVE_ENGINE="${EVOLVE_ENGINE:-${CONFIG_ENGINES_EVOLVE:-codex}}"
 INNER_BUDGET="${INNER_BUDGET:-$CONFIG_BUDGETS_USD_INNER}"
 INNER_TIMEOUT="${INNER_TIMEOUT:-$CONFIG_TIMEOUTS_S_INNER}"
 

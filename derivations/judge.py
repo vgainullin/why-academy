@@ -78,10 +78,10 @@ def adversarial_settings(cfg: dict) -> dict:
     if model_override is not None and model_override.strip().lower() in ("", "default", "none"):
         model = None
     else:
-        model = model_override or section.get("model", "sonnet")
+        model = model_override or section.get("model", "anthropic/claude-sonnet-4.6")
     return {
         "enabled": bool(section.get("enabled", False)),
-        "engine": os.environ.get("ADVERSARIAL_JUDGE_ENGINE") or section.get("engine", "claude"),
+        "engine": os.environ.get("ADVERSARIAL_JUDGE_ENGINE") or section.get("engine", "openrouter"),
         "model": model,
         "budget": str(section.get("budget_usd", cfg.get("budgets_usd", {}).get("judge", 1))),
         "timeout": str(section.get("timeout_s", cfg.get("timeouts_s", {}).get("judge", 180))),

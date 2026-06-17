@@ -79,6 +79,8 @@ class AdversarialSettingsTests(unittest.TestCase):
     def test_defaults_when_section_absent(self) -> None:
         s = judge.adversarial_settings({})
         self.assertFalse(s["enabled"])
+        self.assertEqual(s["engine"], "openrouter")
+        self.assertEqual(s["model"], "anthropic/claude-sonnet-4.6")
         self.assertEqual(s["fail_mode"], "closed")
 
     def test_reads_config_section(self) -> None:

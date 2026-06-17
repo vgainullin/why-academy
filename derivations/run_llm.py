@@ -11,7 +11,7 @@ from llm_cli import LLMEngineError, QuotaExhaustedError, run_prompt
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engine", default="claude")
+    ap.add_argument("--engine", default="codex")
     ap.add_argument("--model", default=None)
     ap.add_argument("--budget", default=None)
     ap.add_argument("--timeout", default=None)

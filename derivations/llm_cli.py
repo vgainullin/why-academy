@@ -30,6 +30,10 @@ DEFAULT_QUOTA_PATTERNS = [
     "rate_limit_exceeded",
     "Anthropic API quota exceeded",
 ]
+LOCAL_CLAUDE_DISABLED_MESSAGE = (
+    "local Claude Code engine is disabled for this pipeline; use codex for "
+    "generation/evolution or openrouter for Claude-family API models"
+)
 
 CONTEXT_BUDGET_TOKENS = 200_000
 DEFAULT_ROTATION_SATURATION = 0.85
@@ -62,7 +66,16 @@ class CodexWorkerError(LLMEngineError):
     pass
 
 
-def step_engine(cfg: dict, step: str, default: str = "claude") -> str:
+def local_claude_allowed() -> bool:
+    return _env_flag("ALLOW_LOCAL_CLAUDE", False)
+
+
+def reject_local_claude_engine(engine: str, *, label: str = "engine") -> None:
+    if (engine or "").strip().lower() == "claude" and not local_claude_allowed():
+        raise LLMEngineError(f"{label}: {LOCAL_CLAUDE_DISABLED_MESSAGE}")
+
+
+def step_engine(cfg: dict, step: str, default: str = "codex") -> str:
     """Return configured engine for a pipeline step."""
     env_name = f"{step.upper()}_ENGINE"
     if os.environ.get(env_name):
@@ -151,6 +164,7 @@ def run_prompt(
     timeout = int(float(timeout_s)) if timeout_s else None
 
     if engine == "claude":
+        reject_local_claude_engine(engine)
         cmd = [
             CLAUDE_BIN,
             "-p",
@@ -504,6 +518,20 @@ class CodexWorkerPool:
                         break
                     continue
         raise CodexWorkerError(f"all {self.size} codex workers failed; last={last_err}")
+
+    def preflight(self) -> dict:
+        w = self._workers[0]
+        with w._lock:
+            try:
+                out = w.send("Reply with exactly OK.")
+            finally:
+                w.reset()
+        return {
+            "engine": self.engine,
+            "worker_id": w.worker_id,
+            "session_id": out.get("session_id"),
+            "duration_ms": (out.get("result") or {}).get("duration_ms"),
+        }
 
     def close(self) -> None:
         for w in self._workers:

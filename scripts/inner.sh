@@ -7,10 +7,10 @@
 #   INNER_ENGINE=codex INNER_MODEL=gpt-5.2 scripts/inner.sh "..."
 #
 # Side effects:
-#   - derivations/problems/<id>.json                 (written by claude)
+#   - derivations/problems/<id>.json                 (written by the configured engine)
 #   - derivations/problems/<id>.verifier.json        (written by verify.py)
 #   - derivations/logs/epoch_<NNN>/run_<uuid>.prompt.md   (rendered prompt, audit)
-#   - derivations/logs/epoch_<NNN>/run_<uuid>.console.log (raw claude stdout/stderr)
+#   - derivations/logs/epoch_<NNN>/run_<uuid>.console.log (raw engine stdout/stderr)
 #   - derivations/logs/epoch_<NNN>/run_<uuid>.jsonl       (the canonical record)
 #
 # Permission posture: --permission-mode bypassPermissions. v0 trade-off:
@@ -28,7 +28,7 @@ cd "$ROOT"
 source "$ROOT/scripts/_derivation_python.sh"
 eval "$("$PY" "$ROOT/derivations/config.py" shell-export)"
 MODEL="${INNER_MODEL:-$CONFIG_MODELS_INNER}"
-ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-claude}}"
+ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-codex}}"
 BUDGET="${INNER_BUDGET:-$CONFIG_BUDGETS_USD_INNER}"
 TIMEOUT="${INNER_TIMEOUT:-$CONFIG_TIMEOUTS_S_INNER}"
 
@@ -81,7 +81,7 @@ fi
 SIDECAR="derivations/problems/${PID}.verifier.json"
 if [[ ! -f "$SIDECAR" ]]; then
   echo "[inner] FAIL: sidecar not found at $SIDECAR" >&2
-  echo "[inner] (claude reported GRAPH: $PID but verify.py never wrote the sidecar)" >&2
+  echo "[inner] ($ENGINE reported GRAPH: $PID but verify.py never wrote the sidecar)" >&2
   exit 3
 fi
 

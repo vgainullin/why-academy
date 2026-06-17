@@ -1,18 +1,18 @@
 {
-  "description": "Adds the adversarial second judge and judge calibration thresholds. PASS verdicts from the primary (DeepSeek) judge are re-reviewed by a Claude adversarial pass on a different engine so errors decorrelate; adversarial wrapper errors fail closed. Builds on v4.",
+  "description": "Adds the adversarial second judge and judge calibration thresholds. PASS verdicts from the primary (DeepSeek) judge are re-reviewed by an OpenRouter Claude-family adversarial pass on a different engine so errors decorrelate; adversarial wrapper errors fail closed. Builds on v4.",
   "models": {
-    "inner":     "sonnet",
+    "inner":     "",
     "judge":     "deepseek-v4-flash",
-    "evolve":    "sonnet",
-    "outer":     "sonnet",
-    "implement": "sonnet"
+    "evolve":    "",
+    "outer":     "",
+    "implement": ""
   },
   "engines": {
-    "inner":     "claude",
+    "inner":     "codex",
     "judge":     "deepseek",
-    "evolve":    "claude",
-    "outer":     "claude",
-    "implement": "claude"
+    "evolve":    "codex",
+    "outer":     "codex",
+    "implement": "codex"
   },
   "budgets_usd": {
     "inner":     1,
@@ -30,8 +30,8 @@
   },
   "adversarial_judge": {
     "enabled": true,
-    "engine": "claude",
-    "model": "sonnet",
+    "engine": "openrouter",
+    "model": "anthropic/claude-sonnet-4.6",
     "budget_usd": 1,
     "timeout_s": 180,
     "fail_mode": "closed"

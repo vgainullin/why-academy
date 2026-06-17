@@ -16,7 +16,7 @@ dotted path joined by underscores.  models.inner -> CONFIG_MODELS_INNER
 Env override pattern in callers:
   eval "$(derivations/config.py shell-export)"
   INNER_MODEL="${INNER_MODEL:-$CONFIG_MODELS_INNER}"
-  INNER_ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-claude}}"
+  INNER_ENGINE="${INNER_ENGINE:-${CONFIG_ENGINES_INNER:-codex}}"
 """
 from __future__ import annotations
 import argparse

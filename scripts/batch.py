@@ -374,8 +374,7 @@ def main() -> int:
                 print(f"[batch] worker pool preflight failed: {preflight_error}", file=sys.stderr)
                 return 70
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as ex:
-                from claude_worker import QuotaExhaustedError as ClaudeQuotaExhaustedError
-                from llm_cli import QuotaExhaustedError as LLMQuotaExhaustedError
+                from llm_cli import QuotaExhaustedError
                 future_to_target = {
                     ex.submit(run_one_pooled, t, i, batch_id, pool,
                               args.max_iter, inner_engine, step_engine(cfg, "judge"),
@@ -388,7 +387,7 @@ def main() -> int:
                     i, t = future_to_target[fut]
                     try:
                         target, rc, metrics = fut.result()
-                    except (ClaudeQuotaExhaustedError, LLMQuotaExhaustedError) as e:
+                    except QuotaExhaustedError as e:
                         print(f"[batch] quota exhausted while processing t{i:03d}: {e}", file=sys.stderr)
                         return 75
                     tag = "OK" if rc == 0 else f"EXIT-{rc}"

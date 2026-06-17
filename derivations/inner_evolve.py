@@ -40,7 +40,6 @@ NORMALIZATION_BRIDGE_VERSION = "normalization_bridge.v1"
 RULE_EXECUTOR_TREATMENT_ID = "rule_executor"
 NORMALIZATION_BRIDGE_TREATMENT_ID = "rule_executor_normalization_bridge_v1"
 sys.path.insert(0, str(ROOT))
-from claude_worker import QuotaExhaustedError as ClaudeQuotaExhaustedError  # noqa: E402
 from evolution_memory import find_seed_variant  # noqa: E402
 from evolve import build_evolve_prompt, normalize_addendum, validate_addendum  # noqa: E402
 from failure_diagnosis import diagnose_iter  # noqa: E402
@@ -51,7 +50,7 @@ from json_inner import (  # noqa: E402
     problem_from_response,
     render_json_prompt,
 )
-from llm_cli import QuotaExhaustedError as LLMQuotaExhaustedError  # noqa: E402
+from llm_cli import QuotaExhaustedError  # noqa: E402
 from rule_executor import (  # noqa: E402
     RuleExecutorError,
     RuleExecutorCoverageGap,
@@ -424,7 +423,7 @@ def _evolve_next_variant(target: str, target_dir: Path, iter_dir: Path, it: int,
             },
         }, indent=2))
         if ev.returncode == 75:
-            raise LLMQuotaExhaustedError("quota exhausted during evolve")
+            raise QuotaExhaustedError("quota exhausted during evolve")
         if ev.returncode != 0 or not addendum_path.exists():
             (iter_dir / "status.txt").write_text("evolve_fail")
             return False, f"evolve_fail_iter_{it}"
@@ -587,7 +586,7 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
         # Generate via the worker pool (long-running session)
         try:
             response = pool.submit(rendered)
-        except (ClaudeQuotaExhaustedError, LLMQuotaExhaustedError):
+        except QuotaExhaustedError:
             raise
         except Exception as e:
             (iter_dir / "status.txt").write_text(f"worker_error: {type(e).__name__}: {e}")

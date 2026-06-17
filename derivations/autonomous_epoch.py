@@ -12,15 +12,20 @@ All thresholds, gates, and limits are config-driven (configs/v<N>.json runner se
 Resumable: re-running picks up at the current phase. Disk artifacts are the
 truth; _epoch_state.json is a hint. Catches QuotaExhaustedError, writes
 PAUSED_QUOTA state, and exits 0 (so a wrapper cron can re-launch later).
+Any other unexpected exception writes PAUSED_ERROR with a traceback so the
+runner can be re-launched after the underlying issue is fixed.
 """
 from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -31,6 +36,11 @@ from config import load_config  # noqa: E402
 
 PHASES = ["GENERATE", "ANALYZE", "IMPLEMENT", "CLOSE", "DONE"]
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
+RESUMABLE_PAUSE_STATES = {"PAUSED_QUOTA", "PAUSED_ERROR", "PAUSED_WALLCLOCK", "PAUSED_SIGNAL"}
+STATE_JSON = "derivations/state.json"
+
+# Exit codes from batch.py that indicate "no useful work done" (don't advance).
+BATCH_FATAL_EXIT_CODES = {2, 70}
 
 
 def _state_path(cfg: dict) -> Path:
@@ -57,19 +67,38 @@ def run(cmd: list, **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=str(PROJECT_ROOT), **kw)
 
 
+def _state_json_path() -> Path:
+    return PROJECT_ROOT / STATE_JSON
+
+
+def _read_state_json() -> dict:
+    return json.loads(_state_json_path().read_text())
+
+
 def epoch_num() -> int:
-    return int(json.loads((PROJECT_ROOT / "derivations" / "state.json").read_text())["epoch"])
+    return int(_read_state_json()["epoch"])
 
 
 def validator_version() -> str:
-    return json.loads((PROJECT_ROOT / "derivations" / "state.json").read_text())["validator_version"]
+    return _read_state_json()["validator_version"]
 
 
 def bump_state_field(field: str, new_val) -> None:
-    p = PROJECT_ROOT / "derivations" / "state.json"
+    p = _state_json_path()
     d = json.loads(p.read_text())
     d[field] = new_val
     p.write_text(json.dumps(d, indent=2))
+
+
+def snapshot_state_json() -> bytes:
+    """Snapshot the full state.json so phase_implement can restore it atomically."""
+    p = _state_json_path()
+    return p.read_bytes()
+
+
+def restore_state_json(snapshot: bytes) -> None:
+    p = _state_json_path()
+    p.write_bytes(snapshot)
 
 
 def affected_rule_from_proposal(path: Path) -> str | None:
@@ -100,6 +129,27 @@ def restore_validator_snapshot(snapshot: dict | None) -> None:
         path.unlink(missing_ok=True)
 
 
+def clear_stale_proposals(epoch_dir: Path, handled: set[str]) -> int:
+    """Remove proposal_*.md files that have no closure sidecar and aren't in proposals_handled.
+
+    Called before re-running ANALYZE so a partial outer-loop crash doesn't leave
+    duplicate or stale proposals for IMPLEMENT to process.
+    Returns the count of removed files.
+    """
+    removed = 0
+    for prop in epoch_dir.glob("proposal_*.md"):
+        if "_closure" in prop.name:
+            continue
+        if prop.name in handled:
+            continue
+        closure_sidecar = prop.with_name(prop.stem + "_closure.json")
+        if closure_sidecar.exists():
+            continue
+        prop.unlink()
+        removed += 1
+    return removed
+
+
 # ── PHASE: GENERATE ─────────────────────────────────────────────────────
 def phase_generate(cfg: dict, state: dict, queue_path: Path) -> None:
     """Run the inner-loop batch. Resumable via batch_id."""
@@ -116,9 +166,19 @@ def phase_generate(cfg: dict, state: dict, queue_path: Path) -> None:
         state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         save_state(cfg, state)
         return
+    if r.returncode in BATCH_FATAL_EXIT_CODES:
+        # Preflight failure (70) or config/contract violation (2): no work was
+        # done. Don't advance to ANALYZE with an empty log set.
+        state["resume_phase"] = "GENERATE"
+        state["phase"] = "PAUSED_ERROR"
+        state["error"] = f"batch.sh exited {r.returncode} (fatal; no generation occurred)"
+        state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        save_state(cfg, state)
+        return
     if r.returncode != 0:
-        # Partial completion is OK; batch is resumable.
-        print(f"[runner] GENERATE returned {r.returncode} (likely some targets failed; that's OK)", file=sys.stderr)
+        # Exit code 1: partial completion (some targets failed). That's OK;
+        # the batch is resumable and the outer loop can analyze partial data.
+        print(f"[runner] GENERATE returned {r.returncode} (partial completion; some targets failed)", file=sys.stderr)
     state["phase"] = "ANALYZE"
     save_state(cfg, state)
 
@@ -131,6 +191,11 @@ def phase_analyze(cfg: dict, state: dict) -> None:
     if summary.exists():
         print(f"[runner] ANALYZE: summary.md exists; skipping outer call", file=sys.stderr)
     else:
+        # Clear stale proposals from a partial outer-loop crash before re-running.
+        handled = set(state.get("proposals_handled", []))
+        removed = clear_stale_proposals(epoch_dir, handled)
+        if removed:
+            print(f"[runner] ANALYZE: cleared {removed} stale proposal(s) from prior partial run", file=sys.stderr)
         print(f"[runner] ANALYZE: running outer loop on epoch_{epoch_num():03d}", file=sys.stderr)
         r = run([str(PROJECT_ROOT / "scripts" / "outer.sh"),
                  f"epoch_{epoch_num():03d}"])
@@ -184,12 +249,16 @@ def phase_implement(cfg: dict, state: dict) -> None:
             continue
         pre_validator_v = validator_version()
         pre_validator_snapshot = snapshot_validator(rule)
+        pre_state_json = snapshot_state_json()
+
+        def _revert_to_pre() -> None:
+            restore_validator_snapshot(pre_validator_snapshot)
+            restore_state_json(pre_state_json)
 
         # 1. Implement
         r = run([str(PROJECT_ROOT / "scripts" / "implement.sh"), str(prop)])
         if r.returncode == 75:
-            restore_validator_snapshot(pre_validator_snapshot)
-            bump_state_field("validator_version", pre_validator_v)
+            _revert_to_pre()
             state["resume_phase"] = "IMPLEMENT"
             state["phase"] = "PAUSED_QUOTA"
             state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -197,8 +266,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             return
         if r.returncode != 0:
             print(f"  -> implement.sh failed rc={r.returncode}; marking handled", file=sys.stderr)
-            restore_validator_snapshot(pre_validator_snapshot)
-            bump_state_field("validator_version", pre_validator_v)
+            _revert_to_pre()
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
@@ -209,8 +277,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
         # 2. Closure test
         r = run([str(PROJECT_ROOT / "scripts" / "closure_test.sh"), str(prop)])
         if r.returncode == 75:
-            restore_validator_snapshot(pre_validator_snapshot)
-            bump_state_field("validator_version", pre_validator_v)
+            _revert_to_pre()
             state["resume_phase"] = "IMPLEMENT"
             state["phase"] = "PAUSED_QUOTA"
             state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -219,8 +286,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
         closure_sidecar = prop.with_name(prop.stem + "_closure.json")
         if not closure_sidecar.exists():
             print(f"  -> closure_test produced no sidecar; treating as FAILED", file=sys.stderr)
-            restore_validator_snapshot(pre_validator_snapshot)
-            bump_state_field("validator_version", pre_validator_v)
+            _revert_to_pre()
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
@@ -236,9 +302,8 @@ def phase_implement(cfg: dict, state: dict) -> None:
             # validator_version was already bumped by implement.sh; nothing more to do
         else:
             print(f"  -> REVERTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
-            # Revert validator code to its exact pre-implementation state.
-            restore_validator_snapshot(pre_validator_snapshot)
-            bump_state_field("validator_version", pre_validator_v)
+            # Revert validator code AND state.json to exact pre-implementation state.
+            _revert_to_pre()
             if stop_on_fail:
                 handled.add(prop.name)
                 state["proposals_handled"] = sorted(handled)
@@ -266,6 +331,31 @@ def phase_close(cfg: dict, state: dict) -> None:
 
 
 # ── DRIVER ──────────────────────────────────────────────────────────────
+def _resume_from_pause(state: dict, cfg: dict) -> None:
+    """Clear any pause state and set phase to the resume point."""
+    phase = state.get("phase", "GENERATE")
+    if phase in RESUMABLE_PAUSE_STATES:
+        resume = state.get("resume_phase", "GENERATE")
+        print(f"[runner] {phase} from previous run; resuming at phase={resume}", file=sys.stderr)
+        state["phase"] = resume
+        state.pop("resume_phase", None)
+        state.pop("error", None)
+        state.pop("paused_at", None)
+        save_state(cfg, state)
+
+
+def _write_pause_state(cfg: dict, state: dict, pause_phase: str,
+                       resume_phase: str | None = None, error: str | None = None) -> None:
+    """Write a pause state and persist it."""
+    state["phase"] = pause_phase
+    if resume_phase:
+        state["resume_phase"] = resume_phase
+    if error:
+        state["error"] = error
+    state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    save_state(cfg, state)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--queue", default="derivations/targets/cohort_v1.txt",
@@ -281,18 +371,31 @@ def main() -> int:
         state_path.unlink()
 
     state = load_state(cfg)
-
-    if state.get("phase") == "PAUSED_QUOTA":
-        print(f"[runner] PAUSED_QUOTA from previous run; clearing pause and resuming at "
-              f"phase={state.get('resume_phase', 'GENERATE')}", file=sys.stderr)
-        state["phase"] = state.get("resume_phase", "GENERATE")
-        save_state(cfg, state)
+    _resume_from_pause(state, cfg)
 
     epoch_start_wall = time.time()
     max_wall = float(cfg.get("runner", {}).get("epoch", {}).get("max_wall_clock_s_per_epoch", 7200))
 
+    # Signal handler: write PAUSED_SIGNAL and exit 0 so a cron wrapper can re-launch.
+    _signal_received = None
+
+    def _signal_handler(signum, frame):
+        nonlocal _signal_received
+        _signal_received = signum
+
+    prev_term = signal.signal(signal.SIGTERM, _signal_handler)
+    prev_int = signal.signal(signal.SIGINT, _signal_handler)
+
     try:
-        while state.get("phase") not in ("DONE", "PAUSED_QUOTA"):
+        while state.get("phase") not in ("DONE", "PAUSED_QUOTA", "PAUSED_ERROR", "PAUSED_SIGNAL"):
+            if _signal_received is not None:
+                sig_name = signal.Signals(_signal_received).name
+                print(f"[runner] received {sig_name}; writing PAUSED_SIGNAL and exiting", file=sys.stderr)
+                _write_pause_state(cfg, state, "PAUSED_SIGNAL",
+                                   resume_phase=state.get("phase", "GENERATE"),
+                                   error=f"signal: {sig_name}")
+                return 0
+
             phase = state["phase"]
             if phase == "GENERATE":
                 phase_generate(cfg, state, Path(args.queue))
@@ -306,24 +409,31 @@ def main() -> int:
                 print(f"[runner] unknown phase {phase!r}; exiting", file=sys.stderr)
                 return 2
 
+            if state.get("phase") in RESUMABLE_PAUSE_STATES:
+                break
+
             if time.time() - epoch_start_wall > max_wall:
                 print(f"[runner] wall-clock cap ({max_wall}s) exceeded; pausing", file=sys.stderr)
-                state["resume_phase"] = state["phase"]
-                state["phase"] = "PAUSED_WALLCLOCK"
-                save_state(cfg, state)
+                _write_pause_state(cfg, state, "PAUSED_WALLCLOCK",
+                                   resume_phase=state.get("phase", "GENERATE"))
                 return 0
     except Exception as e:
-        # Quota detection: import inside the try/except to avoid a circular cost
-        from claude_worker import QuotaExhaustedError as ClaudeQuotaExhaustedError  # noqa: E402
-        from llm_cli import QuotaExhaustedError as LLMQuotaExhaustedError  # noqa: E402
-        if isinstance(e, (ClaudeQuotaExhaustedError, LLMQuotaExhaustedError)):
+        from llm_cli import QuotaExhaustedError  # noqa: E402
+        if isinstance(e, QuotaExhaustedError):
             print(f"[runner] QUOTA EXHAUSTED ({e}); writing PAUSED_QUOTA and exiting", file=sys.stderr)
-            state["resume_phase"] = state.get("phase", "GENERATE")
-            state["phase"] = "PAUSED_QUOTA"
-            state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            save_state(cfg, state)
+            _write_pause_state(cfg, state, "PAUSED_QUOTA",
+                               resume_phase=state.get("phase", "GENERATE"))
             return 0
-        raise
+        tb = traceback.format_exc()
+        print(f"[runner] UNEXPECTED ERROR in phase={state.get('phase')}; writing PAUSED_ERROR", file=sys.stderr)
+        print(tb, file=sys.stderr)
+        _write_pause_state(cfg, state, "PAUSED_ERROR",
+                           resume_phase=state.get("phase", "GENERATE"),
+                           error=f"{type(e).__name__}: {e}\n{tb}")
+        return 0
+    finally:
+        signal.signal(signal.SIGTERM, prev_term)
+        signal.signal(signal.SIGINT, prev_int)
 
     print(f"[runner] phase={state.get('phase')}; exiting 0", file=sys.stderr)
     return 0

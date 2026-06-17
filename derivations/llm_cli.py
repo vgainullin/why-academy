@@ -53,6 +53,15 @@ CODEX_MINIMAL_FEATURES = [
     "in_app_browser",
 ]
 
+# Steps that need filesystem access (reading logs, writing reports/validators)
+# must keep shell_tool and unified_exec enabled. Inner loop only generates text,
+# so full minimal mode is correct there.
+CODEX_FS_REQUIRED_STEPS = {"outer", "implement"}
+CODEX_FS_SAFE_FEATURES = [
+    f for f in CODEX_MINIMAL_FEATURES
+    if f not in ("shell_tool", "unified_exec")
+]
+
 
 class LLMEngineError(RuntimeError):
     pass
@@ -124,15 +133,16 @@ def _codex_base_cmd(cwd_path: Path, sandbox: str) -> list[str]:
     ]
 
 
-def _append_codex_common_args(cmd: list[str], model: str | None) -> list[str]:
+def _append_codex_common_args(cmd: list[str], model: str | None, *, step: str | None = None) -> list[str]:
     if _env_flag("CODEX_MINIMAL", True):
         cmd += ["--ignore-user-config", "--ignore-rules"]
         disable_raw = os.environ.get("CODEX_MINIMAL_DISABLES")
-        disables = (
-            [s.strip() for s in disable_raw.split(",") if s.strip()]
-            if disable_raw
-            else CODEX_MINIMAL_FEATURES
-        )
+        if disable_raw:
+            disables = [s.strip() for s in disable_raw.split(",") if s.strip()]
+        elif step in CODEX_FS_REQUIRED_STEPS:
+            disables = CODEX_FS_SAFE_FEATURES
+        else:
+            disables = CODEX_MINIMAL_FEATURES
         for feature in disables:
             cmd += ["--disable", feature]
     if model:
@@ -152,6 +162,7 @@ def run_prompt(
     timeout_s: int | float | str | None = None,
     cwd: Path | str | None = None,
     quota_patterns: list[str] | None = None,
+    step: str | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a prompt through the selected CLI and return a CompletedProcess.
 
@@ -200,7 +211,7 @@ def run_prompt(
             prefix="codex-last-message-", suffix=".txt", delete=False
         ) as tmp:
             last_message_path = Path(tmp.name)
-        cmd = _append_codex_common_args(_codex_base_cmd(cwd_path, sandbox), model)
+        cmd = _append_codex_common_args(_codex_base_cmd(cwd_path, sandbox), model, step=step)
         cmd += ["--ephemeral", "--output-last-message", str(last_message_path)]
         cmd.append("-")
         try:

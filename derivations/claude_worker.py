@@ -47,11 +47,9 @@ class WorkerError(RuntimeError):
     pass
 
 
-class QuotaExhaustedError(WorkerError):
-    """Raised when the Claude Code subprocess reports the subscription quota is hit.
-    The runner catches this specifically and writes a PAUSED_QUOTA epoch state
-    rather than retrying or escalating. Patterns are read from config at the
-    call site (runner.quota_pause.detect_patterns)."""
+from llm_cli import QuotaExhaustedError  # noqa: E402,F401 -- re-exported for backward compat
+
+__all__ = ["WorkerError", "QuotaExhaustedError", "ClaudeWorker", "ClaudeWorkerPool"]
 
 
 class ClaudeWorker:

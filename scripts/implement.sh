@@ -17,8 +17,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ ! -f "$PROPOSAL" ]]; then
-  echo "[implement] FAIL: proposal not found at $PROPOSAL" >&2
-  exit 1
+	echo "[implement] FAIL: proposal not found at $PROPOSAL" >&2
+	exit 1
 fi
 
 source "$ROOT/scripts/_derivation_python.sh"
@@ -46,19 +46,20 @@ CONSOLE="$LOG_DIR/run_${RUN_ID}.console.log"
 
 set +e
 "$PY" derivations/run_llm.py \
-  --engine "$ENGINE" \
-  --model "$MODEL" \
-  --budget "$BUDGET" \
-  --timeout "$TIMEOUT" \
-  --prompt-file "$RENDERED" \
-  > "$CONSOLE" 2>&1
+	--engine "$ENGINE" \
+	--model "$MODEL" \
+	--budget "$BUDGET" \
+	--timeout "$TIMEOUT" \
+	--step implement \
+	--prompt-file "$RENDERED" \
+	>"$CONSOLE" 2>&1
 LLM_EXIT=$?
 set -e
 
 if [[ $LLM_EXIT -ne 0 ]]; then
-  echo "[implement] $ENGINE exited $LLM_EXIT; tail of console:" >&2
-  tail -60 "$CONSOLE" >&2
-  exit $LLM_EXIT
+	echo "[implement] $ENGINE exited $LLM_EXIT; tail of console:" >&2
+	tail -60 "$CONSOLE" >&2
+	exit $LLM_EXIT
 fi
 
 # Surface the implementation report

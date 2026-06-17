@@ -16,6 +16,8 @@ def main() -> int:
     ap.add_argument("--budget", default=None)
     ap.add_argument("--timeout", default=None)
     ap.add_argument("--prompt-file", required=True)
+    ap.add_argument("--step", default=None,
+                    help="pipeline step label (inner, outer, implement, judge, evolve)")
     args = ap.parse_args()
 
     prompt = Path(args.prompt_file).read_text()
@@ -26,6 +28,7 @@ def main() -> int:
             model=args.model,
             budget=args.budget,
             timeout_s=args.timeout,
+            step=args.step,
         )
     except QuotaExhaustedError as e:
         print(f"[llm] quota exhausted: {e}", file=sys.stderr)

@@ -47,19 +47,20 @@ CONSOLE="$REPORTS_DIR/run_${RUN_ID}.console.log"
 
 set +e
 "$PY" derivations/run_llm.py \
-  --engine "$ENGINE" \
-  --model "$MODEL" \
-  --budget "$BUDGET" \
-  --timeout "$TIMEOUT" \
-  --prompt-file "$RENDERED" \
-  > "$CONSOLE" 2>&1
+	--engine "$ENGINE" \
+	--model "$MODEL" \
+	--budget "$BUDGET" \
+	--timeout "$TIMEOUT" \
+	--step outer \
+	--prompt-file "$RENDERED" \
+	>"$CONSOLE" 2>&1
 LLM_EXIT=$?
 set -e
 
 if [[ $LLM_EXIT -ne 0 ]]; then
-  echo "[outer] $ENGINE exited $LLM_EXIT; tail of console:" >&2
-  tail -60 "$CONSOLE" >&2
-  exit $LLM_EXIT
+	echo "[outer] $ENGINE exited $LLM_EXIT; tail of console:" >&2
+	tail -60 "$CONSOLE" >&2
+	exit $LLM_EXIT
 fi
 
 echo "[outer] done. reports:" >&2

@@ -33,6 +33,9 @@ TREATMENT_FAILURE_STATUSES = {
     "rule_executor_coverage_gap",
     "rule_executor_fail",
     "substitution_structural_fail",
+    "normalization_boundary_fail",
+    "normalization_bridge_fail",
+    "normalization_contract_mismatch",
 }
 
 
@@ -86,6 +89,38 @@ def batch_exit_code(results: list[tuple[str, int, object]], *,
     return 0, expected
 
 
+def batch_resume_preflight(
+    batch_id: str,
+    *,
+    inner_mode: str,
+    experiment_id: str | None,
+    treatment_id: str | None,
+    normalization_mode: str,
+) -> str | None:
+    from inner_evolve import (  # type: ignore
+        BRIDGE_NORMALIZATION_MODE,
+        BatchResumeContractError,
+        batch_resume_contract,
+        validate_existing_batch_resume,
+    )
+
+    expected = batch_resume_contract(
+        inner_mode=inner_mode,
+        experiment_id=experiment_id,
+        treatment_id=treatment_id,
+        normalization_mode=normalization_mode,
+    )
+    try:
+        validate_existing_batch_resume(
+            ROOT / "derivations" / "_evolutions" / "batches" / batch_id,
+            expected,
+            require_checkpoint_for_existing_state=normalization_mode == BRIDGE_NORMALIZATION_MODE,
+        )
+    except BatchResumeContractError as e:
+        return str(e)
+    return None
+
+
 def run_one_legacy(target: str, out_dir: Path, *, batch_id: str,
                    target_index: int) -> tuple[str, int, str]:
     """Legacy --no-evolution path: spawn inner.sh per target."""
@@ -107,7 +142,8 @@ def run_one_pooled(target: str, target_index: int, batch_id: str, pool,
                    max_iter: int, inner_engine: str, judge_engine: str,
                    evolve_engine: str, judge_model: str, evolve_model: str,
                    inner_mode: str, experiment_id: str | None,
-                   treatment_id: str | None
+                   treatment_id: str | None,
+                   normalization_mode: str
                    ) -> tuple[str, int, dict]:
     """Pooled path: in-thread process_target call sharing the worker pool."""
     from inner_evolve import process_target  # imported here so legacy path doesn't pay
@@ -120,6 +156,7 @@ def run_one_pooled(target: str, target_index: int, batch_id: str, pool,
                                  inner_mode=inner_mode,
                                  experiment_id=experiment_id,
                                  treatment_id=treatment_id,
+                                 normalization_mode=normalization_mode,
                                  judge_engine=judge_engine,
                                  evolve_engine=evolve_engine,
                                  judge_model=judge_model,
@@ -158,12 +195,20 @@ def main() -> int:
                     help="optional experiment id recorded in checkpoint.json")
     ap.add_argument("--treatment-id", default=os.environ.get("TREATMENT_ID"),
                     help="optional treatment id recorded in checkpoint.json")
+    ap.add_argument("--normalization-mode",
+                    choices=["legacy", "preserve-executor-boundaries"],
+                    default=os.environ.get("NORMALIZATION_MODE", "legacy"),
+                    help="normalization path; preserve-executor-boundaries is rule_executor-only")
     ap.add_argument("--allow-treatment-failures", action="store_true",
                     default=env_flag("ALLOW_TREATMENT_FAILURES"),
                     help=("rule_executor pilot mode: return success when all failed targets are "
                           "explicit treatment failures or coverage gaps"))
     args = ap.parse_args()
     evolution_mode = not args.no_evolution
+    if args.normalization_mode != "legacy" and not evolution_mode:
+        print("[batch] --normalization-mode preserve-executor-boundaries requires evolution mode",
+              file=sys.stderr)
+        return 2
     inner_model = os.environ.get("INNER_MODEL", cfg["models"]["inner"])
     judge_model = os.environ.get("JUDGE_MODEL", cfg["models"]["judge"])
     evolve_model = os.environ.get("EVOLVE_MODEL", cfg["models"]["evolve"])
@@ -186,9 +231,24 @@ def main() -> int:
         judge_engine = step_engine(cfg, "judge")
         evolve_engine = step_engine(cfg, "evolve")
         inner_mode = args.inner_mode or ("json" if inner_engine == "codex" else "agent")
+        if args.normalization_mode != "legacy" and inner_mode != "rule_executor":
+            print("[batch] --normalization-mode preserve-executor-boundaries requires --inner-mode rule_executor",
+                  file=sys.stderr)
+            return 2
+        resume_error = batch_resume_preflight(
+            batch_id,
+            inner_mode=inner_mode,
+            experiment_id=args.experiment_id,
+            treatment_id=args.treatment_id,
+            normalization_mode=args.normalization_mode,
+        )
+        if resume_error:
+            print(f"[batch] refusing --batch-id {batch_id}: {resume_error}", file=sys.stderr)
+            return 2
         print(f"[batch] batch_id={batch_id}  max_iter={args.max_iter}", file=sys.stderr)
         print(f"[batch] engines: inner={inner_engine} judge={judge_engine} evolve={evolve_engine}", file=sys.stderr)
         print(f"[batch] inner_mode={inner_mode}", file=sys.stderr)
+        print(f"[batch] normalization_mode={args.normalization_mode}", file=sys.stderr)
         print(f"[batch] workspace: derivations/_evolutions/batches/{batch_id}/", file=sys.stderr)
 
     results = []
@@ -211,6 +271,10 @@ def main() -> int:
         # Pooled evolution path: one engine-specific pool shared across targets.
         inner_engine = step_engine(cfg, "inner")
         inner_mode = args.inner_mode or ("json" if inner_engine == "codex" else "agent")
+        if args.normalization_mode != "legacy" and inner_mode != "rule_executor":
+            print("[batch] --normalization-mode preserve-executor-boundaries requires --inner-mode rule_executor",
+                  file=sys.stderr)
+            return 2
         active_inner_mode = inner_mode
         if inner_engine == "claude":
             from claude_worker import ClaudeWorkerPool
@@ -244,7 +308,7 @@ def main() -> int:
                               args.max_iter, inner_engine, step_engine(cfg, "judge"),
                               step_engine(cfg, "evolve"), judge_model,
                               evolve_model, inner_mode, args.experiment_id,
-                              args.treatment_id): (i, t)
+                              args.treatment_id, args.normalization_mode): (i, t)
                     for i, t in enumerate(targets)
                 }
                 for fut in concurrent.futures.as_completed(future_to_target):

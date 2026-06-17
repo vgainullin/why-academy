@@ -21,6 +21,99 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
+TREATMENT_FAILURE_STATUSES = {
+    "rule_plan_invalid",
+    "rule_executor_coverage_gap",
+    "rule_executor_fail",
+    "substitution_structural_fail",
+    "normalization_boundary_fail",
+    "normalization_bridge_fail",
+    "normalization_contract_mismatch",
+}
+
+NORMALIZATION_BRIDGE_FAILURE_STATUSES = {
+    "normalization_boundary_fail",
+    "normalization_bridge_fail",
+    "normalization_contract_mismatch",
+}
+
+
+def _read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _treatment_failure(iter_dir: Path, status: str) -> dict | None:
+    if status not in TREATMENT_FAILURE_STATUSES:
+        return None
+    treatment_error = (
+        _read_json(iter_dir / "normalization_bridge_error.json")
+        or _read_json(iter_dir / "rule_executor_error.json")
+        or {}
+    )
+    return {
+        "status": status,
+        "failure_class": treatment_error.get("failure_class") or status,
+        "error": treatment_error.get("error") or "",
+    }
+
+
+def _failure_record(
+    iter_dir: Path,
+    batch_checkpoint: dict,
+    target: str,
+    target_idx: int,
+    treatment_failure: dict,
+) -> dict:
+    return {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "run_id": f"{batch_checkpoint['batch_id']}_t{target_idx:03d}_{iter_dir.name}",
+        "batch_id": batch_checkpoint["batch_id"],
+        "target_index": target_idx,
+        "iter": int(iter_dir.name.replace("iter_", "")),
+        "epoch": batch_checkpoint["epoch"],
+        "prompt_version": batch_checkpoint["prompt_version"],
+        "validator_library_version": batch_checkpoint["validator_version"],
+        "config_version": batch_checkpoint.get("config_version", "v1"),
+        "engine": batch_checkpoint.get("inner_engine", "claude"),
+        "model": batch_checkpoint.get("inner_model", "unknown"),
+        "inner_mode": batch_checkpoint.get("inner_mode"),
+        "experiment_id": batch_checkpoint.get("experiment_id"),
+        "treatment_id": batch_checkpoint.get("treatment_id"),
+        "normalization_mode": batch_checkpoint.get("normalization_mode", "legacy"),
+        "target": target,
+        "problem_id": None,
+        "verifier_version": None,
+        "n_nodes": 0,
+        "n_edges": 0,
+        "node_truth": {"TRUE": 0, "FALSE": 0, "ERROR": 0, "NA": 0},
+        "edge_summary": {"PASS": 0, "FAIL": 0, "UNCOVERED": 0, "WEAK_PASS": 0, "ERROR": 0},
+        "edge_results": [],
+        "canvas_check": None,
+        "judge_eval": None,
+        "target_check": None,
+        "normalization_bridge": _normalization_bridge_summary(iter_dir),
+        "treatment_failure": treatment_failure,
+    }
+
+
+def _normalization_bridge_summary(iter_dir: Path) -> dict | None:
+    report = _read_json(iter_dir / "problem.normalization_bridge.json")
+    if not report:
+        return None
+    metrics = report.get("metrics") if isinstance(report.get("metrics"), dict) else {}
+    return {
+        "bridge_version": report.get("bridge_version"),
+        "normalization_mode": report.get("normalization_mode"),
+        "status": report.get("status"),
+        "metrics": metrics,
+    }
+
 
 def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> list[dict]:
     """One target dir -> one record per iter (so outer loop sees every attempt)."""
@@ -33,42 +126,14 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
         canvas_check_path = iter_dir / "problem.canvas_check.json"
         judge_path = iter_dir / "problem.judge.json"
         target_check_path = iter_dir / "problem.target_check.json"
+        status = (iter_dir / "status.txt").read_text().strip() if (iter_dir / "status.txt").exists() else "missing"
+        treatment_failure = _treatment_failure(iter_dir, status)
+        if status in NORMALIZATION_BRIDGE_FAILURE_STATUSES and treatment_failure:
+            records.append(_failure_record(iter_dir, batch_checkpoint, target, target_idx, treatment_failure))
+            continue
         if not problem_path.exists() or not verifier_path.exists():
-            status = (iter_dir / "status.txt").read_text().strip() if (iter_dir / "status.txt").exists() else "missing"
-            treatment_error = json.loads((iter_dir / "rule_executor_error.json").read_text()) if (iter_dir / "rule_executor_error.json").exists() else None
-            if status in ("rule_plan_invalid", "rule_executor_coverage_gap", "rule_executor_fail", "substitution_structural_fail"):
-                records.append({
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "run_id": f"{batch_checkpoint['batch_id']}_t{target_idx:03d}_{iter_dir.name}",
-                    "batch_id": batch_checkpoint["batch_id"],
-                    "target_index": target_idx,
-                    "iter": int(iter_dir.name.replace("iter_", "")),
-                    "epoch": batch_checkpoint["epoch"],
-                    "prompt_version": batch_checkpoint["prompt_version"],
-                    "validator_library_version": batch_checkpoint["validator_version"],
-                    "config_version": batch_checkpoint.get("config_version", "v1"),
-                    "engine": batch_checkpoint.get("inner_engine", "claude"),
-                    "model": batch_checkpoint.get("inner_model", "unknown"),
-                    "inner_mode": batch_checkpoint.get("inner_mode"),
-                    "experiment_id": batch_checkpoint.get("experiment_id"),
-                    "treatment_id": batch_checkpoint.get("treatment_id"),
-                    "target": target,
-                    "problem_id": None,
-                    "verifier_version": None,
-                    "n_nodes": 0,
-                    "n_edges": 0,
-                    "node_truth": {"TRUE": 0, "FALSE": 0, "ERROR": 0, "NA": 0},
-                    "edge_summary": {"PASS": 0, "FAIL": 0, "UNCOVERED": 0, "WEAK_PASS": 0, "ERROR": 0},
-                    "edge_results": [],
-                    "canvas_check": None,
-                    "judge_eval": None,
-                    "target_check": None,
-                    "treatment_failure": {
-                        "status": status,
-                        "failure_class": treatment_error.get("failure_class") if treatment_error else status,
-                        "error": treatment_error.get("error") if treatment_error else "",
-                    },
-                })
+            if treatment_failure:
+                records.append(_failure_record(iter_dir, batch_checkpoint, target, target_idx, treatment_failure))
             continue
         problem = json.loads(problem_path.read_text())
         verifier = json.loads(verifier_path.read_text())
@@ -91,6 +156,7 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
             "inner_mode": batch_checkpoint.get("inner_mode"),
             "experiment_id": batch_checkpoint.get("experiment_id"),
             "treatment_id": batch_checkpoint.get("treatment_id"),
+            "normalization_mode": batch_checkpoint.get("normalization_mode", "legacy"),
             "target": target,
             "problem_id": problem["id"],
             "verifier_version": verifier["verifier_version"],
@@ -121,7 +187,10 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
                 "goal_sympy_srepr": target_check.get("goal_sympy_srepr"),
                 "expected_goals": target_check.get("expected_goals", []),
             } if target_check else None,
+            "normalization_bridge": _normalization_bridge_summary(iter_dir),
         }
+        if treatment_failure:
+            rec["treatment_failure"] = treatment_failure
         records.append(rec)
     return records
 

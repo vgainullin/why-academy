@@ -113,6 +113,112 @@ class AbCompareTests(unittest.TestCase):
                 1,
             )
 
+    def test_counts_normalization_bridge_failures_and_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            control = root / "control"
+            treatment = root / "treatment"
+            control.mkdir()
+            treatment.mkdir()
+            (control / "checkpoint.json").write_text(json.dumps({
+                "batch_id": "control",
+                "inner_mode": "json",
+                "experiment_id": "ab_test",
+            }))
+            (treatment / "checkpoint.json").write_text(json.dumps({
+                "batch_id": "treatment",
+                "inner_mode": "rule_executor",
+                "experiment_id": "ab_test",
+                "treatment_id": "rule_executor_normalization_bridge_v1",
+                "normalization_mode": "preserve-executor-boundaries",
+            }))
+            write_target(control, 0, "derive h", accepted=True, status="PASS")
+            write_target(treatment, 0, "derive h", accepted=False,
+                         status="normalization_boundary_fail",
+                         failure_reason="normalization_boundary_fail_iter_0")
+            bridge_path = treatment / "targets" / "target_000" / "iter_00" / "problem.normalization_bridge.json"
+            bridge_path.write_text(json.dumps({
+                "bridge_version": "normalization_bridge.v1",
+                "normalization_mode": "preserve-executor-boundaries",
+                "status": "normalization_boundary_fail",
+                "metrics": {
+                    "protected_edges": 2,
+                    "preserved_edges": 1,
+                    "collapsed_protected_edges": 1,
+                    "blocked_merges": 1,
+                    "allowed_noop_drops": 0,
+                    "raw_pass_normalized_substitution_fail": 1,
+                },
+            }))
+
+            summary = compare_batches(control, treatment, experiment_id="ab_test")
+
+            self.assertEqual(
+                summary["treatment_batch"]["treatment_failure_counts"]["normalization_boundary_fail"],
+                1,
+            )
+            self.assertEqual(
+                summary["treatment_batch"]["normalization_bridge"]["status_counts"]["normalization_boundary_fail"],
+                1,
+            )
+            self.assertEqual(summary["treatment_batch"]["normalization_bridge"]["blocked_merges"], 1)
+
+    def test_bridge_status_counts_do_not_replace_iteration_status_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            control = root / "control"
+            treatment = root / "treatment"
+            control.mkdir()
+            treatment.mkdir()
+            (control / "checkpoint.json").write_text(json.dumps({
+                "batch_id": "control",
+                "inner_mode": "json",
+                "experiment_id": "ab_test",
+            }))
+            (treatment / "checkpoint.json").write_text(json.dumps({
+                "batch_id": "treatment",
+                "inner_mode": "rule_executor",
+                "experiment_id": "ab_test",
+                "treatment_id": "rule_executor_normalization_bridge_v1",
+                "normalization_mode": "preserve-executor-boundaries",
+            }))
+            write_target(control, 0, "derive h", accepted=True, status="PASS")
+            write_target(control, 1, "derive y", accepted=True, status="PASS")
+            write_target(treatment, 0, "derive h", accepted=True, status="PASS")
+            write_target(treatment, 1, "derive y", accepted=False,
+                         status="substitution_structural_fail",
+                         failure_reason="substitution_structural_fail_iter_0")
+            for idx in (0, 1):
+                bridge_path = treatment / "targets" / f"target_{idx:03d}" / "iter_00" / "problem.normalization_bridge.json"
+                bridge_path.write_text(json.dumps({
+                    "bridge_version": "normalization_bridge.v1",
+                    "normalization_mode": "preserve-executor-boundaries",
+                    "status": "PASS",
+                    "metrics": {
+                        "protected_edges": 1,
+                        "preserved_edges": 1,
+                        "collapsed_protected_edges": 0,
+                        "blocked_merges": 0,
+                        "allowed_noop_drops": 0,
+                        "raw_pass_normalized_substitution_fail": 0,
+                    },
+                }))
+
+            summary = compare_batches(control, treatment, experiment_id="ab_test")
+
+            self.assertEqual(
+                summary["treatment_batch"]["iter_status_counts"],
+                {"PASS": 1, "substitution_structural_fail": 1},
+            )
+            self.assertEqual(
+                summary["treatment_batch"]["treatment_failure_counts"],
+                {"substitution_structural_fail": 1},
+            )
+            self.assertEqual(
+                summary["treatment_batch"]["normalization_bridge"]["status_counts"],
+                {"PASS": 2},
+            )
+
     def test_refuses_missing_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

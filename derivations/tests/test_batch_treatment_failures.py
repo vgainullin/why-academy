@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -21,6 +23,7 @@ class BatchTreatmentFailureTests(unittest.TestCase):
             [
                 ("target a", 1, {"failure_reason": "rule_executor_coverage_gap_iter_0"}),
                 ("target b", 1, {"failure_reason": "substitution_structural_fail_iter_1"}),
+                ("target d", 1, {"failure_reason": "normalization_boundary_fail_iter_0"}),
                 ("target c", 0, {"accepted": True}),
             ],
             evolution_mode=True,
@@ -31,6 +34,7 @@ class BatchTreatmentFailureTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(counts["rule_executor_coverage_gap"], 1)
         self.assertEqual(counts["substitution_structural_fail"], 1)
+        self.assertEqual(counts["normalization_boundary_fail"], 1)
 
     def test_allowance_does_not_mask_unexpected_failures(self) -> None:
         rc, counts = batch_script.batch_exit_code(
@@ -57,6 +61,73 @@ class BatchTreatmentFailureTests(unittest.TestCase):
 
         self.assertEqual(rc, 1)
         self.assertEqual(counts, {})
+
+    def test_bridge_resume_preflight_rejects_incompatible_checkpoint(self) -> None:
+        batch_id = "test_batch_bridge_incompatible_resume"
+        batch_dir = ROOT / "derivations" / "_evolutions" / "batches" / batch_id
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        batch_dir.mkdir(parents=True)
+        (batch_dir / "checkpoint.json").write_text(json.dumps({
+            "batch_id": batch_id,
+            "inner_mode": "rule_executor",
+            "experiment_id": "rule_executor_ab_test",
+            "treatment_id": "rule_executor",
+            "rule_executor_version": "rule_executor.v1",
+            "substitution_structural_check_version": "substitution_structural_check.v1",
+        }))
+
+        try:
+            error = batch_script.batch_resume_preflight(
+                batch_id,
+                inner_mode="rule_executor",
+                experiment_id="rule_executor_ab_test",
+                treatment_id="rule_executor_normalization_bridge_v1",
+                normalization_mode="preserve-executor-boundaries",
+            )
+
+            self.assertIsNotNone(error)
+            assert error is not None
+            self.assertIn("incompatible batch resume metadata", error)
+            self.assertIn("treatment_id", error)
+            self.assertIn("normalization_mode", error)
+        finally:
+            shutil.rmtree(batch_dir, ignore_errors=True)
+
+    def test_bridge_resume_preflight_rejects_missing_checkpoint_with_existing_state(self) -> None:
+        batch_id = "test_batch_bridge_missing_checkpoint"
+        batch_dir = ROOT / "derivations" / "_evolutions" / "batches" / batch_id
+        shutil.rmtree(batch_dir, ignore_errors=True)
+        (batch_dir / "targets" / "target_000").mkdir(parents=True)
+
+        try:
+            error = batch_script.batch_resume_preflight(
+                batch_id,
+                inner_mode="rule_executor",
+                experiment_id="rule_executor_ab_test",
+                treatment_id="rule_executor_normalization_bridge_v1",
+                normalization_mode="preserve-executor-boundaries",
+            )
+
+            self.assertIsNotNone(error)
+            assert error is not None
+            self.assertIn("existing target state has no checkpoint", error)
+        finally:
+            shutil.rmtree(batch_dir, ignore_errors=True)
+
+    def test_bridge_resume_preflight_allows_fresh_batch_id(self) -> None:
+        batch_id = "test_batch_bridge_fresh_resume"
+        batch_dir = ROOT / "derivations" / "_evolutions" / "batches" / batch_id
+        shutil.rmtree(batch_dir, ignore_errors=True)
+
+        error = batch_script.batch_resume_preflight(
+            batch_id,
+            inner_mode="rule_executor",
+            experiment_id="rule_executor_ab_test",
+            treatment_id="rule_executor_normalization_bridge_v1",
+            normalization_mode="preserve-executor-boundaries",
+        )
+
+        self.assertIsNone(error)
 
 
 if __name__ == "__main__":

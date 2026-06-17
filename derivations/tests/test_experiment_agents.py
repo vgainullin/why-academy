@@ -46,13 +46,30 @@ class ExperimentAgentsTests(unittest.TestCase):
         iter0 = target / "iter_00"
         iter0.mkdir(parents=True)
         (iter0 / "status.txt").write_text("verify_fail")
+        (iter0 / "rule_plan.raw.txt").write_text('{"id": "problem"}')
+        self.write_json(iter0 / "rule_plan.json", {"id": "problem", "steps": []})
+        self.write_json(iter0 / "problem.rule_executor.json", {"executor_version": "rule_executor.v1"})
+        self.write_json(iter0 / "problem.raw.json", {"id": "raw"})
+        self.write_json(iter0 / "problem.raw.verifier.json", {"edge_summary": {"PASS": 1}})
         self.write_json(iter0 / "problem.verifier.json", {"edge_summary": {"FAIL": 1}})
         self.write_json(iter0 / "failure_diagnosis.json", {"failure_class": "rule_fail"})
+        self.write_json(iter0 / "problem.normalizer.json", {"normalizer_version": "0.2"})
         if treatment:
             self.write_json(iter0 / "rule_executor_error.json", {
                 "failure_class": "substitution_structural_fail",
             })
             self.write_json(iter0 / "problem.substitution_check.json", {"status": "FAIL"})
+            self.write_json(iter0 / "problem.raw.substitution_check.json", {"status": "PASS"})
+            self.write_json(iter0 / "problem.normalization_bridge.json", {
+                "bridge_version": "normalization_bridge.v1",
+                "status": "normalization_boundary_fail",
+            })
+            self.write_json(iter0 / "normalization_bridge_error.json", {
+                "failure_class": "normalization_boundary_fail",
+            })
+            self.write_json(iter0 / "problem.normalization_bridge_candidate.json", {
+                "id": "candidate",
+            })
         return batch
 
     def test_manifest_has_required_gate_groups(self) -> None:
@@ -168,8 +185,18 @@ class ExperimentAgentsTests(unittest.TestCase):
             self.assertIn("control", joined)
             self.assertIn("treatment", joined)
             self.assertIn("problem.verifier.json", joined)
+            self.assertIn("rule_plan.raw.txt", joined)
+            self.assertIn("rule_plan.json", joined)
+            self.assertIn("problem.rule_executor.json", joined)
+            self.assertIn("problem.raw.json", joined)
+            self.assertIn("problem.raw.verifier.json", joined)
+            self.assertIn("problem.normalizer.json", joined)
             self.assertIn("rule_executor_error.json", joined)
             self.assertIn("problem.substitution_check.json", joined)
+            self.assertIn("problem.raw.substitution_check.json", joined)
+            self.assertIn("problem.normalization_bridge.json", joined)
+            self.assertIn("normalization_bridge_error.json", joined)
+            self.assertIn("problem.normalization_bridge_candidate.json", joined)
 
     def test_ab_analysis_requires_comparison_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

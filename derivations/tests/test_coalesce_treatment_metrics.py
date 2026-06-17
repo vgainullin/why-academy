@@ -79,6 +79,19 @@ class CoalesceTreatmentMetricsTests(unittest.TestCase):
                 "failure_class": "rule_executor_coverage_gap",
                 "error": "unsupported executor rule",
             }))
+            (iter0 / "problem.normalization_bridge.json").write_text(json.dumps({
+                "bridge_version": "normalization_bridge.v1",
+                "normalization_mode": "preserve-executor-boundaries",
+                "status": "normalization_boundary_fail",
+                "metrics": {
+                    "protected_edges": 2,
+                    "preserved_edges": 1,
+                    "collapsed_protected_edges": 1,
+                    "blocked_merges": 1,
+                    "allowed_noop_drops": 0,
+                    "raw_pass_normalized_substitution_fail": 1,
+                },
+            }))
             (iter0 / "variant.md").write_text("")
 
             (target1 / "target.json").write_text(json.dumps({"target": "derive h"}))
@@ -107,6 +120,8 @@ class CoalesceTreatmentMetricsTests(unittest.TestCase):
             self.assertTrue(metrics["promotion_disabled"])
             self.assertEqual(metrics["treatment_failure_counts"]["rule_executor_coverage_gap"], 1)
             self.assertEqual(metrics["substitution_structural"]["n_accepted_failed_edges"], 1)
+            self.assertEqual(metrics["normalization_bridge"]["status_counts"]["normalization_boundary_fail"], 1)
+            self.assertEqual(metrics["normalization_bridge"]["collapsed_protected_edges"], 1)
             proposal = (batch / "promote_proposal.md").read_text()
             self.assertIn("Promotion disabled for this batch", proposal)
 

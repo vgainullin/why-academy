@@ -32,6 +32,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
+LEGACY_NORMALIZATION_MODE = "legacy"
+BRIDGE_NORMALIZATION_MODE = "preserve-executor-boundaries"
+RULE_EXECUTOR_VERSION = "rule_executor.v1"
+SUBSTITUTION_STRUCTURAL_CHECK_VERSION = "substitution_structural_check.v1"
+NORMALIZATION_BRIDGE_VERSION = "normalization_bridge.v1"
+RULE_EXECUTOR_TREATMENT_ID = "rule_executor"
+NORMALIZATION_BRIDGE_TREATMENT_ID = "rule_executor_normalization_bridge_v1"
 sys.path.insert(0, str(ROOT))
 from claude_worker import QuotaExhaustedError as ClaudeQuotaExhaustedError  # noqa: E402
 from evolution_memory import find_seed_variant  # noqa: E402
@@ -115,6 +122,194 @@ def _write_failure_diagnosis(iter_dir: Path, gate: str) -> Path:
     out = iter_dir / "failure_diagnosis.json"
     out.write_text(json.dumps(diagnosis, indent=2))
     return out
+
+
+def _uses_normalization_bridge(inner_mode: str, normalization_mode: str) -> bool:
+    return inner_mode == "rule_executor" and normalization_mode == BRIDGE_NORMALIZATION_MODE
+
+
+class BatchResumeContractError(ValueError):
+    """Raised when an existing batch id was created for a different treatment."""
+
+
+def _validate_normalization_mode(inner_mode: str, normalization_mode: str) -> None:
+    if normalization_mode not in {LEGACY_NORMALIZATION_MODE, BRIDGE_NORMALIZATION_MODE}:
+        raise ValueError(f"unsupported normalization_mode: {normalization_mode}")
+    if normalization_mode == BRIDGE_NORMALIZATION_MODE and inner_mode != "rule_executor":
+        raise ValueError(
+            "normalization_mode=preserve-executor-boundaries requires inner_mode=rule_executor"
+        )
+
+
+def effective_treatment_id(
+    inner_mode: str,
+    normalization_mode: str,
+    treatment_id: str | None,
+) -> str | None:
+    if treatment_id:
+        return treatment_id
+    if _uses_normalization_bridge(inner_mode, normalization_mode):
+        return NORMALIZATION_BRIDGE_TREATMENT_ID
+    if inner_mode == "rule_executor":
+        return RULE_EXECUTOR_TREATMENT_ID
+    return None
+
+
+def batch_resume_contract(
+    *,
+    inner_mode: str,
+    experiment_id: str | None,
+    treatment_id: str | None,
+    normalization_mode: str,
+) -> dict[str, str | None]:
+    _validate_normalization_mode(inner_mode, normalization_mode)
+    return {
+        "inner_mode": inner_mode,
+        "experiment_id": experiment_id,
+        "treatment_id": effective_treatment_id(inner_mode, normalization_mode, treatment_id),
+        "normalization_mode": normalization_mode,
+        "rule_executor_version": RULE_EXECUTOR_VERSION if inner_mode == "rule_executor" else None,
+        "normalization_bridge_version": (
+            NORMALIZATION_BRIDGE_VERSION
+            if _uses_normalization_bridge(inner_mode, normalization_mode)
+            else None
+        ),
+        "substitution_structural_check_version": (
+            SUBSTITUTION_STRUCTURAL_CHECK_VERSION if inner_mode == "rule_executor" else None
+        ),
+    }
+
+
+def _checkpoint_value(checkpoint: dict, field: str) -> str | None:
+    if field == "normalization_mode" and field not in checkpoint:
+        return LEGACY_NORMALIZATION_MODE
+    return checkpoint.get(field)
+
+
+def _format_contract_value(value: str | None) -> str:
+    return "<missing>" if value is None else repr(value)
+
+
+def validate_batch_resume_contract(
+    checkpoint: dict,
+    expected: dict[str, str | None],
+) -> None:
+    mismatches = []
+    for field, expected_value in expected.items():
+        actual_value = _checkpoint_value(checkpoint, field)
+        if actual_value != expected_value:
+            mismatches.append(
+                f"{field}: expected {_format_contract_value(expected_value)}, "
+                f"found {_format_contract_value(actual_value)}"
+            )
+    if mismatches:
+        raise BatchResumeContractError(
+            "incompatible batch resume metadata; use a fresh --batch-id or rerun "
+            "with the original treatment contract (" + "; ".join(mismatches) + ")"
+        )
+
+
+def _batch_has_target_state(batch_dir: Path) -> bool:
+    targets_dir = batch_dir / "targets"
+    return targets_dir.exists() and any(targets_dir.iterdir())
+
+
+def validate_existing_batch_resume(
+    batch_dir: Path,
+    expected: dict[str, str | None],
+    *,
+    require_checkpoint_for_existing_state: bool = False,
+) -> dict | None:
+    checkpoint_path = batch_dir / "checkpoint.json"
+    if not checkpoint_path.exists():
+        if require_checkpoint_for_existing_state and _batch_has_target_state(batch_dir):
+            raise BatchResumeContractError(
+                "incomplete batch resume metadata; existing target state has no checkpoint.json"
+            )
+        return None
+    try:
+        checkpoint = json.loads(checkpoint_path.read_text())
+    except Exception as e:
+        raise BatchResumeContractError(
+            f"incomplete batch resume metadata; checkpoint.json is not valid JSON: {e}"
+        ) from e
+    if not isinstance(checkpoint, dict):
+        raise BatchResumeContractError(
+            "incomplete batch resume metadata; checkpoint.json must contain a JSON object"
+        )
+    validate_batch_resume_contract(checkpoint, expected)
+    return checkpoint
+
+
+def _write_batch_checkpoint_if_missing(
+    evo_base: Path,
+    *,
+    batch_id: str,
+    target_index: int,
+    max_iter: int,
+    inner_engine: str,
+    pool,
+    judge_engine: str,
+    evolve_engine: str,
+    judge_model: str,
+    evolve_model: str,
+    expected_contract: dict[str, str | None],
+    require_checkpoint_for_existing_state: bool,
+) -> None:
+    checkpoint = evo_base / "checkpoint.json"
+    if checkpoint.exists():
+        validate_existing_batch_resume(
+            evo_base,
+            expected_contract,
+            require_checkpoint_for_existing_state=require_checkpoint_for_existing_state,
+        )
+        return
+
+    evo_base.mkdir(parents=True, exist_ok=True)
+    state = json.loads((PROJECT_ROOT / "derivations" / "state.json").read_text())
+    checkpoint_payload = {
+        "batch_id": batch_id,
+        "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "epoch": state["epoch"],
+        "prompt_version": state["prompt_version"],
+        "validator_version": state["validator_version"],
+        "config_version": state.get("config_version", "v1"),
+        "max_iter": max_iter,
+        "inner_via": f"{inner_engine}_worker_pool",
+        "inner_engine": inner_engine,
+        "inner_model": getattr(pool, "model", "unknown"),
+        "judge_engine": judge_engine,
+        "judge_model": judge_model,
+        "evolve_engine": evolve_engine,
+        "evolve_model": evolve_model,
+        "validator_dirs": os.environ.get("DERIVATION_VALIDATOR_DIRS", ""),
+        "validator_prepend": os.environ.get("DERIVATION_VALIDATOR_PREPEND", ""),
+        "prompt_addenda": os.environ.get("DERIVATION_PROMPT_ADDENDA", ""),
+        **expected_contract,
+    }
+    tmp = evo_base / f".checkpoint.{os.getpid()}.{target_index}.{time.time_ns()}.tmp"
+    tmp.write_text(json.dumps(checkpoint_payload, indent=2))
+    try:
+        os.link(tmp, checkpoint)
+    except FileExistsError:
+        validate_existing_batch_resume(
+            evo_base,
+            expected_contract,
+            require_checkpoint_for_existing_state=require_checkpoint_for_existing_state,
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _clear_bridge_treatment_artifacts(iter_dir: Path) -> None:
+    for name in (
+        "problem.normalization_bridge.json",
+        "problem.normalization_bridge_candidate.json",
+        "problem.normalizer.json",
+        "normalization_bridge_error.json",
+        "rule_executor_error.json",
+    ):
+        (iter_dir / name).unlink(missing_ok=True)
 
 
 def _clear_problem_sidecars(iter_dir: Path) -> None:
@@ -248,6 +443,7 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                    inner_mode: str = "agent",
                    experiment_id: str | None = None,
                    treatment_id: str | None = None,
+                   normalization_mode: str = "legacy",
                    judge_engine: str = "claude",
                    evolve_engine: str = "claude",
                    judge_model: str = "sonnet",
@@ -260,9 +456,38 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
     return it without re-running. Callers can rerun batch.sh against the same
     --batch-id to pick up where a previous interrupted run left off.
     """
+    _validate_normalization_mode(inner_mode, normalization_mode)
+
     safe_bid = _safe_batch_id(batch_id)
     evo_base = PROJECT_ROOT / "derivations" / "_evolutions" / "batches" / batch_id
     target_dir = evo_base / "targets" / f"target_{target_index:03d}"
+    expected_contract = batch_resume_contract(
+        inner_mode=inner_mode,
+        experiment_id=experiment_id,
+        treatment_id=treatment_id,
+        normalization_mode=normalization_mode,
+    )
+    bridge_mode = _uses_normalization_bridge(inner_mode, normalization_mode)
+    validate_existing_batch_resume(
+        evo_base,
+        expected_contract,
+        require_checkpoint_for_existing_state=bridge_mode,
+    )
+    if bridge_mode:
+        _write_batch_checkpoint_if_missing(
+            evo_base,
+            batch_id=batch_id,
+            target_index=target_index,
+            max_iter=max_iter,
+            inner_engine=inner_engine,
+            pool=pool,
+            judge_engine=judge_engine,
+            evolve_engine=evolve_engine,
+            judge_model=judge_model,
+            evolve_model=evolve_model,
+            expected_contract=expected_contract,
+            require_checkpoint_for_existing_state=True,
+        )
     target_dir.mkdir(parents=True, exist_ok=True)
 
     # Resumability: skip targets that already completed in a prior run of the
@@ -276,36 +501,24 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
     if existing_metrics.exists() and (accepted.exists() or failed.exists()):
         return json.loads(existing_metrics.read_text())
 
-    # batch-level checkpoint (only the first target to land writes this; race-safe enough)
-    checkpoint = evo_base / "checkpoint.json"
-    if not checkpoint.exists():
-        state = json.loads((PROJECT_ROOT / "derivations" / "state.json").read_text())
-        checkpoint.write_text(json.dumps({
-            "batch_id": batch_id,
-            "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "epoch": state["epoch"],
-            "prompt_version": state["prompt_version"],
-            "validator_version": state["validator_version"],
-            "config_version": state.get("config_version", "v1"),
-            "max_iter": max_iter,
-            "inner_via": f"{inner_engine}_worker_pool",
-            "inner_mode": inner_mode,
-            "experiment_id": experiment_id,
-            "treatment_id": treatment_id or ("rule_executor" if inner_mode == "rule_executor" else None),
-            "inner_engine": inner_engine,
-            "inner_model": getattr(pool, "model", "unknown"),
-            "judge_engine": judge_engine,
-            "judge_model": judge_model,
-            "evolve_engine": evolve_engine,
-            "evolve_model": evolve_model,
-            "validator_dirs": os.environ.get("DERIVATION_VALIDATOR_DIRS", ""),
-            "validator_prepend": os.environ.get("DERIVATION_VALIDATOR_PREPEND", ""),
-            "prompt_addenda": os.environ.get("DERIVATION_PROMPT_ADDENDA", ""),
-            "rule_executor_version": "rule_executor.v1" if inner_mode == "rule_executor" else None,
-            "substitution_structural_check_version": (
-                "substitution_structural_check.v1" if inner_mode == "rule_executor" else None
-            ),
-        }, indent=2))
+    # Control path keeps the historical checkpoint timing. Bridge mode must
+    # publish checkpoint metadata before target state exists so parallel fresh
+    # starts do not look like incomplete resumes.
+    if not bridge_mode:
+        _write_batch_checkpoint_if_missing(
+            evo_base,
+            batch_id=batch_id,
+            target_index=target_index,
+            max_iter=max_iter,
+            inner_engine=inner_engine,
+            pool=pool,
+            judge_engine=judge_engine,
+            evolve_engine=evolve_engine,
+            judge_model=judge_model,
+            evolve_model=evolve_model,
+            expected_contract=expected_contract,
+            require_checkpoint_for_existing_state=False,
+        )
 
     (target_dir / "target.json").write_text(json.dumps({
         "target": target,
@@ -349,6 +562,8 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
     for it in range(max_iter):
         iter_dir = target_dir / f"iter_{it:02d}"
         iter_dir.mkdir(exist_ok=True)
+        if _uses_normalization_bridge(inner_mode, normalization_mode):
+            _clear_bridge_treatment_artifacts(iter_dir)
 
         # Snapshot the variant being used this iter
         if variant_prompt_path != iter_dir / "variant.md":
@@ -564,12 +779,46 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
                 continue
             break
         shutil.copy(verifier_sidecar, iter_dir / "problem.raw.verifier.json")
+        verifier_sidecar.unlink(missing_ok=True)
 
-        normalize_res = _run_py("derivations/graph_normalize.py", str(iter_dir / "problem.json"))
+        if _uses_normalization_bridge(inner_mode, normalization_mode):
+            normalize_res = _run_py(
+                "derivations/normalization_bridge.py",
+                str(iter_dir / "problem.json"),
+                "--executor-report",
+                str(iter_dir / "problem.rule_executor.json"),
+                "--normalizer-report",
+                str(iter_dir / "problem.normalizer.json"),
+                "--bridge-report",
+                str(iter_dir / "problem.normalization_bridge.json"),
+            )
+        else:
+            normalize_res = _run_py("derivations/graph_normalize.py", str(iter_dir / "problem.json"))
         (iter_dir / "graph_normalize.log").write_text(normalize_res.stdout + normalize_res.stderr)
         if normalize_res.returncode != 0:
-            (iter_dir / "status.txt").write_text("normalize_fail")
-            fail_reason = f"normalize_fail_iter_{it}"
+            failure_class = "normalize_fail"
+            bridge_report = None
+            if _uses_normalization_bridge(inner_mode, normalization_mode):
+                bridge_path = iter_dir / "problem.normalization_bridge.json"
+                if bridge_path.exists():
+                    try:
+                        bridge_report = json.loads(bridge_path.read_text())
+                        failure_class = bridge_report.get("status") or "normalization_bridge_fail"
+                    except Exception:
+                        failure_class = "normalization_bridge_fail"
+                else:
+                    failure_class = "normalization_bridge_fail"
+                error_payload = {
+                    "failure_class": failure_class,
+                    "error": "normalization bridge did not preserve rule-executor boundaries",
+                    "report": bridge_report,
+                    "stdout": normalize_res.stdout[-2000:],
+                    "stderr": normalize_res.stderr[-2000:],
+                }
+                (iter_dir / "normalization_bridge_error.json").write_text(json.dumps(error_payload, indent=2))
+                (iter_dir / "rule_executor_error.json").write_text(json.dumps(error_payload, indent=2))
+            (iter_dir / "status.txt").write_text(failure_class)
+            fail_reason = f"{failure_class}_iter_{it}"
             _write_transition_if_possible(target_dir, it)
             if it + 1 < max_iter:
                 diagnosis_path = _write_failure_diagnosis(iter_dir, "runtime")

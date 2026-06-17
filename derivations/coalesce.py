@@ -32,6 +32,9 @@ TREATMENT_FAILURE_STATUSES = {
     "rule_executor_coverage_gap",
     "rule_executor_fail",
     "substitution_structural_fail",
+    "normalization_boundary_fail",
+    "normalization_bridge_fail",
+    "normalization_contract_mismatch",
 }
 
 ADDENDUM_BLOCK_RE = re.compile(r"(?ms)^## Addendum[^\n]*$.*?(?=^## Addendum|\Z)")
@@ -155,6 +158,15 @@ def main() -> int:
         "n_accepted_failed_edges": 0,
         "n_accepted_iters_with_failed_edges": 0,
     }
+    normalization_bridge_summary = {
+        "status_counts": {},
+        "protected_edges": 0,
+        "preserved_edges": 0,
+        "collapsed_protected_edges": 0,
+        "blocked_merges": 0,
+        "allowed_noop_drops": 0,
+        "raw_pass_normalized_substitution_fail": 0,
+    }
 
     for tdir in targets:
         mp = tdir / "target_metrics.json"
@@ -172,6 +184,21 @@ def main() -> int:
             iter_status_counts[status] = iter_status_counts.get(status, 0) + 1
             if status in TREATMENT_FAILURE_STATUSES:
                 treatment_failure_counts[status] = treatment_failure_counts.get(status, 0) + 1
+            bridge_report = read_json(iter_dir / "problem.normalization_bridge.json")
+            if bridge_report:
+                bridge_status = bridge_report.get("status") or "unknown"
+                status_counts = normalization_bridge_summary["status_counts"]
+                status_counts[bridge_status] = status_counts.get(bridge_status, 0) + 1
+                metrics = bridge_report.get("metrics") if isinstance(bridge_report.get("metrics"), dict) else {}
+                for key in (
+                    "protected_edges",
+                    "preserved_edges",
+                    "collapsed_protected_edges",
+                    "blocked_merges",
+                    "allowed_noop_drops",
+                    "raw_pass_normalized_substitution_fail",
+                ):
+                    normalization_bridge_summary[key] += int(metrics.get(key, 0) or 0)
             substitution_report = substitution_report_for_iter(iter_dir)
             if substitution_report:
                 substitution_summary["n_iters_with_problem"] += 1
@@ -268,6 +295,7 @@ def main() -> int:
         "iter_status_counts": dict(sorted(iter_status_counts.items())),
         "treatment_failure_counts": dict(sorted(treatment_failure_counts.items())),
         "substitution_structural": substitution_summary,
+        "normalization_bridge": normalization_bridge_summary,
     }
     (batch_dir / "batch_metrics.json").write_text(json.dumps(metrics, indent=2))
 
@@ -309,6 +337,14 @@ def main() -> int:
         f"{substitution_summary['n_accepted_failed_edges']}",
         "",
     ]
+    if normalization_bridge_summary["status_counts"]:
+        report.append("Normalization bridge statuses:")
+        for r, c in sorted(
+            normalization_bridge_summary["status_counts"].items(),
+            key=lambda kv: (-kv[1], kv[0]),
+        ):
+            report.append(f"- {r}: {c}")
+        report.append("")
     if treatment_failure_counts:
         report.append("Treatment failure statuses:")
         for r, c in sorted(treatment_failure_counts.items(), key=lambda kv: (-kv[1], kv[0])):

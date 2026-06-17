@@ -208,6 +208,19 @@ def diagnose_iter(iter_dir: Path, gate: str | None = None) -> dict:
                 "raw_preview": str(rule_plan_error.get("raw", ""))[:1200],
             },
         }
+    bridge_error = _read_json(iter_dir / "normalization_bridge_error.json")
+    if bridge_error:
+        failure_class = bridge_error.get("failure_class", "normalization_bridge_fail")
+        return {
+            "gate": gate,
+            "failure_class": failure_class,
+            "rule": None,
+            "details": bridge_error.get("error", ""),
+            "severity": "blocking",
+            "repair_scope": "normalizer",
+            "source_path": str(iter_dir / "normalization_bridge_error.json"),
+            "raw": bridge_error,
+        }
     executor_error = _read_json(iter_dir / "rule_executor_error.json")
     if executor_error:
         failure_class = executor_error.get("failure_class", "rule_executor_fail")

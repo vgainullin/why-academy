@@ -40,6 +40,9 @@ TREATMENT_FAILURE_STATUSES = {
     "rule_executor_coverage_gap",
     "rule_executor_fail",
     "substitution_structural_fail",
+    "normalization_boundary_fail",
+    "normalization_bridge_fail",
+    "normalization_contract_mismatch",
 }
 
 
@@ -276,10 +279,17 @@ def target_record(target_dir: Path) -> dict[str, Any]:
 
     iter_statuses = []
     for iter_dir in sorted(target_dir.glob("iter_*")):
-        iter_statuses.append({
+        item = {
             "iter": int(iter_dir.name.replace("iter_", "")),
             "status": read_status(iter_dir),
-        })
+        }
+        bridge = read_json(iter_dir / "problem.normalization_bridge.json")
+        if bridge:
+            item["normalization_bridge"] = {
+                "status": bridge.get("status"),
+                "metrics": bridge.get("metrics") if isinstance(bridge.get("metrics"), dict) else {},
+            }
+        iter_statuses.append(item)
 
     accepted_substitution = None
     if accepted and accepted_iter is not None:
@@ -347,6 +357,33 @@ def batch_summary(batch: dict[str, Any]) -> dict[str, Any]:
     accepted_substitution_failures = 0
     accepted_failed_edges = 0
     accepted_inspected_edges = 0
+    normalization_bridge = {
+        "status_counts": {},
+        "protected_edges": 0,
+        "preserved_edges": 0,
+        "collapsed_protected_edges": 0,
+        "blocked_merges": 0,
+        "allowed_noop_drops": 0,
+        "raw_pass_normalized_substitution_fail": 0,
+    }
+    for r in records:
+        for item in r["iter_statuses"]:
+            bridge = item.get("normalization_bridge")
+            if not bridge:
+                continue
+            status = bridge.get("status") or "unknown"
+            bridge_status_counts = normalization_bridge["status_counts"]
+            bridge_status_counts[status] = bridge_status_counts.get(status, 0) + 1
+            metrics = bridge.get("metrics") if isinstance(bridge.get("metrics"), dict) else {}
+            for key in (
+                "protected_edges",
+                "preserved_edges",
+                "collapsed_protected_edges",
+                "blocked_merges",
+                "allowed_noop_drops",
+                "raw_pass_normalized_substitution_fail",
+            ):
+                normalization_bridge[key] += int(metrics.get(key, 0) or 0)
     for r in accepted:
         report = r.get("accepted_substitution")
         if not report:
@@ -382,6 +419,7 @@ def batch_summary(batch: dict[str, Any]) -> dict[str, Any]:
             "n_failed_edges": accepted_failed_edges,
             "n_iters_with_failures": accepted_substitution_failures,
         },
+        "normalization_bridge": normalization_bridge,
     }
 
 
@@ -532,7 +570,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- Control failed accepted substitution edges: {c['accepted_substitution']['n_failed_edges']}",
         f"- Treatment failed accepted substitution edges: {t['accepted_substitution']['n_failed_edges']}",
         "",
+        "## Normalization Bridge",
+        "",
     ])
+    bridge_statuses = (t.get("normalization_bridge") or {}).get("status_counts") or {}
+    if bridge_statuses:
+        for status, count in bridge_statuses.items():
+            lines.append(f"- {status}: {count}")
+    else:
+        lines.append("- none")
+    lines.append("")
     return "\n".join(lines)
 
 

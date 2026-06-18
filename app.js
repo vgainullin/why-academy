@@ -3525,7 +3525,11 @@ plt.close('all')
     });
 
     if (completedBlockId && activeBlock && lesson.demo_mode.auto_advance) {
-      const nextEl = document.getElementById('block-' + activeBlock.id);
+      const completedIdx = lesson.blocks.findIndex(b => b.id === completedBlockId);
+      const nextBlock = completedIdx >= 0
+        ? lesson.blocks.slice(completedIdx + 1).find(b => !blockState[b.id] || !blockState[b.id].completed)
+        : null;
+      const nextEl = document.getElementById('block-' + (nextBlock ? nextBlock.id : activeBlock.id));
       const completedEl = document.getElementById('block-' + completedBlockId);
       if (nextEl && completedEl) {
         const scrollAfterPulse = event => {

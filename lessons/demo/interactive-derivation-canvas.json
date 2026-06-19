@@ -1,7 +1,7 @@
 {
   "lesson_id": "DEMO-CANVAS",
-  "title": "Spring Loop Derivation Canvas Demo",
-  "description": "A recording-ready sequence of handwritten derivations where each result feeds the next step of a spring-loaded loop-the-loop design.",
+  "title": "Interactive Derivation Canvas Demo",
+  "description": "A short practice ladder of handwritten derivations that ramps from algebra to physics and keeps a running score.",
   "prerequisites": [],
   "demo_mode": {
     "enabled": true,
@@ -12,86 +12,104 @@
     {
       "id": "DEMO-INTRO",
       "type": "read",
-      "title": "One connected derivation",
-      "content_html": "<p>The goal is to design a spring launch that barely carries a cart through a vertical loop. Each canvas reads your handwritten lines, marks valid equations, and adds points when you reach the target.</p><p>The first derivation finds the required speed at the top of the loop. The next turns energy into a release height. Then you combine those two results and finish by sizing the spring compression.</p>"
+      "title": "Practice ladder",
+      "content_html": "<p>Four short rounds. Start with a one-line algebra warm-up, then reuse the same moves in progressively more physical equations.</p>"
     },
     {
-      "id": "DEMO-TOP-SPEED",
+      "id": "DEMO-LINEAR",
       "type": "canvas-derive",
-      "title": "Top-of-loop speed",
+      "title": "Warm-up: isolate x",
       "demo_step": 1,
       "demo_difficulty": "Warm-up",
       "demo_points": 50,
-      "prompt": "At the top of the loop, the minimum-speed case has gravity supplying the centripetal force. Isolate v^2.",
-      "context_note": "<strong>Carry forward:</strong> this result becomes the speed condition used in the height derivation.",
-      "starting_equation": "mg = \\frac{m v^2}{R}",
-      "target_equation": "v^2 = gR",
+      "prompt": "Start with one clean algebra move: isolate x.",
+      "starting_equation": "x + 3 = 10",
+      "target_equation": "x = 7",
       "target_forms": [
-        "v^2 = gR",
-        "v^2 = g R",
-        "gR = v^2"
+        "x = 7",
+        "7 = x"
       ],
       "valid_forms": [
-        "mg = \\frac{m v^2}{R}",
-        "g = \\frac{v^2}{R}",
-        "Rg = v^2",
-        "gR = v^2",
-        "v^2 = gR",
-        "v^2 = g R"
+        "x + 3 = 10",
+        "x = 10 - 3",
+        "x = 7",
+        "7 = x"
       ],
-      "vars": ["m", "g", "v", "R"],
+      "vars": ["x"],
       "hints": [
-        "Cancel m on both sides.",
-        "Multiply both sides by R.",
-        "Rewrite with v^2 on the left."
+        "Undo the +3 by subtracting 3 from both sides.",
+        "10 - 3 = 7."
       ]
     },
     {
-      "id": "DEMO-HEIGHT-BALANCE",
+      "id": "DEMO-KINETIC",
       "type": "canvas-derive",
-      "title": "Height as stored energy",
+      "title": "Add a square root",
       "demo_step": 2,
       "demo_difficulty": "Algebra",
       "demo_points": 75,
-      "prompt": "Use conservation of energy from release height h to the top of the loop, then solve for h in terms of v^2.",
-      "context_note": "<strong>Carry forward:</strong> the previous canvas gave v^2 = gR. Do not substitute it yet; first make a clean height formula.",
-      "starting_equation": "mgh = \\frac{1}{2} m v^2 + mg(2R)",
-      "target_equation": "h = \\frac{v^2}{2g} + 2R",
+      "prompt": "Same idea, more symbols: solve the kinetic-energy equation for v.",
+      "starting_equation": "E = \\frac{1}{2} m v^2",
+      "target_equation": "v = \\sqrt{\\frac{2E}{m}}",
       "target_forms": [
-        "h = \\frac{v^2}{2g} + 2R",
-        "h = 2R + \\frac{v^2}{2g}"
+        "v = \\sqrt{\\frac{2E}{m}}",
+        "v = \\sqrt{2E/m}"
       ],
       "valid_forms": [
-        "mgh = \\frac{1}{2} m v^2 + mg(2R)",
-        "gh = \\frac{1}{2} v^2 + g(2R)",
-        "gh = \\frac{1}{2} v^2 + 2gR",
-        "h = \\frac{1}{2g} v^2 + 2R",
-        "h = \\frac{v^2}{2g} + 2R",
-        "h = 2R + \\frac{v^2}{2g}"
+        "E = \\frac{1}{2} m v^2",
+        "2E = m v^2",
+        "\\frac{2E}{m} = v^2",
+        "v^2 = \\frac{2E}{m}",
+        "v = \\sqrt{\\frac{2E}{m}}",
+        "v = \\sqrt{2E/m}"
       ],
-      "vars": ["m", "g", "h", "v", "R"],
+      "vars": ["E", "m", "v"],
       "hints": [
-        "Cancel m from every term.",
-        "Divide the whole equation by g.",
-        "Leave v^2 in the formula so the top-speed result can drop in next."
+        "Multiply both sides by 2.",
+        "Divide by m so v^2 is alone.",
+        "Use the positive square root for speed."
       ]
     },
     {
-      "id": "DEMO-BRIDGE-HEIGHT",
-      "type": "read",
-      "title": "Now connect the two results",
-      "content_html": "<p>The first canvas produced <strong>v<sup>2</sup> = gR</strong>. The second produced <strong>h = v<sup>2</sup>/(2g) + 2R</strong>. The next canvas is the payoff: substitute the required top speed and simplify the minimum release height.</p>"
-    },
-    {
-      "id": "DEMO-LOOP-HEIGHT",
+      "id": "DEMO-SPRING",
       "type": "canvas-derive",
-      "title": "Minimum release height",
+      "title": "Spring launch speed",
       "demo_step": 3,
       "demo_difficulty": "Energy",
       "demo_points": 100,
-      "prompt": "Substitute the top-of-loop speed condition into the height formula and simplify h.",
-      "context_note": "<strong>Carry forward:</strong> this height threshold is the amount of gravitational energy the launch spring must provide.",
-      "starting_equation": "h = \\frac{gR}{2g} + 2R",
+      "prompt": "Reuse the square-root move to derive launch speed from spring energy.",
+      "starting_equation": "\\frac{1}{2} k A^2 = \\frac{1}{2} m v^2",
+      "target_equation": "v = A\\sqrt{\\frac{k}{m}}",
+      "target_forms": [
+        "v = A\\sqrt{\\frac{k}{m}}",
+        "v = A \\sqrt{k/m}",
+        "v = \\sqrt{\\frac{k A^2}{m}}"
+      ],
+      "valid_forms": [
+        "\\frac{1}{2} k A^2 = \\frac{1}{2} m v^2",
+        "k A^2 = m v^2",
+        "\\frac{k A^2}{m} = v^2",
+        "v^2 = \\frac{k A^2}{m}",
+        "v = \\sqrt{\\frac{k A^2}{m}}",
+        "v = A\\sqrt{\\frac{k}{m}}",
+        "v = A \\sqrt{k/m}"
+      ],
+      "vars": ["k", "A", "m", "v"],
+      "hints": [
+        "Cancel the 1/2 on both sides first.",
+        "Divide by m to isolate v^2.",
+        "Take the positive square root. Since A is an amplitude, use A > 0."
+      ]
+    },
+    {
+      "id": "DEMO-LOOP",
+      "type": "canvas-derive",
+      "title": "Final challenge: loop threshold",
+      "demo_step": 4,
+      "demo_difficulty": "Challenge",
+      "demo_points": 150,
+      "prompt": "Put the earlier moves together. Derive the minimum release height for a loop-the-loop.",
+      "starting_equation": "mg = \\frac{m v^2}{R}",
       "target_equation": "h = \\frac{5R}{2}",
       "target_forms": [
         "h = \\frac{5R}{2}",
@@ -99,49 +117,25 @@
         "h = 2.5R"
       ],
       "valid_forms": [
-        "h = \\frac{gR}{2g} + 2R",
-        "h = \\frac{R}{2} + 2R",
-        "h = \\frac{R}{2} + \\frac{4R}{2}",
+        "mg = \\frac{m v^2}{R}",
+        "g = \\frac{v^2}{R}",
+        "v^2 = gR",
+        "\\frac{1}{2} m v^2 + m g (2R) = m g h",
+        "\\frac{1}{2} v^2 + 2 g R = g h",
+        "\\frac{1}{2} (gR) + 2gR = gh",
+        "\\frac{1}{2} gR + 2gR = gh",
+        "\\frac{5}{2} g R = g h",
+        "\\frac{5}{2} R = h",
         "h = \\frac{5R}{2}",
-        "h = \\frac{5}{2}R",
-        "h = 2.5R"
+        "h = \\frac{5}{2} R",
+        "h = 2.5 R"
       ],
-      "vars": ["g", "R", "h"],
+      "vars": ["m", "g", "v", "R", "h"],
       "hints": [
-        "Cancel g in gR/(2g).",
-        "Write 2R as 4R/2.",
-        "Add the two R terms."
-      ]
-    },
-    {
-      "id": "DEMO-SPRING-SIZE",
-      "type": "canvas-derive",
-      "title": "Spring compression",
-      "demo_step": 4,
-      "demo_difficulty": "Challenge",
-      "demo_points": 150,
-      "prompt": "Finish the design. Set the spring energy equal to the gravitational energy needed for the release height h = 5R/2, then solve for the compression A.",
-      "context_note": "<strong>Final link:</strong> the loop threshold from the previous canvas becomes the design requirement for the spring.",
-      "starting_equation": "\\frac{1}{2} k A^2 = mg\\left(\\frac{5R}{2}\\right)",
-      "target_equation": "A = \\sqrt{\\frac{5mgR}{k}}",
-      "target_forms": [
-        "A = \\sqrt{\\frac{5mgR}{k}}",
-        "A = \\sqrt{5mgR/k}"
-      ],
-      "valid_forms": [
-        "\\frac{1}{2} k A^2 = mg\\left(\\frac{5R}{2}\\right)",
-        "\\frac{1}{2} k A^2 = \\frac{5mgR}{2}",
-        "k A^2 = 5mgR",
-        "A^2 = \\frac{5mgR}{k}",
-        "A = \\sqrt{\\frac{5mgR}{k}}",
-        "A = \\sqrt{5mgR/k}"
-      ],
-      "vars": ["k", "A", "m", "g", "R"],
-      "hints": [
-        "First simplify the right side to 5mgR/2.",
-        "Multiply both sides by 2.",
-        "Divide by k.",
-        "Take the positive square root because compression is a length."
+        "Use the force equation first to get v^2 = gR.",
+        "At the top, the ball is at height 2R, so its potential energy is mg(2R).",
+        "Use 1/2 m v^2 + mg(2R) = mgh.",
+        "Substitute v^2 = gR, then cancel m and g."
       ]
     }
   ]

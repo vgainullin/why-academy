@@ -1,7 +1,7 @@
 {
   "lesson_id": "DEMO-CANVAS",
   "title": "Interactive Derivation Canvas Demo",
-  "description": "A six-round practice demo that ramps from algebra to physics while keeping score.",
+  "description": "A seven-round practice demo that ramps from algebra to launch height while keeping score.",
   "prerequisites": [],
   "demo_mode": {
     "enabled": true,
@@ -13,7 +13,7 @@
       "id": "DEMO-INTRO",
       "type": "read",
       "title": "Practice rounds",
-      "content_html": "<p>Six short canvas rounds. Each round adds one move.</p>"
+      "content_html": "<p>Seven short canvas rounds. Each round adds one move.</p>"
     },
     {
       "id": "DEMO-SUBTRACT",
@@ -155,40 +155,63 @@
       ]
     },
     {
-      "id": "DEMO-LOOP",
+      "id": "DEMO-HEIGHT-FROM-SPEED",
       "type": "canvas-derive",
-      "title": "Loop threshold",
+      "title": "Height from speed",
       "demo_step": 6,
-      "demo_difficulty": "Challenge",
-      "demo_points": 150,
-      "prompt": "Final round: use force for v^2, then energy for h.",
-      "starting_equation": "mg = \\frac{m v^2}{R}",
-      "target_equation": "h = \\frac{5R}{2}",
+      "demo_difficulty": "Energy",
+      "demo_points": 130,
+      "prompt": "A launch speed turns into height. Solve for h.",
+      "starting_equation": "\\frac{1}{2} m v^2 = mgh",
+      "target_equation": "h = \\frac{v^2}{2g}",
       "target_forms": [
-        "h = \\frac{5R}{2}",
-        "h = \\frac{5}{2}R",
-        "h = 2.5R"
+        "h = \\frac{v^2}{2g}",
+        "h = \\frac{1}{2g}v^2",
+        "\\frac{v^2}{2g} = h"
       ],
       "valid_forms": [
-        "mg = \\frac{m v^2}{R}",
-        "g = \\frac{v^2}{R}",
-        "v^2 = gR",
-        "\\frac{1}{2} m v^2 + m g (2R) = m g h",
-        "\\frac{1}{2} v^2 + 2 g R = g h",
-        "\\frac{1}{2} (gR) + 2gR = gh",
-        "\\frac{1}{2} gR + 2gR = gh",
-        "\\frac{5}{2} g R = g h",
-        "\\frac{5}{2} R = h",
-        "h = \\frac{5R}{2}",
-        "h = \\frac{5}{2} R",
-        "h = 2.5 R"
+        "\\frac{1}{2} m v^2 = mgh",
+        "\\frac{1}{2} v^2 = gh",
+        "\\frac{v^2}{2} = gh",
+        "h = \\frac{v^2}{2g}",
+        "h = \\frac{1}{2g}v^2",
+        "\\frac{v^2}{2g} = h"
       ],
-      "vars": ["m", "g", "v", "R", "h"],
+      "vars": ["m", "g", "v", "h"],
       "hints": [
-        "Cancel m in the force equation.",
-        "Multiply by R to get v^2 = gR.",
-        "Use 1/2 m v^2 + mg(2R) = mgh.",
-        "Substitute v^2 = gR, then cancel m and g."
+        "Cancel m first.",
+        "Write 1/2 v^2 as v^2/2.",
+        "Divide by g."
+      ]
+    },
+    {
+      "id": "DEMO-HEIGHT-FROM-SPRING",
+      "type": "canvas-derive",
+      "title": "Height from spring",
+      "demo_step": 7,
+      "demo_difficulty": "Challenge",
+      "demo_points": 150,
+      "prompt": "Now skip speed and solve directly for height.",
+      "starting_equation": "\\frac{1}{2} k A^2 = mgh",
+      "target_equation": "h = \\frac{k A^2}{2mg}",
+      "target_forms": [
+        "h = \\frac{k A^2}{2mg}",
+        "h = \\frac{kA^2}{2mg}",
+        "\\frac{k A^2}{2mg} = h"
+      ],
+      "valid_forms": [
+        "\\frac{1}{2} k A^2 = mgh",
+        "\\frac{k A^2}{2} = mgh",
+        "k A^2 = 2mgh",
+        "\\frac{k A^2}{2mg} = h",
+        "h = \\frac{k A^2}{2mg}",
+        "h = \\frac{kA^2}{2mg}"
+      ],
+      "vars": ["k", "A", "m", "g", "h"],
+      "hints": [
+        "Write the left side as kA^2/2.",
+        "Divide by mg.",
+        "Put h on the left."
       ]
     }
   ]

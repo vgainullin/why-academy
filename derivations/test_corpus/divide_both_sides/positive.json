@@ -3,42 +3,72 @@
     "description": "numeric divisor: 3x=15 divided by 3 gives x=5",
     "from_srepr": "Eq(3*x, 15)",
     "to_srepr": "Eq(x, 5)",
-    "args": {"divisor": 3},
+    "args": {
+      "divisor": 3
+    },
+    "expected": "PASS"
+  },
+  {
+    "description": "numeric divisor with swapped orientation: 3x=15 divided by 3 gives 5=x",
+    "from_srepr": "Eq(3*x, 15)",
+    "to_srepr": "Eq(5, x)",
+    "args": {
+      "divisor": 3
+    },
     "expected": "PASS"
   },
   {
     "description": "quadratic formula step: divide ax^2+bx=0 by a",
     "from_srepr": "Eq(a*x**2 + b*x, 0)",
     "to_srepr": "Eq(x**2 + b/a*x, 0)",
-    "args": {"divisor": "a"},
+    "args": {
+      "divisor": "a"
+    },
     "expected": "PASS"
   },
   {
     "description": "mass-spring step 1: divide m*xdd=-k*x by m",
     "from_srepr": "Eq(m*Symbol('xdd'), -k*x)",
     "to_srepr": "Eq(Symbol('xdd'), -k*x/m)",
-    "args": {"divisor": "m"},
+    "args": {
+      "divisor": "m"
+    },
     "expected": "PASS"
   },
   {
     "description": "mass-spring step 2: divide -k*x/m=omega^2*x by -k",
     "from_srepr": "Eq(-k*x/m, Symbol('omega')**2*x)",
     "to_srepr": "Eq(x/m, -Symbol('omega')**2*x/k)",
-    "args": {"divisor": "-k"},
+    "args": {
+      "divisor": "-k"
+    },
     "expected": "PASS"
   },
   {
     "description": "numeric divisor variant: 2x=10 divided by 2 gives x=5",
     "from_srepr": "Eq(2*x, 10)",
     "to_srepr": "Eq(x, 5)",
-    "args": {"divisor": 2},
+    "args": {
+      "divisor": 2
+    },
     "expected": "PASS"
   },
   {
     "description": "divide already-simplified equation: x=5 by 3 gives x/3=5/3",
     "from_srepr": "Eq(x, 5)",
     "to_srepr": "Eq(x/3, Rational(5, 3))",
-    "args": {"divisor": 3},
+    "args": {
+      "divisor": 3
+    },
+    "expected": "PASS"
+  },
+  {
+    "description": "[bugfix:orientation_false_rejection] reproduction case (must PASS)",
+    "from_srepr": "Eq(3*x, 15)",
+    "to_srepr": "Eq(5, x)",
+    "args": {
+      "divisor": 3
+    },
     "expected": "PASS"
   }
 ]

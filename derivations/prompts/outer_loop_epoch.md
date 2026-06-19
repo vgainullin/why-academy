@@ -193,6 +193,7 @@ Wait for the human reviewer to either:
 ## Hard constraints
 
 - **No implementation.** The temptation to "just go ahead and write the validator" is exactly the failure mode this loop is designed to prevent. The strength of the auto-research framework comes from the gate at this step.
+- **Never draft `Kind: BUGFIX` here.** BUGFIX proposals are reserved for the BUG_INVESTIGATE phase, which emits them only from a seed hypothesis with a confirmed reproduction case. The outer loop works from aggregate evidence and must not claim a confirmed reproduction. If you believe a candidate is a confirmed bug with a reproduction case, draft it as `INVESTIGATE` and flag it as a seed-hypothesis candidate for the bug-investigate config.
 - **No prompt-level fixes here.** PARSE_FAILURE and VALIDATOR_REJECTED true-positives belong in the inner-loop prompt update, which is a separate concern handled at a different cadence. Note them in the summary but do not propose prompt changes here.
 - **Cite specific evidence.** Every proposal must reference at least 3 concrete log entries (problem_id + edge). No abstract "the LLM sometimes does X" — anchor everything in observed data. If you can't find 3 concrete examples, the candidate isn't ranked high enough yet.
 - **Don't conflate categories.** If a rule shows up in both VALIDATOR_UNCOVERED and WEAK_PASS_ONLY across the epoch, those are two different proposals (write the validator vs. strengthen the fallback). Don't merge.

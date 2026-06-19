@@ -13,7 +13,7 @@ Proposal path: `<<PROPOSAL_PATH>>`
 ### 1. Read and verify the proposal
 
 Read `<<PROPOSAL_PATH>>`. Confirm it has the required sections:
-- `Kind` (NEW_VALIDATOR / STRENGTHEN_VALIDATOR / WEAKEN_VALIDATOR / INVESTIGATE)
+- `Kind` (NEW_VALIDATOR / STRENGTHEN_VALIDATOR / WEAKEN_VALIDATOR / BUGFIX / INVESTIGATE)
 - `Affected rule` (the rule_id this proposal addresses)
 - `Proposed change` (a concrete description, with a code sketch for validator changes)
 - `Test cases required` (a list of +/- examples)
@@ -25,6 +25,8 @@ PROPOSAL INCOMPLETE: <which section is missing>
 Do not implement. Do not write any files. The proposal author must revise.
 
 If `Kind` is `INVESTIGATE`, stop and print `KIND IS INVESTIGATE — no implementation step exists; the proposal is for human follow-up.`
+
+If `Kind` is `BUGFIX`, the proposal carries a `## Reproduction case` block (from_srepr, to_srepr, args, expected, actual) plus a `**Seed hypothesis**` id. The fix is judged solely on whether the reproduction case now returns the `expected` status. Implement the smallest validator change that makes the reproduction case pass WITHOUT weakening the validator for genuine misuses (the `Test cases required` negatives must still FAIL). BUGFIX proposals bypass the 100-attempt evidence floor precisely because they have a confirmed reproduction; do not use that as license to widen scope.
 
 ### 2. Implement the validator
 

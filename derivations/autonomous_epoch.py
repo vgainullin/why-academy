@@ -35,8 +35,10 @@ sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
 
 
-PHASES = ["GENERATE", "ANALYZE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
+PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
+KIND_RE = re.compile(r"^\*\*Kind\*\*:\s*`?([A-Za-z_]+)`?", re.MULTILINE)
+SEED_RE = re.compile(r"^\*\*Seed hypothesis\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 RESUMABLE_PAUSE_STATES = {"PAUSED_QUOTA", "PAUSED_ERROR", "PAUSED_WALLCLOCK", "PAUSED_SIGNAL"}
 STATE_JSON = "derivations/state.json"
 
@@ -105,6 +107,77 @@ def restore_state_json(snapshot: bytes) -> None:
 def affected_rule_from_proposal(path: Path) -> str | None:
     m = RULE_RE.search(path.read_text())
     return m.group(1) if m else None
+
+
+def kind_from_proposal(path: Path) -> str:
+    m = KIND_RE.search(path.read_text())
+    return m.group(1) if m else ""
+
+
+def seed_id_from_proposal(path: Path) -> str | None:
+    m = SEED_RE.search(path.read_text())
+    return m.group(1) if m else None
+
+
+def reproduction_from_proposal(path: Path) -> dict | None:
+    """Parse the `## Reproduction case` block emitted by _write_bugfix_proposal.
+
+    The block may contain a trailing "A negative (must-FAIL) regression case:"
+    sub-block with its own from_srepr/to_srepr/args/expected lines. Those are
+    parsed into a nested `negative` dict so they don't overwrite the main
+    reproduction fields.
+    """
+    text = path.read_text()
+    idx = text.find("## Reproduction case")
+    if idx < 0:
+        return None
+    block = text[idx:]
+    # Stop at the next section header after the reproduction block.
+    next_hdr = block.find("\n## ", 1)
+    if next_hdr >= 0:
+        block = block[:next_hdr]
+
+    fields: dict = {}
+    negative: dict = {}
+    in_negative = False
+    for line in block.splitlines():
+        stripped = line.strip()
+        if "negative" in stripped.lower() and "regression" in stripped.lower():
+            in_negative = True
+            continue
+        if not stripped.startswith("- "):
+            continue
+        body = stripped[2:]
+        if ":" not in body:
+            continue
+        key, _, val = body.partition(":")
+        key = key.strip()
+        val = val.strip()
+        target = negative if in_negative else fields
+        if key == "args":
+            try:
+                target["args"] = json.loads(val)
+            except Exception:
+                target["args"] = {}
+        elif key in ("from_srepr", "to_srepr"):
+            target[key] = val
+        elif key in ("expected", "actual"):
+            target[key] = val
+
+    if "from_srepr" in fields and "to_srepr" in fields:
+        fields.setdefault("args", {})
+        fields.setdefault("expected", "PASS")
+        fields.setdefault("actual", "FAIL")
+        if negative.get("from_srepr") and negative.get("to_srepr"):
+            negative.setdefault("args", {})
+            negative.setdefault("expected", "FAIL")
+            fields["negative"] = negative
+        return fields
+    return None
+
+
+def is_bugfix_proposal(path: Path) -> bool:
+    return kind_from_proposal(path) == "BUGFIX"
 
 
 def snapshot_validator(rule: str | None) -> dict | None:
@@ -202,8 +275,295 @@ def phase_analyze(cfg: dict, state: dict) -> None:
                  f"epoch_{epoch_num():03d}"])
         if r.returncode != 0:
             print(f"[runner] ANALYZE failed rc={r.returncode}", file=sys.stderr)
-    state["phase"] = "EXPERIMENT"
+    state["phase"] = "BUG_INVESTIGATE"
     state["proposals_handled"] = state.get("proposals_handled", [])
+    save_state(cfg, state)
+
+
+# ── PHASE: BUG_INVESTIGATE ──────────────────────────────────────────────
+def _validator_exists(rule: str) -> bool:
+    return (PROJECT_ROOT / "derivations" / "validators" / f"{rule}.py").exists()
+
+
+def _load_epoch_logs(epoch: int) -> list[dict]:
+    """Load every jsonl record for the given epoch. Tolerant of bad lines."""
+    logs_dir = PROJECT_ROOT / "derivations" / "logs" / f"epoch_{epoch:03d}"
+    if not logs_dir.exists():
+        return []
+    out: list[dict] = []
+    for jsonl in sorted(logs_dir.glob("*.jsonl")):
+        with jsonl.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    return out
+
+
+def _match_seed_evidence(seed: dict, logs: list[dict]) -> list[dict]:
+    """Find log evidence matching a seed hypothesis.
+
+    A seed declares `evidence_signals` and `affected_rules`. Each signal is
+    matched against the log records:
+
+    - `VALIDATOR_REJECTED`: an edge whose rule is in `affected_rules`, whose
+      status is FAIL/ERROR, and for which a validator file exists (i.e. the
+      rule is covered, so the FAIL is a rejection rather than UNCOVERED).
+    - any other signal (e.g. `one_rule_per_edge`): a judge-level rejection.
+      Matched when the attempt has a `judge_eval` whose text/verdicts mention
+      the signal substring AND at least one edge uses an affected rule.
+
+    Returns one evidence entry per (record, signal, rule) match.
+    """
+    signals = seed.get("evidence_signals") or []
+    rules = set(seed.get("affected_rules") or [])
+    matches: list[dict] = []
+    for idx, rec in enumerate(logs):
+        edges = rec.get("edge_results") or []
+        rec_rules = {e.get("rule") for e in edges if e.get("rule")}
+        for sig in signals:
+            if sig == "VALIDATOR_REJECTED":
+                for e in edges:
+                    rule = e.get("rule")
+                    if rule in rules and e.get("status") in ("FAIL", "ERROR") \
+                            and _validator_exists(rule):
+                        matches.append({
+                            "record_index": idx,
+                            "signal": sig,
+                            "rule": rule,
+                            "detail": e.get("reason", ""),
+                            "target": rec.get("target", ""),
+                            "batch_id": rec.get("batch_id", ""),
+                        })
+            else:
+                judge = rec.get("judge_eval")
+                if not judge:
+                    continue
+                blob = json.dumps(judge).lower()
+                if sig.lower() not in blob:
+                    continue
+                hit_rules = sorted(rec_rules & rules)
+                if not hit_rules:
+                    continue
+                matches.append({
+                    "record_index": idx,
+                    "signal": sig,
+                    "rule": hit_rules[0],
+                    "detail": sig,
+                    "target": rec.get("target", ""),
+                    "batch_id": rec.get("batch_id", ""),
+                })
+    # Dedup by (record_index, signal, rule).
+    seen = set()
+    deduped: list[dict] = []
+    for m in matches:
+        key = (m["record_index"], m["signal"], m["rule"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(m)
+    return deduped
+
+
+def _sanitized_seed_id(sid: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", sid)
+
+
+def _write_bugfix_proposal(epoch_dir: Path, seed: dict, matches: list[dict],
+                           kind: str) -> Path:
+    """Write a proposal_*.md for a confirmed seed hypothesis."""
+    sid = seed["id"]
+    fname = f"proposal_bug_{_sanitized_seed_id(sid)}.md"
+    path = epoch_dir / fname
+    rules = seed.get("affected_rules") or []
+    repro = seed.get("reproduction")
+    lines: list[str] = []
+    lines.append(f"# Bugfix Proposal: {sid}")
+    lines.append("")
+    lines.append(f"**Kind**: {kind}")
+    lines.append(f"**Affected rule**: {rules[0] if rules else 'none'}")
+    lines.append(f"**Seed hypothesis**: {sid}")
+    lines.append(f"**Evidence count**: {len(matches)}")
+    lines.append("")
+    lines.append("## Hypothesis")
+    lines.append("")
+    lines.append(seed.get("hypothesis", ""))
+    lines.append("")
+    lines.append("## Evidence (from epoch logs)")
+    lines.append("")
+    for m in matches[:10]:
+        lines.append(
+            f"- record={m['record_index']} signal={m['signal']} rule={m['rule']} "
+            f"target={m.get('target', '')!r} batch={m.get('batch_id', '')!r}"
+        )
+    if len(matches) > 10:
+        lines.append(f"- ... and {len(matches) - 10} more")
+    lines.append("")
+    if repro:
+        lines.append("## Reproduction case")
+        lines.append("")
+        lines.append(f"- from_srepr: {repro.get('from_srepr', '')}")
+        lines.append(f"- to_srepr: {repro.get('to_srepr', '')}")
+        lines.append(f"- args: {json.dumps(repro.get('args', {}))}")
+        lines.append(f"- expected: {repro.get('expected', 'PASS')}")
+        lines.append(f"- actual: {repro.get('actual', 'FAIL')}")
+        if repro.get("negative"):
+            neg = repro["negative"]
+            lines.append("")
+            lines.append("A negative (must-FAIL) regression case:")
+            lines.append(f"- from_srepr: {neg.get('from_srepr', '')}")
+            lines.append(f"- to_srepr: {neg.get('to_srepr', '')}")
+            lines.append(f"- args: {json.dumps(neg.get('args', {}))}")
+            lines.append("- expected: FAIL")
+        lines.append("")
+        lines.append("## Proposed change")
+        lines.append("")
+        lines.append(repro.get("proposed_change", ""))
+        lines.append("")
+        lines.append("## Test cases required")
+        lines.append("")
+        lines.append("The reproduction case above must now PASS after the fix.")
+        lines.append("")
+    else:
+        lines.append("## Proposed change")
+        lines.append("")
+        lines.append(
+            "No reproduction case is available for this seed. This is an "
+            "INVESTIGATE proposal: document the pattern for human follow-up; "
+            "do not implement a validator change without a confirmed reproduction."
+        )
+        lines.append("")
+    path.write_text("\n".join(lines))
+    return path
+
+
+def write_regression_tests(rule: str, reproduction: dict, seed_id: str,
+                           corpus_root: Path | None = None) -> dict:
+    """Auto-generate regression corpus entries from a confirmed reproduction.
+
+    Writes the reproduction case into `test_corpus/<rule>/positive.json` (the
+    case that must now PASS). If the seed supplies an explicit `negative`
+    block, appends it to `negative.json`. Existing entries are preserved and
+    de-duplicated by `description`.
+
+    Returns a summary of what was written. This is the auto regression test
+    step from the bug-investigate design: the reproduction case becomes a
+    permanent part of the test suite so the fix cannot silently regress.
+    """
+    if corpus_root is None:
+        corpus_root = PROJECT_ROOT / "derivations" / "test_corpus"
+    rule_dir = corpus_root / rule
+    rule_dir.mkdir(parents=True, exist_ok=True)
+
+    pos_path = rule_dir / "positive.json"
+    pos: list[dict] = []
+    if pos_path.exists():
+        try:
+            pos = json.loads(pos_path.read_text())
+        except Exception:
+            pos = []
+    pos_desc = f"[bugfix:{seed_id}] reproduction case (must PASS)"
+    if not any(e.get("description") == pos_desc for e in pos):
+        pos.append({
+            "description": pos_desc,
+            "from_srepr": reproduction.get("from_srepr", ""),
+            "to_srepr": reproduction.get("to_srepr", ""),
+            "args": reproduction.get("args", {}),
+            "expected": "PASS",
+        })
+        pos_path.write_text(json.dumps(pos, indent=2))
+
+    neg_written = 0
+    neg = reproduction.get("negative")
+    if neg:
+        neg_path = rule_dir / "negative.json"
+        neg_list: list[dict] = []
+        if neg_path.exists():
+            try:
+                neg_list = json.loads(neg_path.read_text())
+            except Exception:
+                neg_list = []
+        neg_desc = f"[bugfix:{seed_id}] negative regression case (must FAIL)"
+        if not any(e.get("description") == neg_desc for e in neg_list):
+            neg_list.append({
+                "description": neg_desc,
+                "from_srepr": neg.get("from_srepr", ""),
+                "to_srepr": neg.get("to_srepr", ""),
+                "args": neg.get("args", {}),
+                "expected": "FAIL",
+            })
+            neg_path.write_text(json.dumps(neg_list, indent=2))
+            neg_written = 1
+
+    return {
+        "rule": rule,
+        "positive_path": str(pos_path),
+        "negative_path": str(rule_dir / "negative.json") if neg else None,
+        "positive_written": 1,
+        "negative_written": neg_written,
+        "seed_id": seed_id,
+    }
+
+
+def phase_bug_investigate(cfg: dict, state: dict) -> None:
+    """Investigate seed hypotheses against the current epoch's logs.
+
+    For each seed with enough matching evidence (>= min_occurrences), write a
+    proposal. Seeds that carry a reproduction case produce `Kind: BUGFIX`
+    proposals (which bypass the 100-attempt evidence floor in IMPLEMENT);
+    seeds without a reproduction case produce `Kind: INVESTIGATE` proposals
+    for human follow-up. Resumable via `bug_seeds_processed`.
+    """
+    bi_cfg = cfg.get("runner", {}).get("bug_investigate", {})
+    if not bi_cfg.get("enabled", False):
+        print("[runner] BUG_INVESTIGATE: disabled in config; skipping to EXPERIMENT", file=sys.stderr)
+        state["phase"] = "EXPERIMENT"
+        save_state(cfg, state)
+        return
+
+    epoch = epoch_num()
+    epoch_dir = PROJECT_ROOT / "derivations" / "reports" / f"epoch_{epoch:03d}"
+    epoch_dir.mkdir(parents=True, exist_ok=True)
+
+    processed = set(state.get("bug_seeds_processed", []))
+    seeds = bi_cfg.get("seeds", []) or []
+    default_min_occ = int(bi_cfg.get("min_occurrences", 2))
+    max_proposals = int(bi_cfg.get("max_proposals_per_epoch", 3))
+
+    logs = _load_epoch_logs(epoch)
+    print(f"[runner] BUG_INVESTIGATE: epoch={epoch:03d} seeds={len(seeds)} log_records={len(logs)}",
+          file=sys.stderr)
+
+    written = 0
+    for seed in seeds:
+        sid = seed.get("id")
+        if not sid or sid in processed:
+            continue
+        if written >= max_proposals:
+            print(f"[runner] BUG_INVESTIGATE: hit max_proposals_per_epoch={max_proposals}; stopping",
+                  file=sys.stderr)
+            break
+        min_occ = int(seed.get("min_occurrences", default_min_occ))
+        matches = _match_seed_evidence(seed, logs)
+        if len(matches) < min_occ:
+            print(f"[runner] BUG_INVESTIGATE: seed={sid} evidence={len(matches)} < {min_occ}; skipping",
+                  file=sys.stderr)
+            processed.add(sid)
+            continue
+        repro = seed.get("reproduction")
+        kind = "BUGFIX" if repro else "INVESTIGATE"
+        path = _write_bugfix_proposal(epoch_dir, seed, matches, kind)
+        written += 1
+        processed.add(sid)
+        print(f"[runner] BUG_INVESTIGATE: seed={sid} kind={kind} evidence={len(matches)} -> {path.name}",
+              file=sys.stderr)
+
+    state["bug_seeds_processed"] = sorted(processed)
+    state["phase"] = "EXPERIMENT"
     save_state(cfg, state)
 
 
@@ -419,8 +779,12 @@ def phase_implement(cfg: dict, state: dict) -> None:
     revert_on_regress = bool(runner_cfg.get("auto_promote", {}).get("revert_on_holdout_regression", True))
 
     epoch_dir = PROJECT_ROOT / "derivations" / "reports" / f"epoch_{epoch_num():03d}"
-    proposals = sorted(p for p in epoch_dir.glob("proposal_*.md") if "_closure" not in p.name)
-    proposals = proposals[:max_proposals]
+    all_proposals = sorted(p for p in epoch_dir.glob("proposal_*.md") if "_closure" not in p.name)
+    # BUGFIX proposals bypass the evidence floor; prioritize them ahead of
+    # ordinary validator/prompt proposals so they aren't squeezed out by the
+    # per-epoch cap.
+    all_proposals.sort(key=lambda p: (0 if is_bugfix_proposal(p) else 1, p.name))
+    proposals = all_proposals[:max_proposals]
     handled = set(state.get("proposals_handled", []))
 
     for prop in proposals:
@@ -470,8 +834,8 @@ def phase_implement(cfg: dict, state: dict) -> None:
             save_state(cfg, state)
             continue
 
-        if kind not in ("NEW_VALIDATOR", "STRENGTHEN_VALIDATOR", "WEAKEN_VALIDATOR"):
-            print(f"  -> skip kind={kind!r} (not a validator or prompt change)", file=sys.stderr)
+        if kind not in ("NEW_VALIDATOR", "STRENGTHEN_VALIDATOR", "WEAKEN_VALIDATOR", "BUGFIX"):
+            print(f"  -> skip kind={kind!r} (not a validator, prompt, or bugfix change)", file=sys.stderr)
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
@@ -537,6 +901,23 @@ def phase_implement(cfg: dict, state: dict) -> None:
         if lift >= min_lift and (not regressed or not revert_on_regress):
             print(f"  -> PROMOTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
             # validator_version was bumped by implement.sh after LLM success; nothing more to do
+            # BUGFIX promotion: auto-generate regression corpus entries from
+            # the reproduction case so the fix cannot silently regress.
+            if kind == "BUGFIX":
+                repro = reproduction_from_proposal(prop)
+                seed_id = seed_id_from_proposal(prop) or "unknown"
+                if repro:
+                    try:
+                        summary = write_regression_tests(rule, repro, seed_id)
+                        print(f"  -> REGRESSION TESTS: "
+                              f"positive={summary['positive_written']} "
+                              f"negative={summary['negative_written']} "
+                              f"-> {summary['positive_path']}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"  -> WARN: regression test generation failed: {e}", file=sys.stderr)
+                else:
+                    print(f"  -> WARN: BUGFIX proposal has no parseable reproduction case; "
+                          f"no auto regression tests written", file=sys.stderr)
         else:
             print(f"  -> REVERTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
             # Revert validator code AND state.json to exact pre-implementation state.
@@ -638,6 +1019,8 @@ def main() -> int:
                 phase_generate(cfg, state, Path(args.queue))
             elif phase == "ANALYZE":
                 phase_analyze(cfg, state)
+            elif phase == "BUG_INVESTIGATE":
+                phase_bug_investigate(cfg, state)
             elif phase == "EXPERIMENT":
                 phase_experiment(cfg, state, Path(args.queue))
             elif phase == "IMPLEMENT":

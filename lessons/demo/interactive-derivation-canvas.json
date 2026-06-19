@@ -1,7 +1,7 @@
 {
   "lesson_id": "DEMO-CANVAS",
   "title": "Interactive Derivation Canvas Demo",
-  "description": "A short practice ladder of handwritten derivations that ramps from algebra to physics and keeps a running score.",
+  "description": "A six-round practice demo that ramps from algebra to physics while keeping score.",
   "prerequisites": [],
   "demo_mode": {
     "enabled": true,
@@ -12,17 +12,17 @@
     {
       "id": "DEMO-INTRO",
       "type": "read",
-      "title": "Practice ladder",
-      "content_html": "<p>Four short rounds. Start with a one-line algebra warm-up, then reuse the same moves in progressively more physical equations.</p>"
+      "title": "Practice rounds",
+      "content_html": "<p>Six short canvas rounds. Each round adds one move.</p>"
     },
     {
-      "id": "DEMO-LINEAR",
+      "id": "DEMO-SUBTRACT",
       "type": "canvas-derive",
-      "title": "Warm-up: isolate x",
+      "title": "One move",
       "demo_step": 1,
       "demo_difficulty": "Warm-up",
-      "demo_points": 50,
-      "prompt": "Start with one clean algebra move: isolate x.",
+      "demo_points": 40,
+      "prompt": "Subtract 3 from both sides.",
       "starting_equation": "x + 3 = 10",
       "target_equation": "x = 7",
       "target_forms": [
@@ -37,18 +37,71 @@
       ],
       "vars": ["x"],
       "hints": [
-        "Undo the +3 by subtracting 3 from both sides.",
+        "Undo the +3 by subtracting 3.",
         "10 - 3 = 7."
+      ]
+    },
+    {
+      "id": "DEMO-TWO-STEP",
+      "type": "canvas-derive",
+      "title": "Two moves",
+      "demo_step": 2,
+      "demo_difficulty": "Algebra",
+      "demo_points": 60,
+      "prompt": "Clear the constant, then divide.",
+      "starting_equation": "2x + 6 = 20",
+      "target_equation": "x = 7",
+      "target_forms": [
+        "x = 7",
+        "7 = x"
+      ],
+      "valid_forms": [
+        "2x + 6 = 20",
+        "2x = 20 - 6",
+        "2x = 14",
+        "x = 7",
+        "7 = x"
+      ],
+      "vars": ["x"],
+      "hints": [
+        "Subtract 6 first.",
+        "Then divide both sides by 2."
+      ]
+    },
+    {
+      "id": "DEMO-SQUARE-ROOT",
+      "type": "canvas-derive",
+      "title": "Square root",
+      "demo_step": 3,
+      "demo_difficulty": "Algebra",
+      "demo_points": 75,
+      "prompt": "Take the positive square root.",
+      "starting_equation": "v^2 = 49",
+      "target_equation": "v = 7",
+      "target_forms": [
+        "v = 7",
+        "7 = v"
+      ],
+      "valid_forms": [
+        "v^2 = 49",
+        "v = \\sqrt{49}",
+        "v = 7",
+        "7 = v"
+      ],
+      "vars": ["v"],
+      "hints": [
+        "A speed uses the positive root.",
+        "sqrt(49) = 7."
       ]
     },
     {
       "id": "DEMO-KINETIC",
       "type": "canvas-derive",
-      "title": "Add a square root",
-      "demo_step": 2,
-      "demo_difficulty": "Algebra",
-      "demo_points": 75,
-      "prompt": "Same idea, more symbols: solve the kinetic-energy equation for v.",
+      "title": "Speed from energy",
+      "demo_step": 4,
+      "demo_difficulty": "Symbols",
+      "demo_points": 90,
+      "prompt": "Use the same square-root move with symbols.",
       "starting_equation": "E = \\frac{1}{2} m v^2",
       "target_equation": "v = \\sqrt{\\frac{2E}{m}}",
       "target_forms": [
@@ -66,18 +119,18 @@
       "vars": ["E", "m", "v"],
       "hints": [
         "Multiply both sides by 2.",
-        "Divide by m so v^2 is alone.",
-        "Use the positive square root for speed."
+        "Divide by m.",
+        "Take the positive square root."
       ]
     },
     {
       "id": "DEMO-SPRING",
       "type": "canvas-derive",
       "title": "Spring launch speed",
-      "demo_step": 3,
+      "demo_step": 5,
       "demo_difficulty": "Energy",
-      "demo_points": 100,
-      "prompt": "Reuse the square-root move to derive launch speed from spring energy.",
+      "demo_points": 115,
+      "prompt": "Apply the same pattern to spring energy.",
       "starting_equation": "\\frac{1}{2} k A^2 = \\frac{1}{2} m v^2",
       "target_equation": "v = A\\sqrt{\\frac{k}{m}}",
       "target_forms": [
@@ -96,19 +149,19 @@
       ],
       "vars": ["k", "A", "m", "v"],
       "hints": [
-        "Cancel the 1/2 on both sides first.",
-        "Divide by m to isolate v^2.",
-        "Take the positive square root. Since A is an amplitude, use A > 0."
+        "Cancel the 1/2 first.",
+        "Divide by m.",
+        "Take the positive square root."
       ]
     },
     {
       "id": "DEMO-LOOP",
       "type": "canvas-derive",
-      "title": "Final challenge: loop threshold",
-      "demo_step": 4,
+      "title": "Loop threshold",
+      "demo_step": 6,
       "demo_difficulty": "Challenge",
       "demo_points": 150,
-      "prompt": "Put the earlier moves together. Derive the minimum release height for a loop-the-loop.",
+      "prompt": "Final round: use force for v^2, then energy for h.",
       "starting_equation": "mg = \\frac{m v^2}{R}",
       "target_equation": "h = \\frac{5R}{2}",
       "target_forms": [
@@ -132,8 +185,8 @@
       ],
       "vars": ["m", "g", "v", "R", "h"],
       "hints": [
-        "Use the force equation first to get v^2 = gR.",
-        "At the top, the ball is at height 2R, so its potential energy is mg(2R).",
+        "Cancel m in the force equation.",
+        "Multiply by R to get v^2 = gR.",
         "Use 1/2 m v^2 + mg(2R) = mgh.",
         "Substitute v^2 = gR, then cancel m and g."
       ]

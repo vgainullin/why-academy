@@ -8,16 +8,21 @@ code instead of asking the model to emit final graph edges directly.
 
 ## Evidence Inputs
 
+> **Code reference:** The tactic inner mode implementation lives on git tag
+> `tactic-experiment-20260615` (commit `1a96659`). The worktree paths below were
+> valid during the experiment but have since been removed; batch artifacts
+> remain under `derivations/_evolutions/batches/`.
+
 - Control batch: `derivations/_evolutions/batches/real_workload_20260614_001`
 - Control introspection: `derivations/_evolutions/batches/real_workload_20260614_001/introspective_log_review_target_008_output.json`
-- Treatment worktree: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment`
-- Treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_002`
-- Treatment JSONL: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/logs/epoch_001/batch_tactic_real_pilot_20260615_002.jsonl`
-- Expanded treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_003`
-- Corrected treatment pilot batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/tactic_real_pilot_20260615_004`
+- Treatment code: `git checkout tactic-experiment-20260615` (see `derivations/tactic_inner.py`, `derivations/prompts/generate_derivation_tactic.md`, `derivations/rule_contracts.py`)
+- Treatment pilot batch: `derivations/_evolutions/batches/tactic_real_pilot_20260615_002`
+- Treatment JSONL: `derivations/logs/epoch_001/batch_tactic_real_pilot_20260615_002.jsonl`
+- Expanded treatment pilot batch: `derivations/_evolutions/batches/tactic_real_pilot_20260615_003`
+- Corrected treatment pilot batch: `derivations/_evolutions/batches/tactic_real_pilot_20260615_004`
 - Fresh JSON control batch: `derivations/_evolutions/batches/tactic_control_json_pilot_20260615_001`
 - Larger JSON control batch: `derivations/_evolutions/batches/ab_control_json_queue_20260615_001`
-- Larger tactic treatment batch: `derivations/_evolutions/worktrees/tactic-inner-mode-experiment/derivations/_evolutions/batches/ab_tactic_queue_20260615_001`
+- Larger tactic treatment batch: `derivations/_evolutions/batches/ab_tactic_queue_20260615_001`
 
 ## Treatment
 

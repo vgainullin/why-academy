@@ -50,7 +50,7 @@ branch_for() { echo "experiment/$1"; }
 
 # ── launch ───────────────────────────────────────────────────────────────
 cmd_launch() {
-	local base="" queue="" reset=0 name_override="" dry=0
+	local base="" queue="" reset=0 name_override="" dry=0 workflow=""
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		--base)
@@ -72,6 +72,10 @@ cmd_launch() {
 		--dry-run)
 			dry=1
 			shift
+			;;
+		--workflow)
+			workflow="$2"
+			shift 2
 			;;
 		*) die "launch: unknown arg: $1" ;;
 		esac
@@ -115,14 +119,14 @@ cmd_launch() {
 		git -C "$wt" commit -m "experiment $name: carry base working-tree changes" >/dev/null
 	fi
 
-	# Hand off to the real epoch runner inside the worktree. DERIVATION_PYTHON
-	# points at the shared venv so the worktree doesn't need its own install.
+	# Default workflow: the autonomous epoch runner.
+	local wf="${workflow:-scripts/autonomous_epoch.sh}"
 	local epoch_args=()
 	[[ $reset -eq 1 ]] && epoch_args+=(--reset)
 	[[ -n "$queue" ]] && epoch_args+=(--queue "$queue")
 
-	echo "[worktree] launching epoch in $wt"
-	echo "[worktree]   base=$base  branch=$branch  config=$cfg"
+	echo "[worktree] launching workflow in $wt"
+	echo "[worktree]   base=$base  branch=$branch  config=$cfg  workflow=$wf"
 	echo "[worktree]   args: ${epoch_args[*]:-(resume)}"
 
 	if [[ $dry -eq 1 ]]; then
@@ -133,10 +137,10 @@ cmd_launch() {
 		return 0
 	fi
 
-	# Run the epoch. We don't `exec` so a failure still leaves the worktree in
+	# Run the workflow. We don't `exec` so a failure still leaves the worktree in
 	# place for inspection; the user can resume by re-running launch --name.
 	local rc=0
-	(cd "$wt" && DERIVATION_PYTHON="$VENV_PY" bash scripts/autonomous_epoch.sh "${epoch_args[@]}") || rc=$?
+	(cd "$wt" && DERIVATION_PYTHON="$VENV_PY" bash "$wf" "${epoch_args[@]}") || rc=$?
 
 	echo "[worktree] epoch exited rc=$rc"
 	echo "[worktree] worktree: $wt"
@@ -264,7 +268,7 @@ cmd_clean() {
 
 # ── compare ──────────────────────────────────────────────────────────────
 cmd_compare() {
-	local control_name="" treatment_name="" exp_id="" out_dir=""
+	local control_name="" treatment_name="" exp_id="" out_dir="" extractor="auto" ext_module=""
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		--experiment-id)
@@ -283,6 +287,14 @@ cmd_compare() {
 			treatment_name="$2"
 			shift 2
 			;;
+		--extractor)
+			extractor="$2"
+			shift 2
+			;;
+		--extractor-module)
+			ext_module="$2"
+			shift 2
+			;;
 		*) [[ -z "$control_name" ]] && control_name="$1" && shift ||
 			[[ -z "$treatment_name" ]] && treatment_name="$1" && shift ||
 			die "compare: unexpected arg: $1" ;;
@@ -297,12 +309,13 @@ cmd_compare() {
 	[[ -d "$control_wt" ]] || die "control worktree not found: $control_wt"
 	[[ -d "$treatment_wt" ]] || die "treatment worktree not found: $treatment_wt"
 
-	local args=(--control "$control_wt" --treatment "$treatment_wt")
+	local args=(--control "$control_wt" --treatment "$treatment_wt" --extractor "$extractor")
 	[[ -n "$exp_id" ]] && args+=(--experiment-id "$exp_id")
 	[[ -n "$out_dir" ]] && args+=(--out-dir "$out_dir")
+	[[ -n "$ext_module" ]] && args+=(--extractor-module "$ext_module")
 
-	echo "[worktree] comparing bugfix results: $control_name vs $treatment_name"
-	DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" "$ROOT/derivations/ab_bugfix_compare.py" "${args[@]}"
+	echo "[worktree] comparing: $control_name vs $treatment_name (extractor=$extractor)"
+	DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" "$ROOT/derivations/worktree_compare.py" "${args[@]}"
 }
 
 # ── main ─────────────────────────────────────────────────────────────────

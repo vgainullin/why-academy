@@ -354,6 +354,37 @@ def _load_epoch_logs(epoch: int) -> list[dict]:
     return out
 
 
+def _load_all_epoch_logs() -> list[dict]:
+    """Load jsonl records from every epoch, not just the current one.
+
+    Each record is annotated with ``_epoch`` (int) so callers can distinguish
+    which epoch produced it. Records are returned in epoch order, then file
+    order within each epoch.
+    """
+    logs_root = PROJECT_ROOT / "derivations" / "logs"
+    if not logs_root.exists():
+        return []
+    out: list[dict] = []
+    for epoch_dir in sorted(logs_root.glob("epoch_*")):
+        m = re.match(r"epoch_(\d+)", epoch_dir.name)
+        if not m:
+            continue
+        epoch = int(m.group(1))
+        for jsonl in sorted(epoch_dir.glob("*.jsonl")):
+            with jsonl.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        rec["_epoch"] = epoch
+                        out.append(rec)
+                    except Exception:
+                        continue
+    return out
+
+
 def _match_seed_evidence(seed: dict, logs: list[dict]) -> list[dict]:
     """Find log evidence matching a seed hypothesis.
 
@@ -367,12 +398,13 @@ def _match_seed_evidence(seed: dict, logs: list[dict]) -> list[dict]:
       Matched when the attempt has a `judge_eval` whose text/verdicts mention
       the signal substring AND at least one edge uses an affected rule.
 
-    Returns one evidence entry per (record, signal, rule) match.
+    Returns one evidence entry per (epoch, record, signal, rule) match.
     """
     signals = seed.get("evidence_signals") or []
     rules = set(seed.get("affected_rules") or [])
     matches: list[dict] = []
     for idx, rec in enumerate(logs):
+        epoch = rec.get("_epoch")
         edges = rec.get("edge_results") or []
         rec_rules = {e.get("rule") for e in edges if e.get("rule")}
         for sig in signals:
@@ -383,6 +415,7 @@ def _match_seed_evidence(seed: dict, logs: list[dict]) -> list[dict]:
                             and _validator_exists(rule):
                         matches.append({
                             "record_index": idx,
+                            "epoch": epoch,
                             "signal": sig,
                             "rule": rule,
                             "detail": e.get("reason", ""),
@@ -401,17 +434,18 @@ def _match_seed_evidence(seed: dict, logs: list[dict]) -> list[dict]:
                     continue
                 matches.append({
                     "record_index": idx,
+                    "epoch": epoch,
                     "signal": sig,
                     "rule": hit_rules[0],
                     "detail": sig,
                     "target": rec.get("target", ""),
                     "batch_id": rec.get("batch_id", ""),
                 })
-    # Dedup by (record_index, signal, rule).
+    # Dedup by (epoch, record_index, signal, rule).
     seen = set()
     deduped: list[dict] = []
     for m in matches:
-        key = (m["record_index"], m["signal"], m["rule"])
+        key = (m.get("epoch"), m["record_index"], m["signal"], m["rule"])
         if key in seen:
             continue
         seen.add(key)
@@ -580,22 +614,35 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     epoch_dir.mkdir(parents=True, exist_ok=True)
 
     processed = set(state.get("bug_seeds_processed", []))
+    # Track the evidence count seen so far for each seed so we can detect
+    # when newly accumulated cross-epoch evidence pushes it over the threshold.
+    prior_evidence = state.get("bug_seed_evidence", {})
     seeds = bi_cfg.get("seeds", []) or []
     default_min_occ = int(bi_cfg.get("min_occurrences", 2))
     max_proposals = int(bi_cfg.get("max_proposals_per_epoch", 3))
 
-    logs = _load_epoch_logs(epoch)
-    print(f"[runner] BUG_INVESTIGATE: epoch={epoch:03d} seeds={len(seeds)} log_records={len(logs)}",
+    logs = _load_all_epoch_logs()
+    current_epoch = epoch_num()
+    current_records = sum(1 for r in logs if r.get("_epoch") == current_epoch)
+    print(f"[runner] BUG_INVESTIGATE: epoch={epoch:03d} seeds={len(seeds)} "
+          f"total_log_records={len(logs)} (current_epoch={current_records})",
           file=sys.stderr)
     if not logs:
-        print(f"[runner] BUG_INVESTIGATE: WARNING — no jsonl logs found for epoch_{epoch:03d}; "
+        print(f"[runner] BUG_INVESTIGATE: WARNING — no jsonl logs found across any epoch; "
               f"no seeds can be matched. Check that backfill ran successfully.",
               file=sys.stderr)
 
     written = 0
+    new_evidence: dict[str, int] = {}
     for seed in seeds:
         sid = seed.get("id")
-        if not sid or sid in processed:
+        if not sid:
+            continue
+        # Seeds that already produced a proposal are marked processed and skipped.
+        # A seed that was below threshold last epoch is NOT in processed — it
+        # gets re-evaluated against all accumulated logs.
+        if sid in processed:
+            new_evidence[sid] = prior_evidence.get(sid, 0)
             continue
         if written >= max_proposals:
             print(f"[runner] BUG_INVESTIGATE: hit max_proposals_per_epoch={max_proposals}; stopping",
@@ -603,20 +650,24 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
             break
         min_occ = int(seed.get("min_occurrences", default_min_occ))
         matches = _match_seed_evidence(seed, logs)
-        if len(matches) < min_occ:
-            print(f"[runner] BUG_INVESTIGATE: seed={sid} evidence={len(matches)} < {min_occ}; skipping",
+        total_evidence = len(matches)
+        new_evidence[sid] = total_evidence
+        if total_evidence < min_occ:
+            print(f"[runner] BUG_INVESTIGATE: seed={sid} evidence={total_evidence} < {min_occ} "
+                  f"(accumulated across all epochs); skipping",
                   file=sys.stderr)
-            processed.add(sid)
             continue
         repro = seed.get("reproduction")
         kind = "BUGFIX" if repro else "INVESTIGATE"
         path = _write_bugfix_proposal(epoch_dir, seed, matches, kind)
         written += 1
         processed.add(sid)
-        print(f"[runner] BUG_INVESTIGATE: seed={sid} kind={kind} evidence={len(matches)} -> {path.name}",
+        print(f"[runner] BUG_INVESTIGATE: seed={sid} kind={kind} evidence={total_evidence} "
+              f"(cross-epoch) -> {path.name}",
               file=sys.stderr)
 
     state["bug_seeds_processed"] = sorted(processed)
+    state["bug_seed_evidence"] = new_evidence
     state["phase"] = "EXPERIMENT"
     save_state(cfg, state)
 

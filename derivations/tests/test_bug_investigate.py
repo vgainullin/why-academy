@@ -126,6 +126,74 @@ class MatchSeedEvidenceTests(unittest.TestCase):
             matches = ae._match_seed_evidence(seed, logs)
         self.assertEqual(len(matches), 1)
 
+    def test_cross_epoch_same_record_index_not_deduped(self) -> None:
+        """Records from different epochs with the same index are NOT deduped."""
+        _make_validator(self.tmp, "divide_both_sides")
+        # Two records, same record_index but different epochs.
+        logs = [
+            {"_epoch": 1, **self._rec([{"rule": "divide_both_sides", "status": "FAIL"}])},
+            {"_epoch": 2, **self._rec([{"rule": "divide_both_sides", "status": "FAIL"}])},
+        ]
+        seed = {"evidence_signals": ["VALIDATOR_REJECTED"],
+                "affected_rules": ["divide_both_sides"]}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            matches = ae._match_seed_evidence(seed, logs)
+        self.assertEqual(len(matches), 2)
+        epochs = {m["epoch"] for m in matches}
+        self.assertEqual(epochs, {1, 2})
+
+    def test_match_records_include_epoch(self) -> None:
+        _make_validator(self.tmp, "divide_both_sides")
+        logs = [{"_epoch": 3, **self._rec([{"rule": "divide_both_sides", "status": "FAIL"}])}]
+        seed = {"evidence_signals": ["VALIDATOR_REJECTED"],
+                "affected_rules": ["divide_both_sides"]}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            matches = ae._match_seed_evidence(seed, logs)
+        self.assertEqual(matches[0]["epoch"], 3)
+
+
+# ── Cross-epoch log loading ──────────────────────────────────────────────
+class LoadAllEpochLogsTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_log(self, epoch: int, name: str, records: list[dict]) -> None:
+        logs_dir = self.tmp / "derivations" / "logs" / f"epoch_{epoch:03d}"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with (logs_dir / name).open("w") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+    def test_loads_all_epochs(self) -> None:
+        self._write_log(1, "a.jsonl", [{"x": 1}])
+        self._write_log(2, "b.jsonl", [{"x": 2}, {"x": 3}])
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            logs = ae._load_all_epoch_logs()
+        self.assertEqual(len(logs), 3)
+        self.assertEqual([r["_epoch"] for r in logs], [1, 2, 2])
+
+    def test_empty_when_no_logs_dir(self) -> None:
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._load_all_epoch_logs(), [])
+
+    def test_skips_non_epoch_dirs(self) -> None:
+        (self.tmp / "derivations" / "logs" / "smoke").mkdir(parents=True)
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._load_all_epoch_logs(), [])
+
+    def test_skips_bad_lines(self) -> None:
+        self._write_log(1, "a.jsonl", [{"x": 1}])
+        # Append a bad line.
+        with (self.tmp / "derivations" / "logs" / "epoch_001" / "a.jsonl").open("a") as f:
+            f.write("not json\n")
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            logs = ae._load_all_epoch_logs()
+        self.assertEqual(len(logs), 1)
+
 
 # ── Proposal writing ─────────────────────────────────────────────────────
 class WriteBugfixProposalTests(unittest.TestCase):
@@ -344,7 +412,11 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         state = {"phase": "BUG_INVESTIGATE"}
         self._run(cfg, state)
         self.assertEqual(state["phase"], "EXPERIMENT")
-        self.assertIn("s1", state["bug_seeds_processed"])
+        # Seed below threshold is NOT in processed (it should be re-evaluated
+        # next epoch against accumulated logs).
+        self.assertNotIn("s1", state["bug_seeds_processed"])
+        # Evidence count is recorded for tracking.
+        self.assertEqual(state["bug_seed_evidence"]["s1"], 1)
         self.assertEqual(list(_epoch_dir(self.tmp).glob("proposal_*.md")), [])
 
     def test_writes_bugfix_proposal_when_evidence_sufficient(self) -> None:
@@ -431,8 +503,74 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         props = list(_epoch_dir(self.tmp).glob("proposal_*.md"))
         self.assertEqual(len(props), 1)
 
+    def test_cross_epoch_accumulation_fires_on_second_epoch(self) -> None:
+        """Seed below threshold in epoch 1 fires in epoch 2 when evidence
+        from both epochs is accumulated."""
+        _make_validator(self.tmp, "divide_both_sides")
+        _write_log(self.tmp, 1, "r1.jsonl", [
+            {"target": "t1", "batch_id": "b1",
+             "edge_results": [{"rule": "divide_both_sides", "status": "FAIL"}]}
+        ])
+        _write_log(self.tmp, 2, "r2.jsonl", [
+            {"target": "t2", "batch_id": "b2",
+             "edge_results": [{"rule": "divide_both_sides", "status": "FAIL"}]}
+        ])
+        cfg = {"runner": {"bug_investigate": {
+            "enabled": True, "min_occurrences": 2, "max_proposals_per_epoch": 3,
+            "seeds": [{"id": "s1", "hypothesis": "h", "affected_rules": ["divide_both_sides"],
+                       "evidence_signals": ["VALIDATOR_REJECTED"],
+                       "reproduction": {"from_srepr": "a", "to_srepr": "b"}}]
+        }}}
+        state = {"phase": "BUG_INVESTIGATE"}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "save_state", side_effect=lambda c, s: self.state_path.write_text(json.dumps(s))), \
+             patch.object(ae, "epoch_num", return_value=2):
+            ae.phase_bug_investigate(cfg, state)
+        self.assertEqual(state["phase"], "EXPERIMENT")
+        props = list((self.tmp / "derivations" / "reports" / "epoch_002").glob("proposal_*.md"))
+        self.assertEqual(len(props), 1)
+        self.assertIn("**Kind**: BUGFIX", props[0].read_text())
+        self.assertIn("s1", state["bug_seeds_processed"])
+        self.assertEqual(state["bug_seed_evidence"]["s1"], 2)
 
-# ── phase_implement BUGFIX routing ───────────────────────────────────────
+    def test_cross_epoch_seed_below_threshold_not_in_processed(self) -> None:
+        """A seed still below threshold after scanning all epochs should
+        NOT be in bug_seeds_processed (re-evaluated next epoch)."""
+        _make_validator(self.tmp, "divide_both_sides")
+        _write_log(self.tmp, 1, "r.jsonl", [
+            {"target": "t", "batch_id": "b",
+             "edge_results": [{"rule": "divide_both_sides", "status": "FAIL"}]}
+        ])
+        cfg = {"runner": {"bug_investigate": {
+            "enabled": True, "min_occurrences": 5,
+            "seeds": [{"id": "s1", "hypothesis": "h", "affected_rules": ["divide_both_sides"],
+                       "evidence_signals": ["VALIDATOR_REJECTED"],
+                       "reproduction": {"from_srepr": "a", "to_srepr": "b"}}]
+        }}}
+        state = {"phase": "BUG_INVESTIGATE"}
+        self._run(cfg, state)
+        self.assertNotIn("s1", state["bug_seeds_processed"])
+        self.assertEqual(state["bug_seed_evidence"]["s1"], 1)
+
+    def test_processed_seed_preserves_evidence_count(self) -> None:
+        """A processed seed keeps its evidence count in state for tracking."""
+        _make_validator(self.tmp, "divide_both_sides")
+        _write_log(self.tmp, 1, "r.jsonl", [
+            {"target": "t", "batch_id": "b",
+             "edge_results": [{"rule": "divide_both_sides", "status": "FAIL"}]}
+            for _ in range(3)
+        ])
+        cfg = {"runner": {"bug_investigate": {
+            "enabled": True, "min_occurrences": 2,
+            "seeds": [{"id": "s1", "hypothesis": "h", "affected_rules": ["divide_both_sides"],
+                       "evidence_signals": ["VALIDATOR_REJECTED"],
+                       "reproduction": {"from_srepr": "a", "to_srepr": "b"}}]
+        }}}
+        state = {"phase": "BUG_INVESTIGATE", "bug_seeds_processed": ["s1"],
+                 "bug_seed_evidence": {"s1": 2}}
+        self._run(cfg, state)
+        self.assertEqual(state["bug_seed_evidence"]["s1"], 2)
 class PhaseImplementBugfixTests(unittest.TestCase):
 
     def setUp(self) -> None:

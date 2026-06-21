@@ -262,8 +262,51 @@ cmd_clean() {
 	echo "[worktree] cleaned $name"
 }
 
+# ── compare ──────────────────────────────────────────────────────────────
+cmd_compare() {
+	local control_name="" treatment_name="" exp_id="" out_dir=""
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--experiment-id)
+			exp_id="$2"
+			shift 2
+			;;
+		--out-dir)
+			out_dir="$2"
+			shift 2
+			;;
+		--control)
+			control_name="$2"
+			shift 2
+			;;
+		--treatment)
+			treatment_name="$2"
+			shift 2
+			;;
+		*) [[ -z "$control_name" ]] && control_name="$1" && shift ||
+			[[ -z "$treatment_name" ]] && treatment_name="$1" && shift ||
+			die "compare: unexpected arg: $1" ;;
+		esac
+	done
+	[[ -n "$control_name" ]] || die "compare: control name required"
+	[[ -n "$treatment_name" ]] || die "compare: treatment name required"
+	local control_wt
+	control_wt="$(worktree_path "$control_name")"
+	local treatment_wt
+	treatment_wt="$(worktree_path "$treatment_name")"
+	[[ -d "$control_wt" ]] || die "control worktree not found: $control_wt"
+	[[ -d "$treatment_wt" ]] || die "treatment worktree not found: $treatment_wt"
+
+	local args=(--control "$control_wt" --treatment "$treatment_wt")
+	[[ -n "$exp_id" ]] && args+=(--experiment-id "$exp_id")
+	[[ -n "$out_dir" ]] && args+=(--out-dir "$out_dir")
+
+	echo "[worktree] comparing bugfix results: $control_name vs $treatment_name"
+	DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" "$ROOT/derivations/ab_bugfix_compare.py" "${args[@]}"
+}
+
 # ── main ─────────────────────────────────────────────────────────────────
-[[ $# -eq 0 ]] && die "usage: $0 {launch|list|merge|clean} ..."
+[[ $# -eq 0 ]] && die "usage: $0 {launch|list|merge|clean|compare} ..."
 sub="$1"
 shift
 case "$sub" in
@@ -271,5 +314,6 @@ launch) cmd_launch "$@" ;;
 list) cmd_list "$@" ;;
 merge) cmd_merge "$@" ;;
 clean) cmd_clean "$@" ;;
-*) die "unknown subcommand: $sub (expected launch|list|merge|clean)" ;;
+compare) cmd_compare "$@" ;;
+*) die "unknown subcommand: $sub (expected launch|list|merge|clean|compare)" ;;
 esac

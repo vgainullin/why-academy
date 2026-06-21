@@ -119,8 +119,8 @@ cmd_launch() {
 		git -C "$wt" commit -m "experiment $name: carry base working-tree changes" >/dev/null
 	fi
 
-	# Default workflow: the autonomous epoch runner.
-	local wf="${workflow:-scripts/autonomous_epoch.sh}"
+	# Default workflow: epoch (full autonomous epoch).
+	local wf="${workflow:-epoch}"
 	local epoch_args=()
 	[[ $reset -eq 1 ]] && epoch_args+=(--reset)
 	[[ -n "$queue" ]] && epoch_args+=(--queue "$queue")
@@ -130,17 +130,22 @@ cmd_launch() {
 	echo "[worktree]   args: ${epoch_args[*]:-(resume)}"
 
 	if [[ $dry -eq 1 ]]; then
-		echo "[worktree] --dry-run: worktree created, skipping epoch"
+		echo "[worktree] --dry-run: worktree created, skipping workflow"
 		echo "[worktree] worktree: $wt"
 		echo "[worktree] branch:   $branch"
-		echo "[worktree] resume:   scripts/worktree_epoch.sh launch --name $name"
+		echo "[worktree] resume:   scripts/worktree_epoch.sh launch --name $name --workflow $wf"
 		return 0
 	fi
 
-	# Run the workflow. We don't `exec` so a failure still leaves the worktree in
-	# place for inspection; the user can resume by re-running launch --name.
+	# Resolve the workflow: if it's a known registry name (epoch, bugfix, etc.),
+	# run via workflow_registry.py. If it's a path to a script, run that directly.
 	local rc=0
-	(cd "$wt" && DERIVATION_PYTHON="$VENV_PY" bash "$wf" "${epoch_args[@]}") || rc=$?
+	if [[ -f "$wf" ]]; then
+		(cd "$wt" && DERIVATION_PYTHON="$VENV_PY" bash "$wf" "${epoch_args[@]}") || rc=$?
+	else
+		(cd "$wt" && DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" \
+			"$ROOT/derivations/workflow_registry.py" run "$wf" "${epoch_args[@]}") || rc=$?
+	fi
 
 	echo "[worktree] epoch exited rc=$rc"
 	echo "[worktree] worktree: $wt"
@@ -318,8 +323,13 @@ cmd_compare() {
 	DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" "$ROOT/derivations/worktree_compare.py" "${args[@]}"
 }
 
+# ── workflows ────────────────────────────────────────────────────────────
+cmd_workflows() {
+	DERIVATION_PYTHON="$VENV_PY" "$VENV_PY" "$ROOT/derivations/workflow_registry.py" list
+}
+
 # ── main ─────────────────────────────────────────────────────────────────
-[[ $# -eq 0 ]] && die "usage: $0 {launch|list|merge|clean|compare} ..."
+[[ $# -eq 0 ]] && die "usage: $0 {launch|list|merge|clean|compare|workflows} ..."
 sub="$1"
 shift
 case "$sub" in
@@ -328,5 +338,6 @@ list) cmd_list "$@" ;;
 merge) cmd_merge "$@" ;;
 clean) cmd_clean "$@" ;;
 compare) cmd_compare "$@" ;;
-*) die "unknown subcommand: $sub (expected launch|list|merge|clean|compare)" ;;
+workflows) cmd_workflows "$@" ;;
+*) die "unknown subcommand: $sub (expected launch|list|merge|clean|compare|workflows)" ;;
 esac

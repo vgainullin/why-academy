@@ -610,5 +610,104 @@ class ClosureBugfixTests(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+# ── Log verification (backfill bridge) ───────────────────────────────────
+
+
+class EpochLogVerificationTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_logs(self, epoch: int, records: list[dict]) -> None:
+        logs_dir = self.tmp / "derivations" / "logs" / f"epoch_{epoch:03d}"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with (logs_dir / "batch_test.jsonl").open("w") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+    def test_count_returns_zero_when_no_logs_dir(self) -> None:
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._epoch_log_count(1), 0)
+
+    def test_count_returns_zero_when_empty_dir(self) -> None:
+        (self.tmp / "derivations" / "logs" / "epoch_001").mkdir(parents=True)
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._epoch_log_count(1), 0)
+
+    def test_count_returns_record_count(self) -> None:
+        self._write_logs(1, [{"a": 1}, {"b": 2}, {"c": 3}])
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._epoch_log_count(1), 3)
+
+    def test_count_skips_blank_lines(self) -> None:
+        logs_dir = self.tmp / "derivations" / "logs" / "epoch_001"
+        logs_dir.mkdir(parents=True)
+        with (logs_dir / "batch.jsonl").open("w") as f:
+            f.write('{"a":1}\n\n  \n{"b":2}\n')
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertEqual(ae._epoch_log_count(1), 2)
+
+    def test_verify_returns_false_when_no_logs(self) -> None:
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertFalse(ae._verify_epoch_logs(1, "TEST"))
+
+    def test_verify_returns_true_when_logs_exist(self) -> None:
+        self._write_logs(1, [{"a": 1}])
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            self.assertTrue(ae._verify_epoch_logs(1, "TEST"))
+
+
+class PhaseGenerateLogGuardTests(unittest.TestCase):
+    """Verify that phase_generate pauses when backfill produces no jsonl."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.state_path = self.tmp / "derivations" / "_epoch_state.json"
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_json = self.tmp / "derivations" / "state.json"
+        self.state_json.write_text(json.dumps({
+            "epoch": 1, "prompt_version": "v1", "validator_version": "v2",
+            "config_version": "v5"
+        }))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run_generate(self, *, has_logs: bool) -> dict:
+        state = {"phase": "GENERATE", "batch_id": "test_batch"}
+        if has_logs:
+            logs_dir = self.tmp / "derivations" / "logs" / "epoch_001"
+            logs_dir.mkdir(parents=True)
+            (logs_dir / "batch_test.jsonl").write_text('{"a":1}\n')
+
+        cfg = {"runner": {"state_file": "derivations/_epoch_state.json"}}
+
+        def fake_save(c, s):
+            self.state_path.write_text(json.dumps(s))
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "run", return_value=mock_result), \
+             patch.object(ae, "epoch_num", return_value=1), \
+             patch.object(ae, "save_state", side_effect=fake_save), \
+             patch.object(ae, "_state_path", lambda c: self.state_path):
+            ae.phase_generate(cfg, state, Path("derivations/targets/cohort_v1.txt"))
+        return state
+
+    def test_pauses_when_no_logs_after_generate(self) -> None:
+        state = self._run_generate(has_logs=False)
+        self.assertEqual(state["phase"], "PAUSED_ERROR")
+        self.assertIn("backfill", state.get("error", "").lower())
+
+    def test_advances_when_logs_exist(self) -> None:
+        state = self._run_generate(has_logs=True)
+        self.assertEqual(state["phase"], "ANALYZE")
+
+
 if __name__ == "__main__":
     unittest.main()

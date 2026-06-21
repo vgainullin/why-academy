@@ -194,6 +194,11 @@ class PhaseGenerateExitCodeTests(unittest.TestCase):
         state = {"phase": "GENERATE"}
         mock_result = MagicMock(returncode=returncode)
 
+        # Create fake jsonl logs so the post-GENERATE log verification passes.
+        logs_dir = self.tmp / "derivations" / "logs" / "epoch_001"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        (logs_dir / "batch_test.jsonl").write_text('{"target": "fake"}\n')
+
         def fake_save_state(cfg, s):
             self.state_path.write_text(json.dumps(s))
 

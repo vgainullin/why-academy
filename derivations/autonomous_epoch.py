@@ -224,6 +224,38 @@ def clear_stale_proposals(epoch_dir: Path, handled: set[str]) -> int:
     return removed
 
 
+def _epoch_log_count(epoch: int) -> int:
+    """Count total jsonl records across all files for an epoch."""
+    logs_dir = PROJECT_ROOT / "derivations" / "logs" / f"epoch_{epoch:03d}"
+    if not logs_dir.exists():
+        return 0
+    total = 0
+    for jsonl in logs_dir.glob("*.jsonl"):
+        try:
+            with jsonl.open() as f:
+                total += sum(1 for line in f if line.strip())
+        except Exception:
+            continue
+    return total
+
+
+def _verify_epoch_logs(epoch: int, phase_name: str) -> bool:
+    """Verify that jsonl logs exist and are non-empty for an epoch.
+
+    Returns True if logs are present, False if missing/empty. Prints a clear
+    warning so silent backfill failures don't leave downstream phases running
+    on no data.
+    """
+    n = _epoch_log_count(epoch)
+    if n == 0:
+        print(f"[runner] {phase_name}: WARNING — 0 jsonl records for epoch_{epoch:03d}. "
+              f"Backfill may have failed. ANALYZE and BUG_INVESTIGATE will have no data.",
+              file=sys.stderr)
+        return False
+    print(f"[runner] {phase_name}: {n} jsonl records for epoch_{epoch:03d}", file=sys.stderr)
+    return True
+
+
 # ── PHASE: GENERATE ─────────────────────────────────────────────────────
 def phase_generate(cfg: dict, state: dict, queue_path: Path) -> None:
     """Run the inner-loop batch. Resumable via batch_id."""
@@ -253,6 +285,19 @@ def phase_generate(cfg: dict, state: dict, queue_path: Path) -> None:
         # Exit code 1: partial completion (some targets failed). That's OK;
         # the batch is resumable and the outer loop can analyze partial data.
         print(f"[runner] GENERATE returned {r.returncode} (partial completion; some targets failed)", file=sys.stderr)
+    # Verify that backfill produced jsonl data. If not, pause with an error
+    # rather than advancing to ANALYZE with empty logs.
+    if not _verify_epoch_logs(epoch_num(), "GENERATE"):
+        state["resume_phase"] = "GENERATE"
+        state["phase"] = "PAUSED_ERROR"
+        state["error"] = (
+            "backfill produced 0 jsonl records — the outer loop and bug "
+            "investigator would have no data to analyze. Check that the batch "
+            "workspace has checkpoint.json and target dirs with iter data."
+        )
+        state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        save_state(cfg, state)
+        return
     state["phase"] = "ANALYZE"
     save_state(cfg, state)
 
@@ -270,11 +315,16 @@ def phase_analyze(cfg: dict, state: dict) -> None:
         removed = clear_stale_proposals(epoch_dir, handled)
         if removed:
             print(f"[runner] ANALYZE: cleared {removed} stale proposal(s) from prior partial run", file=sys.stderr)
-        print(f"[runner] ANALYZE: running outer loop on epoch_{epoch_num():03d}", file=sys.stderr)
-        r = run([str(PROJECT_ROOT / "scripts" / "outer.sh"),
-                 f"epoch_{epoch_num():03d}"])
-        if r.returncode != 0:
-            print(f"[runner] ANALYZE failed rc={r.returncode}", file=sys.stderr)
+        # Verify logs exist before running the outer loop. If backfill failed
+        # silently, outer.sh would run against no data and produce no proposals.
+        if not _verify_epoch_logs(epoch_num(), "ANALYZE"):
+            print(f"[runner] ANALYZE: skipping outer loop (no jsonl data)", file=sys.stderr)
+        else:
+            print(f"[runner] ANALYZE: running outer loop on epoch_{epoch_num():03d}", file=sys.stderr)
+            r = run([str(PROJECT_ROOT / "scripts" / "outer.sh"),
+                     f"epoch_{epoch_num():03d}"])
+            if r.returncode != 0:
+                print(f"[runner] ANALYZE failed rc={r.returncode}", file=sys.stderr)
     state["phase"] = "BUG_INVESTIGATE"
     state["proposals_handled"] = state.get("proposals_handled", [])
     save_state(cfg, state)
@@ -537,6 +587,10 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     logs = _load_epoch_logs(epoch)
     print(f"[runner] BUG_INVESTIGATE: epoch={epoch:03d} seeds={len(seeds)} log_records={len(logs)}",
           file=sys.stderr)
+    if not logs:
+        print(f"[runner] BUG_INVESTIGATE: WARNING — no jsonl logs found for epoch_{epoch:03d}; "
+              f"no seeds can be matched. Check that backfill ran successfully.",
+              file=sys.stderr)
 
     written = 0
     for seed in seeds:

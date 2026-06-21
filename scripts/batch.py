@@ -412,6 +412,10 @@ def main() -> int:
             capture_output=True, text=True,
         )
         print(bf.stderr.strip(), file=sys.stderr)
+        if bf.returncode != 0:
+            print(f"[batch] WARNING: backfill failed (rc={bf.returncode}); "
+                  f"ANALYZE and BUG_INVESTIGATE will have no jsonl data for this batch",
+                  file=sys.stderr)
         print(f"[batch] next: scripts/coalesce_batch.sh derivations/_evolutions/batches/{batch_id}", file=sys.stderr)
     else:
         print(f"[batch] per-run logs: {batch_log_dir}", file=sys.stderr)

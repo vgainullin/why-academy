@@ -24,5 +24,7 @@ def validate(from_expr, to_expr, args):
     expected_rhs = from_expr.rhs + c
     if expr_equal_zero(to_expr.lhs - expected_lhs) and expr_equal_zero(to_expr.rhs - expected_rhs):
         return ("PASS", f"added {c} to both sides")
+    if expr_equal_zero(to_expr.lhs - expected_rhs) and expr_equal_zero(to_expr.rhs - expected_lhs):
+        return ("PASS", f"added {c} to both sides (swapped orientation)")
     return ("FAIL",
             f"adding {c} should give Eq({expected_lhs}, {expected_rhs}); got Eq({to_expr.lhs}, {to_expr.rhs})")

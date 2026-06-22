@@ -227,11 +227,20 @@ def main() -> int:
         print("[backfill] no batches dir", file=sys.stderr)
         return 0
     if len(sys.argv) > 1:
-        targets = [batches_dir / sys.argv[1]]
-    else:
-        targets = sorted(d for d in batches_dir.iterdir() if d.is_dir() and not d.name.startswith("test_"))
+        batch_id = sys.argv[1]
+        batch_dir = batches_dir / batch_id
+        if not batch_dir.exists():
+            print(f"[backfill] ERROR: batch dir not found: {batch_dir}", file=sys.stderr)
+            return 1
+        n = backfill_batch(batch_dir)
+        if n == 0:
+            print(f"[backfill] WARNING: 0 records emitted for {batch_id} "
+                  f"(checkpoint missing or no target dirs with data)", file=sys.stderr)
+            return 1
+        print(f"[backfill] total records: {n}", file=sys.stderr)
+        return 0
     total = 0
-    for bd in targets:
+    for bd in sorted(d for d in batches_dir.iterdir() if d.is_dir() and not d.name.startswith("test_")):
         total += backfill_batch(bd)
     print(f"[backfill] total records: {total}", file=sys.stderr)
     return 0

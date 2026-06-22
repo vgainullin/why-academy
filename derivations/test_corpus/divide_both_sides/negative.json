@@ -3,14 +3,18 @@
     "description": "wrong rhs: 3x=15 divided by 3 should give x=5 not x=6",
     "from_srepr": "Eq(3*x, 15)",
     "to_srepr": "Eq(x, 6)",
-    "args": {"divisor": 3},
+    "args": {
+      "divisor": 3
+    },
     "expected": "FAIL"
   },
   {
     "description": "wrong lhs: a*x=b divided by a should give x=b/a not x+1=b/a",
     "from_srepr": "Eq(a*x, b)",
     "to_srepr": "Eq(x + 1, b/a)",
-    "args": {"divisor": "a"},
+    "args": {
+      "divisor": "a"
+    },
     "expected": "FAIL"
   },
   {
@@ -24,7 +28,18 @@
     "description": "division by zero: divisor=0 is invalid",
     "from_srepr": "Eq(a*x, b)",
     "to_srepr": "Eq(x, 1)",
-    "args": {"divisor": 0},
+    "args": {
+      "divisor": 0
+    },
+    "expected": "FAIL"
+  },
+  {
+    "description": "[bugfix:orientation_false_rejection] negative regression case (must FAIL)",
+    "from_srepr": "Eq(3*x, 15)",
+    "to_srepr": "Eq(x, 6)",
+    "args": {
+      "divisor": 3
+    },
     "expected": "FAIL"
   }
 ]

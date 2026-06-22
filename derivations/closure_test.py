@@ -30,6 +30,11 @@ ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
+from autonomous_epoch import (  # noqa: E402
+    kind_from_proposal,
+    reproduction_from_proposal,
+    seed_id_from_proposal,
+)
 
 
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
@@ -39,6 +44,112 @@ def rule_from_proposal(path: Path) -> str | None:
     text = path.read_text()
     m = RULE_RE.search(text)
     return m.group(1) if m else None
+
+
+def _holdout_regression() -> str | None:
+    """Return the name of the first regressing legacy holdout problem, or None.
+
+    Legacy verifier-format holdout is the only set verify.py parses without
+    modification. Shared by the standard lift-based closure path and the
+    BUGFIX reproduction path.
+    """
+    legacy_dir = PROJECT_ROOT / "derivations" / "test_corpus" / "holdout" / "problems_legacy_verifier"
+    if not legacy_dir.exists():
+        return None
+    for p in legacy_dir.glob("*.json"):
+        r = subprocess.run(
+            [os.environ.get("DERIVATION_PYTHON") or sys.executable, str(ROOT / "verify.py"), str(p)],
+            cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            return p.name
+    return None
+
+
+def _run_reproduction(rule: str, repro: dict) -> tuple[str, str]:
+    """Run the current validator for `rule` on a reproduction case.
+
+    Uses verify.verify_edge so the same validator-loading path as the inner
+    loop is exercised. Imported lazily so this module stays importable in
+    environments without sympy (e.g. unit tests that mock this helper).
+    """
+    from verify import verify_edge  # noqa: E402
+    from sympy_eval import parse_srepr  # noqa: E402
+    from_expr = parse_srepr(repro["from_srepr"])
+    to_expr = parse_srepr(repro["to_srepr"])
+    return verify_edge(from_expr, to_expr, rule, repro.get("args") or {})
+
+
+def _run_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
+                        proposal_path: Path, rule: str) -> int:
+    """Closure path for BUGFIX proposals: verify the reproduction case now passes.
+
+    BUGFIX proposals bypass the 100-attempt evidence floor; their closure
+    signal is a single, concrete reproduction case. lift_fraction is 1.0 when
+    the validator now returns the expected status on that case, else 0.0.
+    Holdout regression is still enforced.
+    """
+    repro = reproduction_from_proposal(proposal_path)
+    seed_id = seed_id_from_proposal(proposal_path)
+    if not repro:
+        print(f"[closure] BUGFIX: no parseable reproduction case in {proposal_path.name}",
+              file=sys.stderr)
+        record = {
+            "rule": rule,
+            "kind": "BUGFIX",
+            "proposal_path": str(proposal_path),
+            "seed_hypothesis": seed_id,
+            "lift_fraction": 0.0,
+            "holdout_regressed": None,
+            "error": "no reproduction case",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "config_version": cfg_version,
+            "min_lift_threshold": runner.get("auto_promote", {}).get("min_lift_fraction", 0.4),
+        }
+        out_path = proposal_path.with_name(proposal_path.stem + "_closure.json")
+        out_path.write_text(json.dumps(record, indent=2))
+        return 1
+
+    expected = repro.get("expected", "PASS")
+    try:
+        status, reason = _run_reproduction(rule, repro)
+    except Exception as e:
+        print(f"[closure] BUGFIX: validator raised on reproduction case: {e}", file=sys.stderr)
+        status, reason = "ERROR", f"validator raised: {e}"
+
+    passes = (status == expected)
+    lift_fraction = 1.0 if passes else 0.0
+    holdout_regressed = _holdout_regression()
+
+    record = {
+        "rule": rule,
+        "kind": "BUGFIX",
+        "proposal_path": str(proposal_path),
+        "seed_hypothesis": seed_id,
+        "reproduction": repro,
+        "expected_status": expected,
+        "actual_status": status,
+        "validator_reason": reason,
+        "lift_fraction": lift_fraction,
+        "holdout_regressed": holdout_regressed,
+        "scoring_surface": "reproduction case",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "config_version": cfg_version,
+        "min_lift_threshold": runner.get("auto_promote", {}).get("min_lift_fraction", 0.4),
+    }
+    out_path = proposal_path.with_name(proposal_path.stem + "_closure.json")
+    out_path.write_text(json.dumps(record, indent=2))
+
+    print()
+    print(f"[closure] BUGFIX rule={rule} seed={seed_id}")
+    print(f"[closure] reproduction: {repro.get('from_srepr')} -> {repro.get('to_srepr')}")
+    print(f"[closure] expected={expected} actual={status} reason={reason}")
+    print(f"[closure] lift fraction: {lift_fraction:.2%}")
+    print(f"[closure] holdout regression: {holdout_regressed or 'none'}")
+    verdict = "REPRO_CONFIRMED" if passes and not holdout_regressed else "REPRO_FAILED"
+    print(f"[closure] verdict: {verdict}")
+    print(f"[closure] sidecar: {out_path}")
+    return 0 if (passes and not holdout_regressed) else 1
 
 
 def previously_failing_targets(rule: str, epoch: int) -> list[dict]:
@@ -119,6 +230,10 @@ def main() -> int:
     if not rule:
         print(f"[closure] FAIL: could not extract Affected rule from {proposal_path.name}", file=sys.stderr)
         return 2
+
+    # BUGFIX proposals close on a single reproduction case, not a lift batch.
+    if kind_from_proposal(proposal_path) == "BUGFIX":
+        return _run_bugfix_closure(cfg, cfg_version, runner, proposal_path, rule)
 
     state = json.loads((PROJECT_ROOT / "derivations" / "state.json").read_text())
     epoch = args.epoch if args.epoch is not None else int(state["epoch"])
@@ -223,19 +338,7 @@ def main() -> int:
     rule_edges_total = post_pass + post_fail + post_other
     lift_fraction = (resolved_pre_fail_edges / pre_fail_total) if pre_fail_total else 0.0
 
-    # Holdout regression check (legacy verifier-format holdout; the only one
-    # verify.py currently parses without modification).
-    holdout_regressed = None
-    legacy_dir = PROJECT_ROOT / "derivations" / "test_corpus" / "holdout" / "problems_legacy_verifier"
-    if legacy_dir.exists():
-        for p in legacy_dir.glob("*.json"):
-            r = subprocess.run(
-                [os.environ.get("DERIVATION_PYTHON") or sys.executable, str(ROOT / "verify.py"), str(p)],
-                cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-            )
-            if r.returncode != 0:
-                holdout_regressed = p.name
-                break
+    holdout_regressed = _holdout_regression()
 
     record = {
         "rule": rule,

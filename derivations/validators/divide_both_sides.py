@@ -45,6 +45,8 @@ def validate(from_expr, to_expr, args):
 
         if expr_equal_zero(to_expr.lhs - expected_lhs) and expr_equal_zero(to_expr.rhs - expected_rhs):
             return ("PASS", f"divided both sides by {d} (arg key '{used_key}')")
+        if expr_equal_zero(to_expr.lhs - expected_rhs) and expr_equal_zero(to_expr.rhs - expected_lhs):
+            return ("PASS", f"divided both sides by {d} (swapped orientation; arg key '{used_key}')")
         return (
             "FAIL",
             f"dividing by {d} should give Eq({expected_lhs}, {expected_rhs}); "

@@ -83,6 +83,40 @@
       "min_acceptance_delta": 0.0,
       "promote_on_win": false
     },
+    "bug_investigate": {
+      "enabled": false,
+      "min_occurrences": 2,
+      "max_proposals_per_epoch": 3,
+      "seeds": [
+        {
+          "id": "orientation_false_rejection",
+          "hypothesis": "divide_both_sides rejected Eq(h, 5*R/2) when expecting Eq(5*R/2, h) — mathematically identical, just swapped sides. The validator was rejecting a valid transform because of equation orientation.",
+          "evidence_signals": ["VALIDATOR_REJECTED"],
+          "affected_rules": ["divide_both_sides"],
+          "min_occurrences": 2,
+          "reproduction": {
+            "from_srepr": "Eq(3*x, 15)",
+            "to_srepr": "Eq(5, x)",
+            "args": {"divisor": 3},
+            "expected": "PASS",
+            "actual": "FAIL",
+            "proposed_change": "Accept swapped orientation in validator (to_expr.lhs == expected_rhs and to_expr.rhs == expected_lhs is a valid result)",
+            "negative": {
+              "from_srepr": "Eq(3*x, 15)",
+              "to_srepr": "Eq(x, 6)",
+              "args": {"divisor": 3}
+            }
+          }
+        },
+        {
+          "id": "fused_subst_simplify",
+          "hypothesis": "Substitution and simplification are being fused into single graph edges, causing one_rule_per_edge judge rejections.",
+          "evidence_signals": ["one_rule_per_edge"],
+          "affected_rules": ["substitute_value", "simplify_expression"],
+          "min_occurrences": 2
+        }
+      ]
+    },
     "state_file": "derivations/_epoch_state.json"
   }
 }

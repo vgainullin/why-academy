@@ -3146,20 +3146,39 @@ plt.close('all')
     padWrap.className = 'cderive-pad-wrap';
     canvasCol.appendChild(padWrap);
 
+    const ghostLayer = document.createElement('div');
+    ghostLayer.className = 'cderive-ghost-layer';
+    padWrap.appendChild(ghostLayer);
+
     const canvas = document.createElement('canvas');
     canvas.className = 'cderive-pad';
     canvas.width = 1400;
     canvas.height = 900;
     padWrap.appendChild(canvas);
 
+    const objectLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    objectLayer.setAttribute('class', 'cderive-object-layer');
+    objectLayer.setAttribute('viewBox', '0 0 1400 900');
+    objectLayer.setAttribute('aria-hidden', 'true');
+    padWrap.appendChild(objectLayer);
+
     let recognitionTimer = null;
+    let objectTimer = null;
     let lastRecognizedStrokeCount = 0;
     let busy = false;
+    let solvedCanvasReady = false;
+    let suppressStrokeChange = false;
+    let detectedObjects = [];
     const RECOGNITION_DEBOUNCE_MS = 1200;
+    const OBJECT_DEBOUNCE_MS = 450;
 
     const dc = new DrawingCanvas(canvas, {
       transparentBg: true,
-      onStrokeChange: function () { scheduleRecognition(); },
+      onStrokeChange: function () {
+        if (suppressStrokeChange) return;
+        if (solvedCanvasReady) scheduleObjectRecognition();
+        else scheduleRecognition();
+      },
       onEraseEnd: function () { lastRecognizedStrokeCount = -1; }
     });
 
@@ -3179,8 +3198,14 @@ plt.close('all')
     clearBtn.addEventListener('click', () => {
       dc.clear();
       lastRecognizedStrokeCount = 0;
-      recognizedLines = [];
-      renderLinesPanel();
+      detectedObjects = [];
+      renderObjectOverlay();
+      if (solvedCanvasReady) {
+        panelStatus.textContent = 'Solved. Sketch a circle, square, or axes.';
+      } else {
+        recognizedLines = [];
+        renderLinesPanel();
+      }
     });
 
     const recognizeNowBtn = document.createElement('button');
@@ -3189,7 +3214,9 @@ plt.close('all')
     recognizeNowBtn.title = 'Force a re-read instead of waiting for the pause timer';
     recognizeNowBtn.addEventListener('click', () => {
       if (recognitionTimer) { clearTimeout(recognitionTimer); recognitionTimer = null; }
-      runRecognition();
+      if (objectTimer) { clearTimeout(objectTimer); objectTimer = null; }
+      if (solvedCanvasReady) runObjectRecognition();
+      else runRecognition();
     });
 
     const doneBtn = document.createElement('button');
@@ -3322,12 +3349,19 @@ plt.close('all')
 
     function scheduleRecognition() {
       if (busy) return;
+      if (solvedCanvasReady) return;
       if (recognitionTimer) clearTimeout(recognitionTimer);
       if (dc.strokes.length === 0) {
         // Canvas was cleared; nothing to do.
         return;
       }
       recognitionTimer = setTimeout(runRecognition, RECOGNITION_DEBOUNCE_MS);
+    }
+
+    function scheduleObjectRecognition() {
+      if (!solvedCanvasReady) return;
+      if (objectTimer) clearTimeout(objectTimer);
+      objectTimer = setTimeout(runObjectRecognition, OBJECT_DEBOUNCE_MS);
     }
 
     async function runRecognition() {
@@ -3378,7 +3412,8 @@ plt.close('all')
         if (anyMatchedTarget) {
           targetReached = true;
           doneBtn.disabled = false;
-          panelStatus.innerHTML = '<span class="cderive-target-hit">You reached the target. Click <strong>I\u2019m done</strong> when you\u2019re ready.</span>';
+          pinSolvedDerivation();
+          panelStatus.innerHTML = '<span class="cderive-target-hit">Solved. Sketch a circle, square, or axes.</span>';
         } else if (okCount > 0) {
           panelStatus.textContent = okCount + ' valid line' + (okCount === 1 ? '' : 's') +
             ' so far. Keep going.';
@@ -3394,6 +3429,216 @@ plt.close('all')
       } finally {
         busy = false;
       }
+    }
+
+    function pinSolvedDerivation() {
+      if (solvedCanvasReady) return;
+      const solvedLines = recognizedLines.filter(line => line.status === 'ok').map(line => line.latex);
+      if (solvedLines.length === 0) return;
+
+      const ghostCard = document.createElement('div');
+      ghostCard.className = 'cderive-ghost-card';
+      ghostCard.innerHTML = solvedLines.map(line => '<div class="cderive-ghost-line">$$' + esc(line) + '$$</div>').join('');
+      ghostLayer.innerHTML = '';
+      ghostLayer.appendChild(ghostCard);
+      ghostLayer.classList.add('active');
+      renderKaTeX(ghostLayer);
+
+      solvedCanvasReady = true;
+      suppressStrokeChange = true;
+      dc.clear();
+      suppressStrokeChange = false;
+      lastRecognizedStrokeCount = 0;
+      detectedObjects = [];
+      renderObjectOverlay();
+    }
+
+    function runObjectRecognition() {
+      detectedObjects = classifyCanvasObjects(dc.strokes);
+      renderObjectOverlay();
+      if (detectedObjects.length === 0) {
+        panelStatus.textContent = dc.strokes.length
+          ? 'Solved. Keep sketching.'
+          : 'Solved. Sketch a circle, square, or axes.';
+        return;
+      }
+      panelStatus.textContent = 'Detected: ' + detectedObjects.map(obj => obj.label).join(', ') + '.';
+    }
+
+    function classifyCanvasObjects(strokes) {
+      if (!strokes || strokes.length === 0) return [];
+      const objects = [];
+      const axes = detectAxes(strokes);
+      if (axes) objects.push(axes);
+
+      strokes.forEach(stroke => {
+        const shape = classifyClosedShape(stroke);
+        if (shape) objects.push(shape);
+      });
+      return objects.slice(0, 4);
+    }
+
+    function strokeBounds(stroke) {
+      const pts = (stroke && stroke.points) || [];
+      if (pts.length === 0) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      pts.forEach(p => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      });
+      return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+    }
+
+    function pointDistance(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function pathLength(points) {
+      let total = 0;
+      for (let i = 1; i < points.length; i++) total += pointDistance(points[i - 1], points[i]);
+      return total;
+    }
+
+    function perpendicularDistance(p, a, b) {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return pointDistance(p, a);
+      return Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function simplifyPoints(points, epsilon) {
+      if (points.length <= 2) return points.slice();
+      let maxDist = 0;
+      let idx = 0;
+      const first = points[0];
+      const last = points[points.length - 1];
+      for (let i = 1; i < points.length - 1; i++) {
+        const dist = perpendicularDistance(points[i], first, last);
+        if (dist > maxDist) {
+          maxDist = dist;
+          idx = i;
+        }
+      }
+      if (maxDist <= epsilon) return [first, last];
+      const left = simplifyPoints(points.slice(0, idx + 1), epsilon);
+      const right = simplifyPoints(points.slice(idx), epsilon);
+      return left.slice(0, -1).concat(right);
+    }
+
+    function classifyClosedShape(stroke) {
+      const pts = (stroke && stroke.points) || [];
+      if (pts.length < 12) return null;
+      const bounds = strokeBounds(stroke);
+      if (!bounds || bounds.w < 80 || bounds.h < 80) return null;
+      const aspect = bounds.w / bounds.h;
+      if (aspect < 0.55 || aspect > 1.8) return null;
+      const closeDist = pointDistance(pts[0], pts[pts.length - 1]);
+      if (closeDist > Math.max(bounds.w, bounds.h) * 0.28) return null;
+
+      const simplified = simplifyPoints(pts, Math.max(bounds.w, bounds.h) * 0.08);
+      const cornerCount = Math.max(0, simplified.length - 1);
+      const isSquareLike = aspect > 0.72 && aspect < 1.32 && cornerCount >= 4 && cornerCount <= 6;
+      return {
+        type: isSquareLike ? 'square' : 'circle',
+        label: isSquareLike ? 'square' : 'circle',
+        bounds
+      };
+    }
+
+    function detectAxes(strokes) {
+      const lines = strokes.map(stroke => {
+        const pts = stroke.points || [];
+        if (pts.length < 2) return null;
+        const first = pts[0];
+        const last = pts[pts.length - 1];
+        const length = pathLength(pts);
+        const direct = pointDistance(first, last);
+        if (length < 180 || direct / length < 0.82) return null;
+        const dx = last.x - first.x;
+        const dy = last.y - first.y;
+        const bounds = strokeBounds(stroke);
+        if (Math.abs(dx) > Math.abs(dy) * 2.5) return { kind: 'h', first, last, bounds };
+        if (Math.abs(dy) > Math.abs(dx) * 2.5) return { kind: 'v', first, last, bounds };
+        return null;
+      }).filter(Boolean);
+
+      const horizontals = lines.filter(line => line.kind === 'h');
+      const verticals = lines.filter(line => line.kind === 'v');
+      for (const h of horizontals) {
+        for (const v of verticals) {
+          const crossesX = v.bounds.minX >= h.bounds.minX - 30 && v.bounds.maxX <= h.bounds.maxX + 30;
+          const crossesY = h.bounds.minY >= v.bounds.minY - 30 && h.bounds.maxY <= v.bounds.maxY + 30;
+          if (crossesX && crossesY) {
+            return {
+              type: 'axes',
+              label: 'coordinate axes',
+              h,
+              v,
+              bounds: {
+                minX: Math.min(h.bounds.minX, v.bounds.minX),
+                minY: Math.min(h.bounds.minY, v.bounds.minY),
+                maxX: Math.max(h.bounds.maxX, v.bounds.maxX),
+                maxY: Math.max(h.bounds.maxY, v.bounds.maxY)
+              }
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    function renderObjectOverlay() {
+      objectLayer.innerHTML = '';
+      detectedObjects.forEach(obj => {
+        if (obj.type === 'axes') {
+          drawSvgLine(obj.h.first, obj.h.last, 'cderive-object-axes');
+          drawSvgLine(obj.v.first, obj.v.last, 'cderive-object-axes');
+          drawSvgLabel(obj.bounds.minX, obj.bounds.minY - 16, 'axes');
+        } else if (obj.type === 'circle') {
+          const cx = obj.bounds.minX + obj.bounds.w / 2;
+          const cy = obj.bounds.minY + obj.bounds.h / 2;
+          const r = Math.max(obj.bounds.w, obj.bounds.h) / 2;
+          const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          el.setAttribute('cx', String(cx));
+          el.setAttribute('cy', String(cy));
+          el.setAttribute('r', String(r));
+          el.setAttribute('class', 'cderive-object-shape');
+          objectLayer.appendChild(el);
+          drawSvgLabel(obj.bounds.minX, obj.bounds.minY - 16, 'circle');
+        } else if (obj.type === 'square') {
+          const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          el.setAttribute('x', String(obj.bounds.minX));
+          el.setAttribute('y', String(obj.bounds.minY));
+          el.setAttribute('width', String(obj.bounds.w));
+          el.setAttribute('height', String(obj.bounds.h));
+          el.setAttribute('class', 'cderive-object-shape');
+          objectLayer.appendChild(el);
+          drawSvgLabel(obj.bounds.minX, obj.bounds.minY - 16, 'square');
+        }
+      });
+    }
+
+    function drawSvgLine(a, b, className) {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      el.setAttribute('x1', String(a.x));
+      el.setAttribute('y1', String(a.y));
+      el.setAttribute('x2', String(b.x));
+      el.setAttribute('y2', String(b.y));
+      el.setAttribute('class', className);
+      objectLayer.appendChild(el);
+    }
+
+    function drawSvgLabel(x, y, label) {
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      el.setAttribute('x', String(Math.max(12, x)));
+      el.setAttribute('y', String(Math.max(22, y)));
+      el.setAttribute('class', 'cderive-object-label');
+      el.textContent = label;
+      objectLayer.appendChild(el);
     }
 
     // Progressive hints (question -> direction -> worked first step).

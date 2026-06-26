@@ -104,6 +104,37 @@ class AnalyzeRoutingTests(unittest.TestCase):
         self.assertEqual(state["bug_investigate_return_phase"], "ANALYZE")
         self.assertEqual(state["bug_investigate_candidate"], candidate)
 
+    def test_completed_bug_investigation_resolves_to_recommended_route(self) -> None:
+        candidate = {
+            "component": "judge",
+            "rule": None,
+            "hypothesis": "overall failed despite passing criteria",
+            "seed_ids": [],
+            "evidence_refs": [{"epoch": 1, "jsonl": "batch.jsonl", "record": 2}],
+        }
+        proposal = self.epoch_dir / "proposal_bug_judge.md"
+        proposal.write_text("**Kind**: BUGFIX\n")
+        (self.epoch_dir / "bug_investigate_result.json").write_text(json.dumps({
+            "status": "BUGFIX_CANDIDATE",
+            "recommended_route": "IMPLEMENT",
+            "candidate": candidate,
+            "proposal_paths": [str(proposal)],
+        }))
+        self._write_summary_and_decision({
+            "route": "BUG_INVESTIGATE",
+            "rationale": "same bug candidate",
+            "candidate": candidate,
+            "fallback_route": "CONTINUE_EPOCH",
+        })
+
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+
+        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["analysis_route"], "IMPLEMENT")
+        self.assertEqual(state["analysis_decision"]["resolved_from_bug_investigation"]["status"],
+                         "BUGFIX_CANDIDATE")
+
     def test_continue_epoch_clears_batch_and_forces_reanalysis(self) -> None:
         self._write_summary_and_decision({
             "route": "CONTINUE_EPOCH",

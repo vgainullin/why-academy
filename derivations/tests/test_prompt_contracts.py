@@ -26,6 +26,15 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("`JUDGE_REJECTED`, `JUDGE_AGGREGATION_MISMATCH`, or", prompt)
         self.assertIn("`JUDGE_ERROR`", prompt)
 
+    def test_completed_bug_investigation_routes_to_implementation(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "outer_loop_epoch.md").read_text()
+
+        self.assertIn("proposal_bug_*.md", prompt)
+        self.assertIn("Do not investigate it again", prompt)
+        self.assertIn("route to", prompt)
+        self.assertIn("`IMPLEMENT`", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

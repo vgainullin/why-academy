@@ -219,7 +219,9 @@ Route meanings:
   when you can name a concrete suspected system defect and provide a candidate
   object. This includes judge/canvas/target/system inconsistencies such as
   `JUDGE_AGGREGATION_MISMATCH`. This does not authorize promotion; it
-  authorizes a focused probe.
+  authorizes a focused probe. Do not choose this route for the same candidate
+  if a matching actionable `proposal_bug_*.md` already exists; choose
+  `IMPLEMENT` so the gated implementation/closure path can evaluate it.
 - `IMPLEMENT`: existing proposals, including any `proposal_bug_*.md` produced by
   a prior bug-investigation branch, are ready to attempt through the gated
   implementation/closure path.
@@ -242,6 +244,11 @@ For `BUG_INVESTIGATE`, `candidate` must be an object:
 
 If you do not have a concrete candidate, do not route to `BUG_INVESTIGATE`.
 Choose `CONTINUE_EPOCH`, `IMPLEMENT`, or `CLOSE`.
+
+Before choosing `BUG_INVESTIGATE`, inspect existing `proposal_bug_*.md` files in
+the epoch report directory. If one already covers the suspected candidate, the
+bug-investigation branch has completed. Do not investigate it again; route to
+`IMPLEMENT` unless there is a concrete reason to close or experiment first.
 
 If any `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
 `BUG_INVESTIGATE` over `CONTINUE_EPOCH` and provide a judge candidate like:
@@ -292,6 +299,10 @@ Wait for the human reviewer to either:
   accounted for as `JUDGE_REJECTED`, `JUDGE_AGGREGATION_MISMATCH`, or
   `JUDGE_ERROR`. Never describe an epoch as having only prompt-level judge
   rejections if there is an aggregate/criterion mismatch.
+- **Do not loop bug investigation.** A matching actionable `proposal_bug_*.md`
+  means the bug-investigation branch has already produced its candidate output.
+  The next route should be `IMPLEMENT`, `EXPERIMENT`, or `CLOSE`, not
+  `BUG_INVESTIGATE` again for the same candidate.
 - **No prompt-level fixes here.** PARSE_FAILURE and VALIDATOR_REJECTED true-positives belong in the inner-loop prompt update, which is a separate concern handled at a different cadence. Note them in the summary but do not propose prompt changes here.
 - **Cite specific evidence.** Every proposal must reference at least 3 concrete log entries (problem_id + edge). No abstract "the LLM sometimes does X" — anchor everything in observed data. If you can't find 3 concrete examples, the candidate isn't ranked high enough yet.
 - **Don't conflate categories.** If a rule shows up in both VALIDATOR_UNCOVERED and WEAK_PASS_ONLY across the epoch, those are two different proposals (write the validator vs. strengthen the fallback). Don't merge.

@@ -287,6 +287,54 @@ def apply_analysis_decision(state: dict, decision: dict) -> None:
         state["phase"] = "CLOSE"
 
 
+def _bug_candidate_key(candidate: object) -> tuple | None:
+    if not isinstance(candidate, dict):
+        return None
+    raw_seed_ids = candidate.get("seed_ids") or []
+    if not isinstance(raw_seed_ids, list):
+        raw_seed_ids = [raw_seed_ids]
+    seed_ids = tuple(sorted(str(s) for s in raw_seed_ids if str(s).strip()))
+    return (
+        str(candidate.get("component") or "").strip(),
+        str(candidate.get("rule") or "").strip(),
+        str(candidate.get("hypothesis") or "").strip(),
+        seed_ids,
+    )
+
+
+def resolve_repeated_bug_investigation(epoch_dir: Path, decision: dict) -> dict:
+    """Avoid re-entering the same completed bug-investigation branch."""
+    if decision.get("route") != "BUG_INVESTIGATE":
+        return decision
+    result, _ = load_bug_investigation_result(epoch_dir)
+    if not isinstance(result, dict) or result.get("status") != "BUGFIX_CANDIDATE":
+        return decision
+    if _bug_candidate_key(decision.get("candidate")) != _bug_candidate_key(result.get("candidate")):
+        return decision
+
+    proposal_paths = result.get("proposal_paths")
+    if not isinstance(proposal_paths, list):
+        proposal_paths = []
+    has_listed_proposal = any(
+        (PROJECT_ROOT / str(path)).exists() or Path(str(path)).exists()
+        for path in proposal_paths
+    )
+    if not has_listed_proposal and not list(epoch_dir.glob("proposal_bug_*.md")):
+        return decision
+
+    route = str(result.get("recommended_route") or decision.get("fallback_route") or "IMPLEMENT").strip().upper()
+    if route not in ANALYSIS_ROUTES or route == "BUG_INVESTIGATE":
+        route = "IMPLEMENT"
+    resolved = dict(decision)
+    resolved["route"] = route
+    resolved["resolved_from_bug_investigation"] = {
+        "status": result.get("status"),
+        "recommended_route": result.get("recommended_route"),
+        "proposal_paths": proposal_paths,
+    }
+    return resolved
+
+
 def selected_bug_seed_ids(state: dict) -> set[str]:
     candidate = state.get("bug_investigate_candidate")
     if not isinstance(candidate, dict):
@@ -558,6 +606,7 @@ def phase_analyze(cfg: dict, state: dict) -> None:
         print(f"[runner] ANALYZE: {error}", file=sys.stderr)
         return
     assert decision is not None
+    decision = resolve_repeated_bug_investigation(epoch_dir, decision)
     apply_analysis_decision(state, decision)
     print(f"[runner] ANALYZE: route={state['analysis_route']}", file=sys.stderr)
     save_state(cfg, state)

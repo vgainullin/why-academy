@@ -12,7 +12,7 @@ phase. The registry provides the run loop (signal handling, wall-clock cap,
 pause/resume, error capture) so workflows only define phase handlers.
 
 Built-in workflows (auto-discovered):
-  epoch   — full GENERATE -> ANALYZE -> BUG_INVESTIGATE -> EXPERIMENT -> IMPLEMENT -> CLOSE
+  epoch   — GENERATE -> ANALYZE, then follows analysis_decision.json route
   bugfix  — standalone BUG_INVESTIGATE -> IMPLEMENT -> CLOSE (reads existing logs)
 
 CLI:
@@ -341,11 +341,10 @@ def main() -> int:
     if args.cmd == "auto-detect":
         from config import load_config
         cfg, _ = load_config()
-        # If bug_investigate is enabled and there are existing logs, suggest bugfix.
-        bi = cfg.get("runner", {}).get("bug_investigate", {})
-        logs_dir = PROJECT_ROOT / "derivations" / "logs"
-        has_logs = logs_dir.exists() and any(logs_dir.iterdir())
-        if bi.get("enabled") and has_logs:
+        state_path = PROJECT_ROOT / cfg.get("runner", {}).get(
+            "state_file", "derivations/_epoch_state.json")
+        state = _load_state(state_path)
+        if state.get("phase") == "BUG_INVESTIGATE":
             print("bugfix")
         else:
             print("epoch")

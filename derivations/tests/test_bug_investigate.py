@@ -39,11 +39,90 @@ def _make_validator(tmp: Path, rule: str) -> None:
 # ── PHASES ───────────────────────────────────────────────────────────────
 class PhasesOrderTests(unittest.TestCase):
 
-    def test_bug_investigate_between_analyze_and_experiment(self) -> None:
-        idx = {p: i for i, p in enumerate(ae.PHASES)}
+    def test_bug_investigate_is_available_as_route_target(self) -> None:
         self.assertIn("BUG_INVESTIGATE", ae.PHASES)
-        self.assertLess(idx["ANALYZE"], idx["BUG_INVESTIGATE"])
-        self.assertLess(idx["BUG_INVESTIGATE"], idx["EXPERIMENT"])
+        self.assertIn("ANALYZE", ae.PHASES)
+
+
+class AnalyzeRoutingTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.state_path = self.tmp / "derivations" / "_epoch_state.json"
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.epoch_dir = _epoch_dir(self.tmp)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _run(self, state: dict) -> dict:
+        def fake_save(c, s):
+            self.state_path.write_text(json.dumps(s))
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "_state_path", lambda c: self.state_path), \
+             patch.object(ae, "save_state", side_effect=fake_save), \
+             patch.object(ae, "epoch_num", return_value=1):
+            ae.phase_analyze({"runner": {}}, state)
+        return state
+
+    def _write_summary_and_decision(self, decision: dict) -> None:
+        (self.epoch_dir / "summary.md").write_text("# Summary\n")
+        (self.epoch_dir / "analysis_decision.json").write_text(json.dumps(decision))
+
+    def test_missing_decision_pauses(self) -> None:
+        (self.epoch_dir / "summary.md").write_text("# Summary\n")
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "PAUSED_ERROR")
+        self.assertEqual(state["resume_phase"], "ANALYZE")
+        self.assertIn("analysis_decision.json", state["error"])
+
+    def test_invalid_route_pauses(self) -> None:
+        self._write_summary_and_decision({"route": "MAYBE"})
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "PAUSED_ERROR")
+        self.assertIn("invalid route", state["error"])
+
+    def test_bug_investigate_route_records_candidate_and_return(self) -> None:
+        candidate = {
+            "component": "validator",
+            "rule": "divide_both_sides",
+            "hypothesis": "swapped orientation rejected",
+            "seed_ids": ["orientation_false_rejection"],
+            "evidence_refs": [{"epoch": 1, "jsonl": "batch.jsonl", "record": 0}],
+        }
+        self._write_summary_and_decision({
+            "route": "BUG_INVESTIGATE",
+            "rationale": "targeted bug probe",
+            "candidate": candidate,
+        })
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "BUG_INVESTIGATE")
+        self.assertEqual(state["bug_investigate_return_phase"], "ANALYZE")
+        self.assertEqual(state["bug_investigate_candidate"], candidate)
+
+    def test_continue_epoch_clears_batch_and_forces_reanalysis(self) -> None:
+        self._write_summary_and_decision({
+            "route": "CONTINUE_EPOCH",
+            "rationale": "needs more samples",
+        })
+        state = {"phase": "ANALYZE", "batch_id": "old_batch"}
+        self._run(state)
+        self.assertEqual(state["phase"], "GENERATE")
+        self.assertNotIn("batch_id", state)
+        self.assertTrue(state["force_analyze"])
+
+    def test_implement_route_goes_to_implement(self) -> None:
+        self._write_summary_and_decision({
+            "route": "IMPLEMENT",
+            "rationale": "proposal ready",
+        })
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "IMPLEMENT")
 
 
 # ── Seed evidence matching ───────────────────────────────────────────────
@@ -150,6 +229,46 @@ class MatchSeedEvidenceTests(unittest.TestCase):
         with patch.object(ae, "PROJECT_ROOT", self.tmp):
             matches = ae._match_seed_evidence(seed, logs)
         self.assertEqual(matches[0]["epoch"], 3)
+
+
+class CandidateEvidenceTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_evidence_refs_use_one_based_record_numbers(self) -> None:
+        _write_log(self.tmp, 1, "batch.jsonl", [
+            {"problem_id": "first", "judge_eval": {"overall": "PASS"}},
+            {"problem_id": "second", "judge_eval": {"overall": "FAIL"}},
+            {"problem_id": "third", "judge_eval": None},
+        ])
+        candidate = {"evidence_refs": [
+            {"epoch": 1, "jsonl": "batch.jsonl", "record": 2}
+        ]}
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            evidence = ae.collect_candidate_evidence(candidate)
+
+        self.assertEqual(evidence[0]["line"], 2)
+        self.assertEqual(evidence[0]["data"]["problem_id"], "second")
+
+    def test_record_zero_keeps_first_line_compatibility(self) -> None:
+        _write_log(self.tmp, 1, "batch.jsonl", [
+            {"problem_id": "first"},
+            {"problem_id": "second"},
+        ])
+        candidate = {"evidence_refs": [
+            {"epoch": 1, "jsonl": "batch.jsonl", "record": 0}
+        ]}
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            evidence = ae.collect_candidate_evidence(candidate)
+
+        self.assertEqual(evidence[0]["line"], 1)
+        self.assertEqual(evidence[0]["data"]["problem_id"], "first")
 
 
 # ── Cross-epoch log loading ──────────────────────────────────────────────
@@ -391,6 +510,13 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         self._run(cfg, state)
         self.assertEqual(state["phase"], "EXPERIMENT")
 
+    def test_disabled_honors_return_phase(self) -> None:
+        cfg = {"runner": {"bug_investigate": {"enabled": False}}}
+        state = {"phase": "BUG_INVESTIGATE", "bug_investigate_return_phase": "ANALYZE"}
+        self._run(cfg, state)
+        self.assertEqual(state["phase"], "ANALYZE")
+        self.assertTrue(state["force_analyze"])
+
     def test_no_section_skips_to_experiment(self) -> None:
         cfg = {"runner": {}}
         state = {"phase": "BUG_INVESTIGATE"}
@@ -502,6 +628,117 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         self._run(cfg, state)
         props = list(_epoch_dir(self.tmp).glob("proposal_*.md"))
         self.assertEqual(len(props), 1)
+
+    def test_requested_seed_ids_filter_candidates(self) -> None:
+        _make_validator(self.tmp, "r_a")
+        _make_validator(self.tmp, "r_b")
+        _write_log(self.tmp, 1, "r.jsonl", [
+            {"target": "t", "batch_id": "b",
+             "edge_results": [{"rule": "r_a", "status": "FAIL"}, {"rule": "r_b", "status": "FAIL"}]}
+            for _ in range(3)
+        ])
+        cfg = {"runner": {"bug_investigate": {
+            "enabled": True, "min_occurrences": 2, "max_proposals_per_epoch": 3,
+            "seeds": [
+                {"id": "s1", "hypothesis": "h", "affected_rules": ["r_a"],
+                 "evidence_signals": ["VALIDATOR_REJECTED"],
+                 "reproduction": {"from_srepr": "a", "to_srepr": "b"}},
+                {"id": "s2", "hypothesis": "h", "affected_rules": ["r_b"],
+                 "evidence_signals": ["VALIDATOR_REJECTED"],
+                 "reproduction": {"from_srepr": "a", "to_srepr": "b"}},
+            ]
+        }}}
+        state = {"phase": "BUG_INVESTIGATE",
+                 "bug_investigate_candidate": {"seed_ids": ["s2"]}}
+        self._run(cfg, state)
+        props = list(_epoch_dir(self.tmp).glob("proposal_*.md"))
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0].name, "proposal_bug_s2.md")
+
+    def test_generic_candidate_uses_investigation_result_fallback(self) -> None:
+        _make_validator(self.tmp, "r_a")
+        _write_log(self.tmp, 1, "r.jsonl", [
+            {"target": "t", "batch_id": "b",
+             "edge_results": [{"rule": "r_a", "status": "FAIL"}]}
+            for _ in range(3)
+        ])
+        cfg = {"models": {"outer": ""}, "engines": {"outer": "codex"},
+               "budgets_usd": {"outer": 3}, "timeouts_s": {"outer": 900},
+               "runner": {"bug_investigate": {
+                   "enabled": True, "min_occurrences": 2, "max_proposals_per_epoch": 3,
+                   "seeds": [{"id": "s1", "hypothesis": "h", "affected_rules": ["r_a"],
+                              "evidence_signals": ["VALIDATOR_REJECTED"],
+                              "reproduction": {"from_srepr": "a", "to_srepr": "b"}}]
+               }}}
+        state = {
+            "phase": "BUG_INVESTIGATE",
+            "batch_id": "old_batch",
+            "bug_investigate_return_phase": "ANALYZE",
+            "analysis_decision": {"fallback_route": "CONTINUE_EPOCH"},
+            "bug_investigate_candidate": {
+                "component": "judge",
+                "hypothesis": "overall failed despite criteria passing",
+                "seed_ids": [],
+            },
+        }
+        with patch.object(ae, "run_candidate_bug_investigation",
+                          return_value=(0, {"status": "NO_ACTIONABLE_BUGFIX",
+                                            "recommended_route": "CONTINUE_EPOCH",
+                                            "proposal_paths": []}, None)):
+            self._run(cfg, state)
+
+        self.assertEqual(state["phase"], "GENERATE")
+        self.assertNotIn("batch_id", state)
+        self.assertTrue(state["force_analyze"])
+        self.assertEqual(list(_epoch_dir(self.tmp).glob("proposal_*.md")), [])
+
+    def test_generic_candidate_with_proposal_returns_to_analyze(self) -> None:
+        proposal = _epoch_dir(self.tmp) / "proposal_bug_judge.md"
+        cfg = {"models": {"outer": ""}, "engines": {"outer": "codex"},
+               "budgets_usd": {"outer": 3}, "timeouts_s": {"outer": 900},
+               "runner": {"bug_investigate": {"enabled": True, "seeds": []}}}
+        state = {
+            "phase": "BUG_INVESTIGATE",
+            "bug_investigate_return_phase": "ANALYZE",
+            "analysis_decision": {"fallback_route": "CONTINUE_EPOCH"},
+            "bug_investigate_candidate": {
+                "component": "judge",
+                "hypothesis": "overall failed despite criteria passing",
+                "seed_ids": [],
+            },
+        }
+
+        def fake_candidate(*args, **kwargs):
+            proposal.write_text("**Kind**: BUGFIX\n**Affected rule**: none\n")
+            return 0, {"status": "BUGFIX_CANDIDATE",
+                       "recommended_route": "IMPLEMENT",
+                       "proposal_paths": [str(proposal)]}, None
+
+        with patch.object(ae, "run_candidate_bug_investigation", side_effect=fake_candidate):
+            self._run(cfg, state)
+
+        self.assertEqual(state["phase"], "ANALYZE")
+        self.assertTrue(state["force_analyze"])
+
+    def test_generic_candidate_error_pauses(self) -> None:
+        cfg = {"models": {"outer": ""}, "engines": {"outer": "codex"},
+               "budgets_usd": {"outer": 3}, "timeouts_s": {"outer": 900},
+               "runner": {"bug_investigate": {"enabled": True, "seeds": []}}}
+        state = {
+            "phase": "BUG_INVESTIGATE",
+            "bug_investigate_candidate": {
+                "component": "judge",
+                "hypothesis": "overall failed despite criteria passing",
+                "seed_ids": [],
+            },
+        }
+        with patch.object(ae, "run_candidate_bug_investigation",
+                          return_value=(2, None, "candidate investigation failed")):
+            self._run(cfg, state)
+
+        self.assertEqual(state["phase"], "PAUSED_ERROR")
+        self.assertEqual(state["resume_phase"], "BUG_INVESTIGATE")
+        self.assertIn("candidate investigation failed", state["error"])
 
     def test_cross_epoch_accumulation_fires_on_second_epoch(self) -> None:
         """Seed below threshold in epoch 1 fires in epoch 2 when evidence

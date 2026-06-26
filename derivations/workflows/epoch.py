@@ -1,4 +1,4 @@
-"""Epoch workflow: full GENERATE -> ANALYZE -> BUG_INVESTIGATE -> EXPERIMENT -> IMPLEMENT -> CLOSE.
+"""Epoch workflow: GENERATE -> ANALYZE, then model-selected route.
 
 This wraps the existing autonomous_epoch.py phase functions into a registered
 workflow. The phase handlers are the same functions that the old if-elif
@@ -23,7 +23,7 @@ from workflow_registry import Workflow, register  # noqa: E402
 @register
 class EpochWorkflow(Workflow):
     name = "epoch"
-    description = "Full autonomous epoch: generate, analyze, bug-investigate, experiment, implement, close"
+    description = "Autonomous epoch: generate, analyze, then follow the meta-analysis route"
 
     def phases(self) -> list[str]:
         return ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT",

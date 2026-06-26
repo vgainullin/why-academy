@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -36,6 +37,9 @@ from config import load_config  # noqa: E402
 
 
 PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
+ANALYSIS_DECISION_FILE = "analysis_decision.json"
+BUG_INVESTIGATION_RESULT_FILE = "bug_investigate_result.json"
+ANALYSIS_ROUTES = {"CONTINUE_EPOCH", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE"}
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 KIND_RE = re.compile(r"^\*\*Kind\*\*:\s*`?([A-Za-z_]+)`?", re.MULTILINE)
 SEED_RE = re.compile(r"^\*\*Seed hypothesis\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
@@ -212,6 +216,8 @@ def clear_stale_proposals(epoch_dir: Path, handled: set[str]) -> int:
     """
     removed = 0
     for prop in epoch_dir.glob("proposal_*.md"):
+        if prop.name.startswith("proposal_bug_"):
+            continue
         if "_closure" in prop.name:
             continue
         if prop.name in handled:
@@ -222,6 +228,218 @@ def clear_stale_proposals(epoch_dir: Path, handled: set[str]) -> int:
         prop.unlink()
         removed += 1
     return removed
+
+
+def analysis_decision_path(epoch_dir: Path) -> Path:
+    return epoch_dir / ANALYSIS_DECISION_FILE
+
+
+def load_analysis_decision(epoch_dir: Path) -> tuple[dict | None, str | None]:
+    """Load and validate the meta-analysis route packet."""
+    path = analysis_decision_path(epoch_dir)
+    if not path.exists():
+        return None, f"missing {path}"
+    try:
+        decision = json.loads(path.read_text())
+    except Exception as e:
+        return None, f"invalid JSON in {path}: {type(e).__name__}: {e}"
+    if not isinstance(decision, dict):
+        return None, f"{path} must contain a JSON object"
+    route = str(decision.get("route", "")).strip().upper()
+    if route not in ANALYSIS_ROUTES:
+        return None, (
+            f"{path} has invalid route {decision.get('route')!r}; "
+            f"expected one of {sorted(ANALYSIS_ROUTES)}"
+        )
+    decision["route"] = route
+    fallback = decision.get("fallback_route")
+    if fallback is not None:
+        fallback_route = str(fallback).strip().upper()
+        if fallback_route not in ANALYSIS_ROUTES:
+            return None, f"{path} has invalid fallback_route {fallback!r}"
+        decision["fallback_route"] = fallback_route
+    if route == "BUG_INVESTIGATE" and not isinstance(decision.get("candidate"), dict):
+        return None, f"{path} route BUG_INVESTIGATE requires a candidate object"
+    return decision, None
+
+
+def apply_analysis_decision(state: dict, decision: dict) -> None:
+    """Apply the model-selected route without adding local bug heuristics."""
+    route = decision["route"]
+    state["analysis_decision"] = decision
+    state["analysis_route"] = route
+    state["proposals_handled"] = state.get("proposals_handled", [])
+
+    if route == "CONTINUE_EPOCH":
+        state.pop("batch_id", None)
+        state["force_analyze"] = True
+        state["phase"] = "GENERATE"
+    elif route == "BUG_INVESTIGATE":
+        state["bug_investigate_candidate"] = decision.get("candidate", {})
+        state["bug_investigate_return_phase"] = "ANALYZE"
+        state["force_analyze"] = True
+        state["phase"] = "BUG_INVESTIGATE"
+    elif route == "IMPLEMENT":
+        state["phase"] = "IMPLEMENT"
+    elif route == "EXPERIMENT":
+        state["phase"] = "EXPERIMENT"
+    elif route == "CLOSE":
+        state["phase"] = "CLOSE"
+
+
+def selected_bug_seed_ids(state: dict) -> set[str]:
+    candidate = state.get("bug_investigate_candidate")
+    if not isinstance(candidate, dict):
+        return set()
+    raw = candidate.get("seed_ids")
+    if raw is None and candidate.get("seed_id"):
+        raw = [candidate.get("seed_id")]
+    if raw is None:
+        return set()
+    if not isinstance(raw, list):
+        raw = [raw]
+    return {str(s).strip() for s in raw if str(s).strip()}
+
+
+def analysis_fallback_route(state: dict) -> str:
+    decision = state.get("analysis_decision")
+    route = None
+    if isinstance(decision, dict):
+        route = decision.get("fallback_route")
+    route = str(route or "CONTINUE_EPOCH").strip().upper()
+    if route not in ANALYSIS_ROUTES or route == "BUG_INVESTIGATE":
+        return "CONTINUE_EPOCH"
+    return route
+
+
+def apply_route_after_bug_investigate(state: dict, route: str) -> None:
+    route = str(route or "CONTINUE_EPOCH").strip().upper()
+    if route not in ANALYSIS_ROUTES or route == "BUG_INVESTIGATE":
+        route = "CONTINUE_EPOCH"
+    if route == "CONTINUE_EPOCH":
+        state.pop("batch_id", None)
+        state["force_analyze"] = True
+        state["phase"] = "GENERATE"
+    elif route == "IMPLEMENT":
+        state["phase"] = "IMPLEMENT"
+    elif route == "EXPERIMENT":
+        state["phase"] = "EXPERIMENT"
+    elif route == "CLOSE":
+        state["phase"] = "CLOSE"
+
+
+def bug_investigation_result_path(epoch_dir: Path) -> Path:
+    return epoch_dir / BUG_INVESTIGATION_RESULT_FILE
+
+
+def load_bug_investigation_result(epoch_dir: Path) -> tuple[dict | None, str | None]:
+    path = bug_investigation_result_path(epoch_dir)
+    if not path.exists():
+        return None, f"missing {path}"
+    try:
+        result = json.loads(path.read_text())
+    except Exception as e:
+        return None, f"invalid JSON in {path}: {type(e).__name__}: {e}"
+    if not isinstance(result, dict):
+        return None, f"{path} must contain a JSON object"
+    return result, None
+
+
+def _read_jsonl_record(path: Path, record: object) -> dict:
+    try:
+        record_int = int(record)
+    except Exception:
+        record_int = 1
+    lines = path.read_text().splitlines()
+    if record_int == 0 and lines:
+        index = 0
+    elif 1 <= record_int <= len(lines):
+        index = record_int - 1
+    else:
+        return {"path": str(path), "record": record, "error": "record index out of range"}
+    try:
+        data = json.loads(lines[index])
+    except Exception as e:
+        return {"path": str(path), "record": record, "line": index + 1,
+                "error": f"invalid JSON: {type(e).__name__}: {e}"}
+    return {"path": str(path), "record": record, "line": index + 1, "data": data}
+
+
+def collect_candidate_evidence(candidate: dict) -> list[dict]:
+    evidence = []
+    for ref in candidate.get("evidence_refs") or []:
+        if not isinstance(ref, dict):
+            evidence.append({"ref": ref, "error": "evidence ref is not an object"})
+            continue
+        epoch = ref.get("epoch")
+        jsonl = ref.get("jsonl")
+        if epoch is None or not jsonl:
+            evidence.append({"ref": ref, "error": "missing epoch or jsonl"})
+            continue
+        try:
+            epoch_nnn = f"epoch_{int(epoch):03d}"
+        except Exception:
+            evidence.append({"ref": ref, "error": "invalid epoch"})
+            continue
+        jsonl_name = Path(str(jsonl)).name
+        path = PROJECT_ROOT / "derivations" / "logs" / epoch_nnn / jsonl_name
+        if not path.exists():
+            evidence.append({"ref": ref, "path": str(path), "error": "jsonl not found"})
+            continue
+        evidence.append({"ref": ref, **_read_jsonl_record(path, ref.get("record", 0))})
+    return evidence
+
+
+def render_candidate_bug_investigation_prompt(epoch_dir: Path, candidate: dict,
+                                              evidence: list[dict]) -> Path:
+    prompt_path = epoch_dir / f"bug_investigate_{uuid.uuid4()}.prompt.md"
+    result_path = bug_investigation_result_path(epoch_dir)
+    packet_path = epoch_dir / "bug_investigate_candidate.json"
+    packet = {
+        "candidate": candidate,
+        "evidence": evidence,
+        "result_path": str(result_path),
+    }
+    packet_path.write_text(json.dumps(packet, indent=2))
+    template = (PROJECT_ROOT / "derivations" / "prompts" /
+                "bug_investigate_candidate.md").read_text()
+    prompt = (template
+              .replace("<<CANDIDATE_JSON>>", json.dumps(candidate, indent=2))
+              .replace("<<EVIDENCE_JSON>>", json.dumps(evidence, indent=2))
+              .replace("<<RESULT_PATH>>", str(result_path))
+              .replace("<<EPOCH_REPORT_DIR>>", str(epoch_dir)))
+    prompt_path.write_text(prompt)
+    return prompt_path
+
+
+def run_candidate_bug_investigation(cfg: dict, epoch_dir: Path,
+                                    candidate: dict) -> tuple[int, dict | None, str | None]:
+    evidence = collect_candidate_evidence(candidate)
+    prompt_path = render_candidate_bug_investigation_prompt(epoch_dir, candidate, evidence)
+    result_path = bug_investigation_result_path(epoch_dir)
+    result_path.unlink(missing_ok=True)
+
+    model = os.environ.get("BUG_INVESTIGATE_MODEL") or cfg.get("models", {}).get("outer", "")
+    engine = (os.environ.get("BUG_INVESTIGATE_ENGINE")
+              or cfg.get("engines", {}).get("outer", "codex"))
+    budget = os.environ.get("BUG_INVESTIGATE_BUDGET") or cfg.get("budgets_usd", {}).get("outer", 3)
+    timeout = os.environ.get("BUG_INVESTIGATE_TIMEOUT") or cfg.get("timeouts_s", {}).get("outer", 900)
+    console = epoch_dir / f"{prompt_path.stem}.console.log"
+
+    with console.open("w") as f:
+        proc = run([os.environ.get("DERIVATION_PYTHON") or sys.executable,
+                    str(PROJECT_ROOT / "derivations" / "run_llm.py"),
+                    "--engine", str(engine),
+                    "--model", str(model),
+                    "--budget", str(budget),
+                    "--timeout", str(timeout),
+                    "--step", "outer",
+                    "--prompt-file", str(prompt_path)],
+                   stdout=f, stderr=subprocess.STDOUT)
+    if proc.returncode != 0:
+        return proc.returncode, None, f"candidate bug investigation exited {proc.returncode}; see {console}"
+    result, error = load_bug_investigation_result(epoch_dir)
+    return proc.returncode, result, error
 
 
 def _epoch_log_count(epoch: int) -> int:
@@ -304,10 +522,14 @@ def phase_generate(cfg: dict, state: dict, queue_path: Path) -> None:
 
 # ── PHASE: ANALYZE ──────────────────────────────────────────────────────
 def phase_analyze(cfg: dict, state: dict) -> None:
-    """Run the outer loop. Resumable: skip if summary.md already exists."""
+    """Run the outer loop, then apply its explicit route decision."""
     epoch_dir = PROJECT_ROOT / "derivations" / "reports" / f"epoch_{epoch_num():03d}"
+    epoch_dir.mkdir(parents=True, exist_ok=True)
     summary = epoch_dir / "summary.md"
-    if summary.exists():
+    decision_path = analysis_decision_path(epoch_dir)
+    force_analyze = bool(state.pop("force_analyze", False))
+    should_run_outer = force_analyze or not summary.exists() or not decision_path.exists()
+    if not should_run_outer:
         print(f"[runner] ANALYZE: summary.md exists; skipping outer call", file=sys.stderr)
     else:
         # Clear stale proposals from a partial outer-loop crash before re-running.
@@ -315,6 +537,7 @@ def phase_analyze(cfg: dict, state: dict) -> None:
         removed = clear_stale_proposals(epoch_dir, handled)
         if removed:
             print(f"[runner] ANALYZE: cleared {removed} stale proposal(s) from prior partial run", file=sys.stderr)
+        decision_path.unlink(missing_ok=True)
         # Verify logs exist before running the outer loop. If backfill failed
         # silently, outer.sh would run against no data and produce no proposals.
         if not _verify_epoch_logs(epoch_num(), "ANALYZE"):
@@ -325,8 +548,18 @@ def phase_analyze(cfg: dict, state: dict) -> None:
                      f"epoch_{epoch_num():03d}"])
             if r.returncode != 0:
                 print(f"[runner] ANALYZE failed rc={r.returncode}", file=sys.stderr)
-    state["phase"] = "BUG_INVESTIGATE"
-    state["proposals_handled"] = state.get("proposals_handled", [])
+    decision, error = load_analysis_decision(epoch_dir)
+    if error:
+        state["phase"] = "PAUSED_ERROR"
+        state["resume_phase"] = "ANALYZE"
+        state["error"] = error
+        state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        save_state(cfg, state)
+        print(f"[runner] ANALYZE: {error}", file=sys.stderr)
+        return
+    assert decision is not None
+    apply_analysis_decision(state, decision)
+    print(f"[runner] ANALYZE: route={state['analysis_route']}", file=sys.stderr)
     save_state(cfg, state)
 
 
@@ -604,8 +837,11 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     """
     bi_cfg = cfg.get("runner", {}).get("bug_investigate", {})
     if not bi_cfg.get("enabled", False):
-        print("[runner] BUG_INVESTIGATE: disabled in config; skipping to EXPERIMENT", file=sys.stderr)
-        state["phase"] = "EXPERIMENT"
+        return_phase = state.pop("bug_investigate_return_phase", "EXPERIMENT")
+        print(f"[runner] BUG_INVESTIGATE: disabled in config; skipping to {return_phase}", file=sys.stderr)
+        if return_phase == "ANALYZE":
+            state["force_analyze"] = True
+        state["phase"] = return_phase
         save_state(cfg, state)
         return
 
@@ -618,6 +854,15 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     # when newly accumulated cross-epoch evidence pushes it over the threshold.
     prior_evidence = state.get("bug_seed_evidence", {})
     seeds = bi_cfg.get("seeds", []) or []
+    requested_seed_ids = selected_bug_seed_ids(state)
+    candidate = state.get("bug_investigate_candidate")
+    candidate_driven = isinstance(candidate, dict) and bool(candidate) and not requested_seed_ids
+    if requested_seed_ids:
+        seeds = [s for s in seeds if s.get("id") in requested_seed_ids]
+    elif candidate_driven:
+        # A generic candidate selected by ANALYZE should be investigated as
+        # itself, not broadened to every configured seed.
+        seeds = []
     default_min_occ = int(bi_cfg.get("min_occurrences", 2))
     max_proposals = int(bi_cfg.get("max_proposals_per_epoch", 3))
 
@@ -627,12 +872,41 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     print(f"[runner] BUG_INVESTIGATE: epoch={epoch:03d} seeds={len(seeds)} "
           f"total_log_records={len(logs)} (current_epoch={current_records})",
           file=sys.stderr)
+    if requested_seed_ids:
+        print(f"[runner] BUG_INVESTIGATE: requested_seed_ids={sorted(requested_seed_ids)}",
+              file=sys.stderr)
     if not logs:
         print(f"[runner] BUG_INVESTIGATE: WARNING — no jsonl logs found across any epoch; "
               f"no seeds can be matched. Check that backfill ran successfully.",
               file=sys.stderr)
 
     written = 0
+    candidate_result: dict | None = None
+    if candidate_driven:
+        before = {p.name for p in epoch_dir.glob("proposal_bug_*.md")}
+        rc, candidate_result, error = run_candidate_bug_investigation(cfg, epoch_dir, candidate)
+        if rc == 75:
+            state["resume_phase"] = "BUG_INVESTIGATE"
+            state["phase"] = "PAUSED_QUOTA"
+            state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            save_state(cfg, state)
+            return
+        if error:
+            state["resume_phase"] = "BUG_INVESTIGATE"
+            state["phase"] = "PAUSED_ERROR"
+            state["error"] = error
+            state["paused_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            save_state(cfg, state)
+            return
+        after = {p.name for p in epoch_dir.glob("proposal_bug_*.md")}
+        proposal_paths = candidate_result.get("proposal_paths") if isinstance(candidate_result, dict) else []
+        if not isinstance(proposal_paths, list):
+            proposal_paths = []
+        listed = sum(1 for p in proposal_paths if (PROJECT_ROOT / str(p)).exists() or Path(str(p)).exists())
+        written += max(len(after - before), listed)
+        print(f"[runner] BUG_INVESTIGATE: candidate status={candidate_result.get('status')} "
+              f"proposal_count={written}", file=sys.stderr)
+
     new_evidence: dict[str, int] = {}
     for seed in seeds:
         sid = seed.get("id")
@@ -668,7 +942,18 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
 
     state["bug_seeds_processed"] = sorted(processed)
     state["bug_seed_evidence"] = new_evidence
-    state["phase"] = "EXPERIMENT"
+    return_phase = state.pop("bug_investigate_return_phase", "EXPERIMENT")
+    if return_phase == "ANALYZE":
+        if written > 0:
+            state["force_analyze"] = True
+            state["phase"] = "ANALYZE"
+        else:
+            route = None
+            if isinstance(candidate_result, dict):
+                route = candidate_result.get("recommended_route")
+            apply_route_after_bug_investigate(state, route or analysis_fallback_route(state))
+    else:
+        state["phase"] = return_phase
     save_state(cfg, state)
 
 

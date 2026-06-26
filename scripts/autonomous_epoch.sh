@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Autonomous epoch driver. Runs one full epoch (GENERATE -> ANALYZE -> IMPLEMENT -> CLOSE).
+# Autonomous epoch driver. Runs GENERATE -> ANALYZE, then follows analysis_decision.json.
 # Resumable: re-running picks up where the previous invocation left off.
 #
 # Usage:

@@ -82,6 +82,12 @@ class ClearStaleProposalsTests(unittest.TestCase):
         self.assertTrue((self.epoch_dir / "proposal_02_bar.md").exists())
         self.assertFalse((self.epoch_dir / "proposal_03_baz.md").exists())
 
+    def test_keeps_bug_investigation_proposal(self) -> None:
+        self._make_proposal("proposal_bug_orientation.md")
+        removed = ae.clear_stale_proposals(self.epoch_dir, set())
+        self.assertEqual(removed, 0)
+        self.assertTrue((self.epoch_dir / "proposal_bug_orientation.md").exists())
+
 
 class SnapshotRestoreTests(unittest.TestCase):
     """Snapshot/restore round-trips for validator files and state.json."""

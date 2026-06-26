@@ -220,8 +220,8 @@ class AutoDetectTests(unittest.TestCase):
         shutil.rmtree(tmp, ignore_errors=True)
 
     def test_auto_detect_returns_epoch_by_default(self) -> None:
-        # The auto-detect logic: bugfix if bug_investigate enabled AND logs exist
-        # Default repo has no logs, so should return epoch.
+        # Auto-detect defaults to the full epoch workflow unless saved runner
+        # state is explicitly parked at BUG_INVESTIGATE.
         import subprocess
         r = subprocess.run(
             [str(DERIVATIONS / ".venv" / "bin" / "python"),

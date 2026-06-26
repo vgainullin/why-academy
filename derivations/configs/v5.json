@@ -84,7 +84,7 @@
       "promote_on_win": false
     },
     "bug_investigate": {
-      "enabled": false,
+      "enabled": true,
       "min_occurrences": 2,
       "max_proposals_per_epoch": 3,
       "seeds": [

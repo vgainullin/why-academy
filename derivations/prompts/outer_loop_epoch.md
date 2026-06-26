@@ -43,7 +43,7 @@ Read all `.jsonl` files in the specified epoch range. Each line is a generation 
     {"from": "n0", "to": "n1", "rule": "u_substitution", "status": "PASS|FAIL|UNCOVERED|WEAK_PASS", "reason": "..."}
   ],
   "canvas_check": {"summary": {...}, "n_duplicates": N, "duplicates": [...]} | null,
-  "judge_eval":   {"overall": "PASS|FAIL", "verdicts": {...}} | null
+  "judge_eval":   {"overall": "PASS|FAIL|ERROR", "verdicts": {...}} | null
 }
 ```
 
@@ -63,10 +63,27 @@ This pipeline does not maintain a separate rule library; the existence of `deriv
   - This distinction requires human review per case; flag both but mark as "needs adjudication"
 - `WEAK_PASS_ONLY`: passed truth-preservation fallback but not a rule-specific check (== VALIDATOR_UNCOVERED, since with no rule library these are the same condition). Aggregate them together; prefer `VALIDATOR_UNCOVERED` as the primary label.
 
-**Attempt-level (zero or one per attempt):**
+**Attempt-level (zero or more per attempt):**
 
 - `CANVAS_DUPLICATE`: `canvas_check.n_duplicates > 0`. Two or more nodes in the graph rendered to the same LaTeX -- almost always sympy auto-simplification eating a pedagogically-distinct step. Surface as a prompt-level signal (the LLM needs to avoid the offending construction). Do not propose validator work.
-- `JUDGE_REJECTED`: `judge_eval.overall == "FAIL"`. The math was correct but the derivation failed a pedagogical rubric criterion (one-rule-per-edge, given-facts-visible, etc.). Sub-categorize by which judge criterion failed; concentrated single-criterion failures across many attempts are the cleanest signal for prompt-level updates. Do not propose validator work for these -- they're prompt-engineering candidates.
+- `JUDGE_REJECTED`: `judge_eval.overall == "FAIL"` and at least one judge
+  criterion verdict is `FAIL`. The math was correct but the derivation failed a
+  pedagogical rubric criterion (one-rule-per-edge, given-facts-visible, etc.).
+  Sub-categorize by which judge criterion failed; concentrated single-criterion
+  failures across many attempts are the cleanest signal for prompt-level
+  updates. Do not propose validator work for these -- they're
+  prompt-engineering candidates.
+- `JUDGE_AGGREGATION_MISMATCH`: `judge_eval.overall` is `FAIL` or `ERROR` while
+  every criterion verdict is `PASS` or `SKIP`. This is not a prompt-level
+  rejection. Treat it as a suspected judge aggregation/system bug and preserve
+  concrete evidence refs. A single clear instance is enough to route to
+  `BUG_INVESTIGATE`, because the bug-investigation branch exists to falsify or
+  confirm this kind of system defect.
+- `JUDGE_ERROR`: `judge_eval.overall == "ERROR"` and the record does not fit
+  `JUDGE_AGGREGATION_MISMATCH` (for example, a missing/malformed judge result or
+  a criterion-level error). Account for it separately from `JUDGE_REJECTED`.
+  Route to `BUG_INVESTIGATE` when you can form a concrete falsifiable system
+  hypothesis with evidence refs; otherwise route to `CONTINUE_EPOCH`.
 
 ### 3. Rank by impact
 
@@ -152,6 +169,8 @@ Attempt-level:
 |--------|-------|---------------|---------------|
 | CANVAS_DUPLICATE | <n> | <%> | <pattern, pattern> |
 | JUDGE_REJECTED   | <n> | <%> | <which criterion, which criterion> |
+| JUDGE_AGGREGATION_MISMATCH | <n> | <%> | <overall vs criteria pattern> |
+| JUDGE_ERROR      | <n> | <%> | <error pattern> |
 
 ## Proposals drafted
 
@@ -174,9 +193,82 @@ the held-out suite hasn't been run this epoch — that's a process gap to flag.>
 regression in pass rate), and whether the held-out suite needs to run.>
 ```
 
-### 6. Stop
+### 6. Write the route decision
 
-Print the path to `summary.md` and the list of proposals. **Do not implement any of the proposals.** Do not edit `validators/`, `rule_library/`, or `verify.py`. Do not run tests against proposed changes — there's nothing to run against yet, since nothing was written.
+Create `derivations/reports/epoch_<NNN>/analysis_decision.json`. This is the
+only state-machine decision artifact the runner reads. The runner will validate
+the JSON shape and follow `route`; it will not infer a route from prose.
+
+Use this schema:
+
+```json
+{
+  "route": "CONTINUE_EPOCH | BUG_INVESTIGATE | IMPLEMENT | EXPERIMENT | CLOSE",
+  "rationale": "<why this route is the best next action>",
+  "confidence": "low | medium | high",
+  "candidate": null,
+  "fallback_route": "CONTINUE_EPOCH | IMPLEMENT | EXPERIMENT | CLOSE"
+}
+```
+
+Route meanings:
+
+- `CONTINUE_EPOCH`: more inner-loop sampling is the right next action. Use this
+  when evidence is too thin, too diffuse, or not yet actionable.
+- `BUG_INVESTIGATE`: run the targeted bug-investigation branch. Use this only
+  when you can name a concrete suspected system defect and provide a candidate
+  object. This includes judge/canvas/target/system inconsistencies such as
+  `JUDGE_AGGREGATION_MISMATCH`. This does not authorize promotion; it
+  authorizes a focused probe.
+- `IMPLEMENT`: existing proposals, including any `proposal_bug_*.md` produced by
+  a prior bug-investigation branch, are ready to attempt through the gated
+  implementation/closure path.
+- `EXPERIMENT`: run the configured A/B experiment before implementation.
+- `CLOSE`: end the epoch without further generation or implementation.
+
+For `BUG_INVESTIGATE`, `candidate` must be an object:
+
+```json
+{
+  "component": "validator | judge | canvas | target | prompt | other",
+  "rule": "<rule id, or null>",
+  "hypothesis": "<falsifiable suspected defect>",
+  "seed_ids": ["<optional configured bug_investigate seed id>"],
+  "evidence_refs": [
+    {"epoch": 1, "jsonl": "batch_example.jsonl", "record": 4}
+  ]
+}
+```
+
+If you do not have a concrete candidate, do not route to `BUG_INVESTIGATE`.
+Choose `CONTINUE_EPOCH`, `IMPLEMENT`, or `CLOSE`.
+
+If any `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
+`BUG_INVESTIGATE` over `CONTINUE_EPOCH` and provide a judge candidate like:
+
+```json
+{
+  "component": "judge",
+  "rule": null,
+  "hypothesis": "judge_eval.overall can be ERROR or FAIL even when every judge criterion verdict is PASS or SKIP.",
+  "seed_ids": [],
+  "evidence_refs": [
+    {"epoch": 1, "jsonl": "batch_example.jsonl", "record": 2}
+  ]
+}
+```
+
+Validator proposal thresholds do not block this route. Those thresholds govern
+validator/rule proposals; `BUG_INVESTIGATE` is for concrete suspected system
+defects.
+
+### 7. Stop
+
+Print the path to `summary.md`, the path to `analysis_decision.json`, and the
+list of proposals. **Do not implement any of the proposals.** Do not edit
+`validators/`, `rule_library/`, or `verify.py`. Do not run tests against
+proposed changes — there's nothing to run against yet, since nothing was
+written.
 
 Wait for the human reviewer to either:
 - Approve specific proposals (separate Claude Code task `implement_proposal $PATH` will be invoked per approved item)
@@ -186,6 +278,7 @@ Wait for the human reviewer to either:
 ## Done criteria
 
 - `derivations/reports/epoch_<NNN>/summary.md` exists with all required sections
+- `derivations/reports/epoch_<NNN>/analysis_decision.json` exists and follows the schema above
 - One proposal file per top-K candidate, all using the schema above
 - No files outside `derivations/reports/` modified
 - Console output gives the human reviewer everything needed to start review
@@ -194,6 +287,11 @@ Wait for the human reviewer to either:
 
 - **No implementation.** The temptation to "just go ahead and write the validator" is exactly the failure mode this loop is designed to prevent. The strength of the auto-research framework comes from the gate at this step.
 - **Never draft `Kind: BUGFIX` here.** BUGFIX proposals are reserved for the BUG_INVESTIGATE phase, which emits them only from a seed hypothesis with a confirmed reproduction case. The outer loop works from aggregate evidence and must not claim a confirmed reproduction. If you believe a candidate is a confirmed bug with a reproduction case, draft it as `INVESTIGATE` and flag it as a seed-hypothesis candidate for the bug-investigate config.
+- **Do not infer the route in prose only.** The runner follows only `analysis_decision.json`. If the decision file is missing or invalid, the epoch pauses.
+- **Do not drop judge anomalies.** Every non-PASS `judge_eval.overall` must be
+  accounted for as `JUDGE_REJECTED`, `JUDGE_AGGREGATION_MISMATCH`, or
+  `JUDGE_ERROR`. Never describe an epoch as having only prompt-level judge
+  rejections if there is an aggregate/criterion mismatch.
 - **No prompt-level fixes here.** PARSE_FAILURE and VALIDATOR_REJECTED true-positives belong in the inner-loop prompt update, which is a separate concern handled at a different cadence. Note them in the summary but do not propose prompt changes here.
 - **Cite specific evidence.** Every proposal must reference at least 3 concrete log entries (problem_id + edge). No abstract "the LLM sometimes does X" — anchor everything in observed data. If you can't find 3 concrete examples, the candidate isn't ranked high enough yet.
 - **Don't conflate categories.** If a rule shows up in both VALIDATOR_UNCOVERED and WEAK_PASS_ONLY across the epoch, those are two different proposals (write the validator vs. strengthen the fallback). Don't merge.

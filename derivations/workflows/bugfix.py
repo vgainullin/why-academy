@@ -45,6 +45,7 @@ class BugfixWorkflow(Workflow):
 
     def prepare(self, cfg: dict, state: dict, args: Any) -> None:
         state["bug_investigate_return_phase"] = "IMPLEMENT"
+        state["implement_return_phase"] = "CLOSE"
         # Clear any stale bug_seeds_processed so seeds are re-evaluated against
         # the current logs on a fresh --reset run.
         if args and getattr(args, "reset", False):

@@ -35,6 +35,13 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("route to", prompt)
         self.assertIn("`IMPLEMENT`", prompt)
 
+    def test_experiment_is_post_implementation(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "outer_loop_epoch.md").read_text()
+
+        self.assertIn("proceed to `EXPERIMENT` after", prompt)
+        self.assertIn("A/B experiment after implementation", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

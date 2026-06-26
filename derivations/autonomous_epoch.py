@@ -4,8 +4,8 @@
 State machine that drives one full epoch end-to-end:
   GENERATE   -> batch generation across the cohort
   ANALYZE    -> outer loop drafts proposals
-  EXPERIMENT -> optional A/B test of pipeline changes (control vs treatment)
   IMPLEMENT  -> for each proposal, implement+closure_test+auto-promote-or-revert
+  EXPERIMENT -> optional A/B test of pipeline changes (control vs treatment)
   CLOSE      -> holdout regression + bump epoch in state.json
 
 All thresholds, gates, and limits are config-driven (configs/v<N>.json runner section).
@@ -36,7 +36,7 @@ sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
 
 
-PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
+PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE", "DONE"]
 ANALYSIS_DECISION_FILE = "analysis_decision.json"
 BUG_INVESTIGATION_RESULT_FILE = "bug_investigate_result.json"
 ANALYSIS_ROUTES = {"CONTINUE_EPOCH", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE"}
@@ -886,7 +886,7 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
     """
     bi_cfg = cfg.get("runner", {}).get("bug_investigate", {})
     if not bi_cfg.get("enabled", False):
-        return_phase = state.pop("bug_investigate_return_phase", "EXPERIMENT")
+        return_phase = state.pop("bug_investigate_return_phase", "IMPLEMENT")
         print(f"[runner] BUG_INVESTIGATE: disabled in config; skipping to {return_phase}", file=sys.stderr)
         if return_phase == "ANALYZE":
             state["force_analyze"] = True
@@ -991,7 +991,7 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
 
     state["bug_seeds_processed"] = sorted(processed)
     state["bug_seed_evidence"] = new_evidence
-    return_phase = state.pop("bug_investigate_return_phase", "EXPERIMENT")
+    return_phase = state.pop("bug_investigate_return_phase", "IMPLEMENT")
     if return_phase == "ANALYZE":
         if written > 0:
             state["force_analyze"] = True
@@ -1052,15 +1052,15 @@ def _run_experiment_batch(batch_id: str, queue_path: Path, *, inner_mode: str,
 
 
 def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
-    """Optional A/B experiment: test a pipeline change (e.g. rule_executor) against control.
+    """Optional A/B experiment after implementation.
 
-    If experiment is not enabled in config, or no proposals from ANALYZE,
-    skip directly to IMPLEMENT.
+    If experiment is not enabled in config, already has a verdict, or lacks
+    enough targets, skip directly to CLOSE.
     """
     exp_cfg = cfg.get("runner", {}).get("experiment", {})
     if not exp_cfg.get("enabled", False):
-        print("[runner] EXPERIMENT: disabled in config; skipping to IMPLEMENT", file=sys.stderr)
-        state["phase"] = "IMPLEMENT"
+        print("[runner] EXPERIMENT: disabled in config; skipping to CLOSE", file=sys.stderr)
+        state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
 
@@ -1076,8 +1076,8 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     # If we already have a verdict, skip
     verdict_path = epoch_dir / "experiment_verdict.json"
     if verdict_path.exists():
-        print(f"[runner] EXPERIMENT: verdict exists; skipping to IMPLEMENT", file=sys.stderr)
-        state["phase"] = "IMPLEMENT"
+        print(f"[runner] EXPERIMENT: verdict exists; skipping to CLOSE", file=sys.stderr)
+        state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
 
@@ -1087,7 +1087,7 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     targets = _experiment_targets(cfg, state, queue_path)
     if len(targets) < 2:
         print(f"[runner] EXPERIMENT: need >=2 targets, got {len(targets)}; skipping", file=sys.stderr)
-        state["phase"] = "IMPLEMENT"
+        state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
 
@@ -1203,7 +1203,7 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     print(f"[runner] EXPERIMENT: verdict={verdict['status']}  delta={verdict.get('acceptance_delta', 'n/a')}", file=sys.stderr)
 
     queue.unlink(missing_ok=True)
-    state["phase"] = "IMPLEMENT"
+    state["phase"] = "CLOSE"
     save_state(cfg, state)
 
 
@@ -1371,7 +1371,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
         state["proposals_handled"] = sorted(handled)
         save_state(cfg, state)
 
-    state["phase"] = "CLOSE"
+    state["phase"] = state.pop("implement_return_phase", "EXPERIMENT")
     save_state(cfg, state)
 
 

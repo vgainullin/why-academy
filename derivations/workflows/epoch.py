@@ -26,8 +26,8 @@ class EpochWorkflow(Workflow):
     description = "Autonomous epoch: generate, analyze, then follow the meta-analysis route"
 
     def phases(self) -> list[str]:
-        return ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT",
-                "IMPLEMENT", "CLOSE", "DONE"]
+        return ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "IMPLEMENT",
+                "EXPERIMENT", "CLOSE", "DONE"]
 
     def initial_phase(self) -> str:
         return "GENERATE"

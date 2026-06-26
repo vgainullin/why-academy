@@ -592,17 +592,17 @@ class ExperimentPhaseTests(unittest.TestCase):
             ae.phase_experiment(cfg, state, self.queue_path)
         return state
 
-    def test_disabled_skips_to_implement(self) -> None:
+    def test_disabled_skips_to_close(self) -> None:
         cfg = {"runner": {"experiment": {"enabled": False}}}
         state = {"phase": "EXPERIMENT"}
         self._run_phase(cfg, state)
-        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["phase"], "CLOSE")
 
-    def test_no_experiment_section_skips_to_implement(self) -> None:
+    def test_no_experiment_section_skips_to_close(self) -> None:
         cfg = {"runner": {}}
         state = {"phase": "EXPERIMENT"}
         self._run_phase(cfg, state)
-        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["phase"], "CLOSE")
 
     def test_too_few_targets_skips(self) -> None:
         queue = self.tmp / "small_queue.txt"
@@ -614,16 +614,16 @@ class ExperimentPhaseTests(unittest.TestCase):
              patch.object(ae, "save_state", lambda c, s: self.state_path.write_text(json.dumps(s))), \
              patch.object(ae, "epoch_num", return_value=1):
             ae.phase_experiment(cfg, state, queue)
-        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["phase"], "CLOSE")
 
-    def test_existing_verdict_skips_to_implement(self) -> None:
+    def test_existing_verdict_skips_to_close(self) -> None:
         cfg = {"runner": {"experiment": {"enabled": True, "max_targets": 5}}}
         state = {"phase": "EXPERIMENT", "experiment_id": "test_exp"}
         epoch_dir = self.tmp / "derivations" / "reports" / "epoch_001"
         epoch_dir.mkdir(parents=True)
         (epoch_dir / "experiment_verdict.json").write_text('{"status": "neutral"}')
         self._run_phase(cfg, state)
-        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["phase"], "CLOSE")
 
 
 class ExperimentTargetSelectionTests(unittest.TestCase):
@@ -746,7 +746,7 @@ class ExperimentVerdictTests(unittest.TestCase):
             "both_failed": 1,
         }}
         state = self._run_with_mock_batches(cfg, comparison_data=comparison)
-        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["phase"], "CLOSE")
         verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
         self.assertEqual(verdict["status"], "treatment_won")
         self.assertEqual(verdict["acceptance_delta"], 0.5)
@@ -861,8 +861,10 @@ class PhasesListTests(unittest.TestCase):
 
     def test_phases_order(self) -> None:
         idx = {p: i for i, p in enumerate(ae.PHASES)}
-        self.assertLess(idx["ANALYZE"], idx["EXPERIMENT"])
-        self.assertLess(idx["EXPERIMENT"], idx["IMPLEMENT"])
+        self.assertLess(idx["ANALYZE"], idx["BUG_INVESTIGATE"])
+        self.assertLess(idx["BUG_INVESTIGATE"], idx["IMPLEMENT"])
+        self.assertLess(idx["IMPLEMENT"], idx["EXPERIMENT"])
+        self.assertLess(idx["EXPERIMENT"], idx["CLOSE"])
 
 
 class PromptUpdateProposalTests(unittest.TestCase):
@@ -928,7 +930,7 @@ class PromptUpdateProposalTests(unittest.TestCase):
     def test_successful_prompt_promotion(self) -> None:
         state = self._run_phase(promote_rc=0)
         self.assertIn("proposal_01_prompt_fix.md", state["proposals_handled"])
-        self.assertEqual(state["phase"], "CLOSE")
+        self.assertEqual(state["phase"], "EXPERIMENT")
         # Prompt was modified (not reverted)
         self.assertIn(b"Addendum", self.prompt_path.read_bytes())
 

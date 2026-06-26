@@ -535,11 +535,11 @@ class PhaseBugInvestigateTests(unittest.TestCase):
             ae.phase_bug_investigate(cfg, state)
         return state
 
-    def test_disabled_skips_to_experiment(self) -> None:
+    def test_disabled_skips_to_implement(self) -> None:
         cfg = {"runner": {"bug_investigate": {"enabled": False}}}
         state = {"phase": "BUG_INVESTIGATE"}
         self._run(cfg, state)
-        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(state["phase"], "IMPLEMENT")
 
     def test_disabled_honors_return_phase(self) -> None:
         cfg = {"runner": {"bug_investigate": {"enabled": False}}}
@@ -548,11 +548,11 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         self.assertEqual(state["phase"], "ANALYZE")
         self.assertTrue(state["force_analyze"])
 
-    def test_no_section_skips_to_experiment(self) -> None:
+    def test_no_section_skips_to_implement(self) -> None:
         cfg = {"runner": {}}
         state = {"phase": "BUG_INVESTIGATE"}
         self._run(cfg, state)
-        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(state["phase"], "IMPLEMENT")
 
     def test_insufficient_evidence_no_proposal(self) -> None:
         _make_validator(self.tmp, "divide_both_sides")
@@ -568,7 +568,7 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         }}}
         state = {"phase": "BUG_INVESTIGATE"}
         self._run(cfg, state)
-        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(state["phase"], "IMPLEMENT")
         # Seed below threshold is NOT in processed (it should be re-evaluated
         # next epoch against accumulated logs).
         self.assertNotIn("s1", state["bug_seeds_processed"])
@@ -594,7 +594,7 @@ class PhaseBugInvestigateTests(unittest.TestCase):
         }}}
         state = {"phase": "BUG_INVESTIGATE"}
         self._run(cfg, state)
-        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(state["phase"], "IMPLEMENT")
         props = list(_epoch_dir(self.tmp).glob("proposal_*.md"))
         self.assertEqual(len(props), 1)
         self.assertIn("**Kind**: BUGFIX", props[0].read_text())
@@ -795,7 +795,7 @@ class PhaseBugInvestigateTests(unittest.TestCase):
              patch.object(ae, "save_state", side_effect=lambda c, s: self.state_path.write_text(json.dumps(s))), \
              patch.object(ae, "epoch_num", return_value=2):
             ae.phase_bug_investigate(cfg, state)
-        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(state["phase"], "IMPLEMENT")
         props = list((self.tmp / "derivations" / "reports" / "epoch_002").glob("proposal_*.md"))
         self.assertEqual(len(props), 1)
         self.assertIn("**Kind**: BUGFIX", props[0].read_text())
@@ -884,8 +884,9 @@ class PhaseImplementBugfixTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run_phase(self, *, implement_rc: int, closure_rc: int,
-                   closure_data: dict | None = None) -> dict:
-        state = {"phase": "IMPLEMENT", "proposals_handled": []}
+                   closure_data: dict | None = None,
+                   initial_state: dict | None = None) -> dict:
+        state = initial_state or {"phase": "IMPLEMENT", "proposals_handled": []}
 
         def fake_save_state(cfg, s):
             self.state_path.write_text(json.dumps(s))
@@ -929,12 +930,27 @@ class PhaseImplementBugfixTests(unittest.TestCase):
                            "positive_path": "p", "negative_path": None}):
             state = self._run_phase(implement_rc=0, closure_rc=0,
                                     closure_data={"lift_fraction": 1.0, "holdout_regressed": None})
-        self.assertEqual(state["phase"], "CLOSE")
+        self.assertEqual(state["phase"], "EXPERIMENT")
         self.assertEqual(len(calls), 1)
         rule, repro, seed_id = calls[0][0]
         self.assertEqual(rule, "divide_both_sides")
         self.assertEqual(seed_id, "orientation_false_rejection")
         self.assertEqual(repro["from_srepr"], "Eq(5*R/2, h)")
+
+    def test_explicit_implement_return_phase_is_honored(self) -> None:
+        self.cfg["runner"]["epoch"]["max_proposals_per_epoch"] = 1
+        state = self._run_phase(
+            implement_rc=0,
+            closure_rc=0,
+            closure_data={"lift_fraction": 1.0, "holdout_regressed": None},
+            initial_state={
+                "phase": "IMPLEMENT",
+                "proposals_handled": [],
+                "implement_return_phase": "CLOSE",
+            },
+        )
+        self.assertEqual(state["phase"], "CLOSE")
+        self.assertNotIn("implement_return_phase", state)
 
     def test_bugfix_reverted_on_low_lift(self) -> None:
         state = self._run_phase(implement_rc=0, closure_rc=0,

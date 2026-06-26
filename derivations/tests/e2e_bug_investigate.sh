@@ -3,8 +3,8 @@
 #
 # Drives the REAL autonomous_epoch.py main() through:
 #   BUG_INVESTIGATE (reads synthetic logs, writes BUGFIX proposal)
-#   -> EXPERIMENT (disabled, skips)
 #   -> IMPLEMENT (stub implement.sh + REAL closure_test.sh)
+#   -> EXPERIMENT (disabled, skips)
 #   -> CLOSE
 #
 # Only the LLM-calling implement.sh is stubbed. Everything else —
@@ -35,6 +35,27 @@ cp -R "$REPO/scripts" "$SANDBOX/scripts"
 # Clean out stale runtime artifacts from the copy
 rm -rf "$SANDBOX/derivations/logs" "$SANDBOX/derivations/reports" "$SANDBOX/derivations/_evolutions"
 rm -f "$SANDBOX/derivations/_epoch_state.json"
+rm -f "$SANDBOX"/derivations/test_corpus/holdout/problems_legacy_verifier/*.verifier.json
+
+"$VENV_PY" - "$SANDBOX/derivations/state.json" \
+	"$SANDBOX/derivations/test_corpus/divide_both_sides/positive.json" \
+	"$SANDBOX/derivations/test_corpus/divide_both_sides/negative.json" <<'PYEOF'
+import json, sys
+state_path = sys.argv[1]
+d = json.load(open(state_path))
+d["epoch"] = 1
+d["validator_version"] = "v2"
+json.dump(d, open(state_path, "w"), indent=2)
+for corpus_path in sys.argv[2:]:
+    p = corpus_path
+    try:
+        entries = json.load(open(p))
+    except FileNotFoundError:
+        continue
+    entries = [e for e in entries if "bugfix:orientation" not in e.get("description", "")]
+    json.dump(entries, open(p, "w"), indent=2)
+print("[e2e] reset sandbox state and stale bugfix artifacts")
+PYEOF
 
 # ── 1. Config: enable bug_investigate ────────────────────────────────────
 "$VENV_PY" - "$SANDBOX/derivations/configs/v5.json" <<'PYEOF'

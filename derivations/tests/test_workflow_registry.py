@@ -25,8 +25,10 @@ class RegistryTests(unittest.TestCase):
     def test_epoch_workflow_phases(self) -> None:
         wf = wr.get_workflow("epoch")
         self.assertEqual(wf.initial_phase(), "GENERATE")
-        self.assertIn("BUG_INVESTIGATE", wf.phases())
-        self.assertEqual(wf.phases()[-1], "DONE")
+        self.assertEqual(wf.phases(), [
+            "GENERATE", "ANALYZE", "BUG_INVESTIGATE", "IMPLEMENT",
+            "EXPERIMENT", "CLOSE", "DONE",
+        ])
 
     def test_bugfix_workflow_phases(self) -> None:
         wf = wr.get_workflow("bugfix")
@@ -40,6 +42,13 @@ class RegistryTests(unittest.TestCase):
         self.assertNotIn("GENERATE", phases)
         self.assertNotIn("ANALYZE", phases)
         self.assertNotIn("EXPERIMENT", phases)
+
+    def test_bugfix_prepare_keeps_implementation_on_close_path(self) -> None:
+        wf = wr.get_workflow("bugfix")
+        state = {}
+        wf.prepare({}, state, args=None)
+        self.assertEqual(state["bug_investigate_return_phase"], "IMPLEMENT")
+        self.assertEqual(state["implement_return_phase"], "CLOSE")
 
     def test_get_unknown_workflow_raises(self) -> None:
         with self.assertRaises(ValueError):

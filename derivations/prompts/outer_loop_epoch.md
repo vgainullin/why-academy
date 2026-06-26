@@ -221,11 +221,13 @@ Route meanings:
   `JUDGE_AGGREGATION_MISMATCH`. This does not authorize promotion; it
   authorizes a focused probe. Do not choose this route for the same candidate
   if a matching actionable `proposal_bug_*.md` already exists; choose
-  `IMPLEMENT` so the gated implementation/closure path can evaluate it.
+  `IMPLEMENT` so the gated implementation path can evaluate it before A/B.
 - `IMPLEMENT`: existing proposals, including any `proposal_bug_*.md` produced by
   a prior bug-investigation branch, are ready to attempt through the gated
-  implementation/closure path.
-- `EXPERIMENT`: run the configured A/B experiment before implementation.
+  implementation path. The runner will proceed to `EXPERIMENT` after
+  implementation attempts complete.
+- `EXPERIMENT`: run the configured A/B experiment after implementation, or
+  directly only when no implementation attempt is needed before close.
 - `CLOSE`: end the epoch without further generation or implementation.
 
 For `BUG_INVESTIGATE`, `candidate` must be an object:
@@ -301,8 +303,8 @@ Wait for the human reviewer to either:
   rejections if there is an aggregate/criterion mismatch.
 - **Do not loop bug investigation.** A matching actionable `proposal_bug_*.md`
   means the bug-investigation branch has already produced its candidate output.
-  The next route should be `IMPLEMENT`, `EXPERIMENT`, or `CLOSE`, not
-  `BUG_INVESTIGATE` again for the same candidate.
+  The next route should be `IMPLEMENT` or `CLOSE`, not `BUG_INVESTIGATE` again
+  for the same candidate.
 - **No prompt-level fixes here.** PARSE_FAILURE and VALIDATOR_REJECTED true-positives belong in the inner-loop prompt update, which is a separate concern handled at a different cadence. Note them in the summary but do not propose prompt changes here.
 - **Cite specific evidence.** Every proposal must reference at least 3 concrete log entries (problem_id + edge). No abstract "the LLM sometimes does X" — anchor everything in observed data. If you can't find 3 concrete examples, the candidate isn't ranked high enough yet.
 - **Don't conflate categories.** If a rule shows up in both VALIDATOR_UNCOVERED and WEAK_PASS_ONLY across the epoch, those are two different proposals (write the validator vs. strengthen the fallback). Don't merge.

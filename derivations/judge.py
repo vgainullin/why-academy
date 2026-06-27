@@ -132,11 +132,31 @@ def apply_adversarial(record: dict, adv: dict) -> dict:
 def normalize_primary_record(record: dict) -> dict:
     """Deterministic hook for primary judge consistency fixes.
 
-    The default behavior preserves the model's primary record exactly. Judge
-    BUGFIX proposals may narrow this function when a concrete fixture proves an
-    internally inconsistent primary verdict.
+    Reject primary records whose serialized criterion verdicts cannot explain
+    a failing/error overall result. A FAIL/ERROR with only PASS/SKIP criteria
+    is an aggregation mismatch unless a hidden failure has been serialized.
     """
-    return dict(record)
+    out = dict(record)
+    verdicts = out.get("verdicts")
+    if not isinstance(verdicts, dict):
+        return out
+
+    statuses = []
+    for payload in verdicts.values():
+        raw = payload.get("verdict") if isinstance(payload, dict) else payload
+        if isinstance(raw, str) and raw.strip():
+            statuses.append(raw.strip().upper())
+
+    overall = str(out.get("overall") or "").strip().upper()
+    if (
+        statuses
+        and len(statuses) == len(verdicts)
+        and overall in ("FAIL", "ERROR")
+        and all(s in ("PASS", "SKIP") for s in statuses)
+    ):
+        out["overall"] = "ERROR"
+        out["consistency_error"] = "overall is non-pass but all criterion verdicts are PASS/SKIP"
+    return out
 
 
 def run_adversarial_judge(problem: dict, target: str, record: dict, settings: dict) -> dict:

@@ -75,6 +75,45 @@ class ApplyAdversarialTests(unittest.TestCase):
         self.assertEqual(out["overall"], "PASS")
 
 
+class NormalizePrimaryRecordTests(unittest.TestCase):
+    def test_nonpass_with_only_pass_skip_criteria_is_explicit_error(self) -> None:
+        out = judge.normalize_primary_record({
+            "overall": "FAIL",
+            "verdicts": {
+                "one_rule_per_edge": {"verdict": "PASS"},
+                "given_facts_visible": {"verdict": "SKIP"},
+                "target_goal_reached": {"verdict": "PASS"},
+            },
+        })
+
+        self.assertEqual(out["overall"], "ERROR")
+        self.assertIn("consistency_error", out)
+
+    def test_failed_criterion_explains_fail(self) -> None:
+        out = judge.normalize_primary_record({
+            "overall": "FAIL",
+            "verdicts": {
+                "one_rule_per_edge": {"verdict": "FAIL"},
+                "given_facts_visible": {"verdict": "SKIP"},
+            },
+        })
+
+        self.assertEqual(out["overall"], "FAIL")
+        self.assertNotIn("consistency_error", out)
+
+    def test_missing_criterion_verdict_is_not_the_pass_skip_mismatch(self) -> None:
+        out = judge.normalize_primary_record({
+            "overall": "FAIL",
+            "verdicts": {
+                "one_rule_per_edge": {"verdict": "PASS"},
+                "given_facts_visible": None,
+            },
+        })
+
+        self.assertEqual(out["overall"], "FAIL")
+        self.assertNotIn("consistency_error", out)
+
+
 class AdversarialSettingsTests(unittest.TestCase):
     def test_defaults_when_section_absent(self) -> None:
         s = judge.adversarial_settings({})

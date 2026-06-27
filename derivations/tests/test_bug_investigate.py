@@ -1258,6 +1258,26 @@ class ClosureBugfixTests(unittest.TestCase):
                 rc = ct.main()
         self.assertEqual(rc, 1)
 
+    def test_holdout_regression_skips_generated_sidecars(self) -> None:
+        legacy = self.tmp / "derivations" / "test_corpus" / "holdout" / "problems_legacy_verifier"
+        legacy.mkdir(parents=True)
+        (legacy / "case.json").write_text(json.dumps({"id": "case", "nodes": [], "edges": []}))
+        (legacy / "case.verifier.json").write_text(json.dumps({"problem_id": "case"}))
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            return result
+
+        with patch.object(ct, "PROJECT_ROOT", self.tmp), \
+             patch.object(ct.subprocess, "run", side_effect=fake_run):
+            self.assertIsNone(ct._holdout_regression())
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(str(calls[0][-1]).endswith("case.json"))
+
 
 # ── Log verification (backfill bridge) ───────────────────────────────────
 

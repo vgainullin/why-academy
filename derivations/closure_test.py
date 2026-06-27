@@ -59,6 +59,8 @@ def _holdout_regression() -> str | None:
     if not legacy_dir.exists():
         return None
     for p in legacy_dir.glob("*.json"):
+        if p.name.endswith((".verifier.json", ".canvas_check.json")):
+            continue
         r = subprocess.run(
             [os.environ.get("DERIVATION_PYTHON") or sys.executable, str(ROOT / "verify.py"), str(p)],
             cwd=str(PROJECT_ROOT), capture_output=True, text=True,

@@ -75,7 +75,7 @@
       "schedule_wakeup_buffer_s": 60
     },
     "experiment": {
-      "enabled": false,
+      "enabled": true,
       "max_targets": 5,
       "control_inner_mode": "json",
       "treatment_inner_mode": "rule_executor",

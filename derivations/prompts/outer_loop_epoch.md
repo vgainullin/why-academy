@@ -230,6 +230,11 @@ Route meanings:
   directly only when no implementation attempt is needed before close.
 - `CLOSE`: end the epoch without further generation or implementation.
 
+When `derivations/reports/epoch_<NNN>/evals/*/eval_verdict.json` files exist,
+use them as the authoritative implementation/evaluation record. Do not infer
+promotion or regression status from raw proposal text when a structured verdict
+is available.
+
 For `BUG_INVESTIGATE`, `candidate` must be an object:
 
 ```json
@@ -305,6 +310,10 @@ Wait for the human reviewer to either:
   means the bug-investigation branch has already produced its candidate output.
   The next route should be `IMPLEMENT` or `CLOSE`, not `BUG_INVESTIGATE` again
   for the same candidate.
+- **Use structured eval verdicts.** Proposal and pipeline evaluation writes
+  `eval_plan.json`, optional `change_manifest.json`, and `eval_verdict.json`
+  under `derivations/reports/epoch_<NNN>/evals/`. Treat those as the durable
+  promotion/regression contract for follow-up analysis.
 - **No prompt-level fixes here.** PARSE_FAILURE and VALIDATOR_REJECTED true-positives belong in the inner-loop prompt update, which is a separate concern handled at a different cadence. Note them in the summary but do not propose prompt changes here.
 - **Cite specific evidence.** Every proposal must reference at least 3 concrete log entries (problem_id + edge). No abstract "the LLM sometimes does X" — anchor everything in observed data. If you can't find 3 concrete examples, the candidate isn't ranked high enough yet.
 - **Don't conflate categories.** If a rule shows up in both VALIDATOR_UNCOVERED and WEAK_PASS_ONLY across the epoch, those are two different proposals (write the validator vs. strengthen the fallback). Don't merge.

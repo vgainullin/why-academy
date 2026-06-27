@@ -936,6 +936,12 @@ class PhaseImplementBugfixTests(unittest.TestCase):
         self.assertEqual(rule, "divide_both_sides")
         self.assertEqual(seed_id, "orientation_false_rejection")
         self.assertEqual(repro["from_srepr"], "Eq(5*R/2, h)")
+        eval_dir = self.reports_dir / "evals" / self.bugfix.stem
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(plan["adapter"], "bugfix_reproduction_replay")
+        self.assertTrue(verdict["promoted"])
+        self.assertEqual(verdict["regression_summary"]["positive_path"], "p")
 
     def test_explicit_implement_return_phase_is_honored(self) -> None:
         self.cfg["runner"]["epoch"]["max_proposals_per_epoch"] = 1

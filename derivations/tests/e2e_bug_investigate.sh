@@ -170,6 +170,27 @@ else:
         errors.append(f"unexpected holdout regression: {rec['holdout_regressed']}")
     print(f"[e2e] PASS: closure lift=1.0, actual=PASS, holdout=none")
 
+# (b2) Structured eval artifacts were written for the BUGFIX replay.
+if props:
+    eval_dir = reports / "evals" / props[0].stem
+    plan_path = eval_dir / "eval_plan.json"
+    manifest_path = eval_dir / "change_manifest.json"
+    verdict_path = eval_dir / "eval_verdict.json"
+    if not plan_path.exists():
+        errors.append("eval_plan.json not written")
+    if not manifest_path.exists():
+        errors.append("change_manifest.json not written")
+    if not verdict_path.exists():
+        errors.append("eval_verdict.json not written")
+    if plan_path.exists() and verdict_path.exists():
+        plan = json.loads(plan_path.read_text())
+        verdict = json.loads(verdict_path.read_text())
+        if plan.get("adapter") != "bugfix_reproduction_replay":
+            errors.append(f"eval adapter={plan.get('adapter')!r}, expected bugfix_reproduction_replay")
+        if verdict.get("status") != "promoted" or not verdict.get("promoted"):
+            errors.append(f"eval verdict status={verdict.get('status')!r}, promoted={verdict.get('promoted')!r}")
+        print("[e2e] PASS: structured BUGFIX eval artifacts written")
+
 # (c) Regression corpus entries were auto-written on promotion
 pos = sandbox / "derivations" / "test_corpus" / "divide_both_sides" / "positive.json"
 neg = sandbox / "derivations" / "test_corpus" / "divide_both_sides" / "negative.json"

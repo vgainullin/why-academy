@@ -19,6 +19,7 @@ runner can be re-launched after the underlying issue is fixed.
 from __future__ import annotations
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,7 @@ from config import load_config  # noqa: E402
 PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE", "DONE"]
 ANALYSIS_DECISION_FILE = "analysis_decision.json"
 BUG_INVESTIGATION_RESULT_FILE = "bug_investigate_result.json"
+EVAL_SCHEMA_VERSION = 1
 ANALYSIS_ROUTES = {"CONTINUE_EPOCH", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE"}
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 KIND_RE = re.compile(r"^\*\*Kind\*\*:\s*`?([A-Za-z_]+)`?", re.MULTILINE)
@@ -205,6 +207,194 @@ def restore_validator_snapshot(snapshot: dict | None) -> None:
         path.write_bytes(snapshot["content"])
     else:
         path.unlink(missing_ok=True)
+
+
+def _relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT.resolve()))
+    except Exception:
+        return str(path)
+
+
+def _file_snapshot(path: Path) -> dict:
+    existed = path.exists()
+    item = {
+        "path": _relative_path(path),
+        "existed": existed,
+    }
+    if existed:
+        data = path.read_bytes()
+        item.update({
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        })
+    return item
+
+
+def _git_output(*args: str) -> str | None:
+    try:
+        r = subprocess.run(["git", *args], cwd=str(PROJECT_ROOT),
+                           capture_output=True, text=True)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip()
+
+
+def baseline_snapshot(*, rule: str | None = None, include_prompt: bool = False) -> dict:
+    """Lightweight reproducibility snapshot for evaluation artifacts."""
+    files = []
+    if rule:
+        files.append(_file_snapshot(PROJECT_ROOT / "derivations" / "validators" / f"{rule}.py"))
+    if include_prompt:
+        files.append(_file_snapshot(PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md"))
+    try:
+        state_json = _read_state_json()
+    except Exception:
+        state_json = None
+    return {
+        "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "git": {
+            "head": _git_output("rev-parse", "HEAD"),
+            "tree": _git_output("rev-parse", "HEAD^{tree}"),
+            "dirty": bool(_git_output("status", "--porcelain")),
+        },
+        "state_json": state_json,
+        "files": files,
+    }
+
+
+def proposal_eval_adapter(kind: str) -> str:
+    if kind == "BUGFIX":
+        return "bugfix_reproduction_replay"
+    if kind in ("NEW_VALIDATOR", "STRENGTHEN_VALIDATOR", "WEAKEN_VALIDATOR"):
+        return "validator_lift_replay"
+    if kind == "PROMPT_UPDATE":
+        return "prompt_promotion"
+    return "none"
+
+
+def proposal_eval_dir(prop: Path) -> Path:
+    return prop.parent / "evals" / prop.stem
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
+
+
+def write_proposal_eval_plan(cfg: dict, prop: Path, *, kind: str, rule: str | None,
+                             baseline: dict) -> tuple[Path, dict]:
+    runner_cfg = cfg.get("runner", {})
+    adapter = proposal_eval_adapter(kind)
+    plan = {
+        "schema_version": EVAL_SCHEMA_VERSION,
+        "plan_type": "proposal_change",
+        "adapter": adapter,
+        "proposal": {
+            "path": _relative_path(prop),
+            "name": prop.name,
+            "kind": kind,
+            "affected_rule": rule,
+            "seed_hypothesis": seed_id_from_proposal(prop),
+        },
+        "baseline": baseline,
+        "thresholds": {
+            "min_lift_fraction": runner_cfg.get("auto_promote", {}).get("min_lift_fraction", 0.4),
+            "revert_on_holdout_regression": runner_cfg.get("auto_promote", {}).get(
+                "revert_on_holdout_regression", True),
+        },
+        "inputs": {
+            "reproduction": reproduction_from_proposal(prop) if kind == "BUGFIX" else None,
+            "closure_test": runner_cfg.get("closure_test", {}),
+        },
+        "commands": [],
+    }
+    eval_dir = proposal_eval_dir(prop)
+    _write_json(eval_dir / "eval_plan.json", plan)
+    return eval_dir, plan
+
+
+def write_change_manifest(eval_dir: Path, *, plan: dict, baseline: dict,
+                          post_snapshot: dict, implement_rc: int) -> dict:
+    manifest = {
+        "schema_version": EVAL_SCHEMA_VERSION,
+        "plan_type": plan["plan_type"],
+        "adapter": plan["adapter"],
+        "proposal": plan["proposal"],
+        "implement_returncode": implement_rc,
+        "baseline": baseline,
+        "treatment": post_snapshot,
+    }
+    _write_json(eval_dir / "change_manifest.json", manifest)
+    return manifest
+
+
+def write_proposal_eval_verdict(eval_dir: Path, *, plan: dict, status: str,
+                                promoted: bool, closure: dict | None = None,
+                                reason: str | None = None,
+                                regression_summary: dict | None = None) -> dict:
+    verdict = {
+        "schema_version": EVAL_SCHEMA_VERSION,
+        "plan_type": plan["plan_type"],
+        "adapter": plan["adapter"],
+        "proposal": plan["proposal"],
+        "status": status,
+        "promoted": promoted,
+        "reason": reason,
+        "closure": closure,
+        "regression_summary": regression_summary,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    _write_json(eval_dir / "eval_verdict.json", verdict)
+    return verdict
+
+
+def experiment_eval_dir(epoch_dir: Path, experiment_id: str) -> Path:
+    return epoch_dir / "evals" / experiment_id
+
+
+def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: list[str],
+                               exp_cfg: dict, baseline: dict) -> tuple[Path, dict]:
+    treatment_mode = exp_cfg.get("treatment_inner_mode", "rule_executor")
+    plan = {
+        "schema_version": EVAL_SCHEMA_VERSION,
+        "plan_type": "pipeline_ab",
+        "adapter": "pipeline_mode_ab",
+        "experiment_id": experiment_id,
+        "baseline": baseline,
+        "control": {
+            "inner_mode": exp_cfg.get("control_inner_mode", "json"),
+        },
+        "treatment": {
+            "inner_mode": treatment_mode,
+            "normalization_mode": exp_cfg.get(
+                "treatment_normalization_mode", "preserve-executor-boundaries"),
+        },
+        "targets": targets,
+        "thresholds": {
+            "min_acceptance_delta": exp_cfg.get("min_acceptance_delta", 0.0),
+            "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
+        },
+    }
+    eval_dir = experiment_eval_dir(epoch_dir, experiment_id)
+    _write_json(eval_dir / "eval_plan.json", plan)
+    return eval_dir, plan
+
+
+def write_experiment_eval_verdict(eval_dir: Path, *, plan: dict, verdict: dict) -> None:
+    out = {
+        "schema_version": EVAL_SCHEMA_VERSION,
+        "plan_type": plan["plan_type"],
+        "adapter": plan["adapter"],
+        "experiment_id": plan["experiment_id"],
+        "status": verdict.get("status"),
+        "promoted": bool(verdict.get("status") == "treatment_won" and verdict.get("promote_on_win")),
+        "verdict": verdict,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    _write_json(eval_dir / "eval_verdict.json", out)
 
 
 def clear_stale_proposals(epoch_dir: Path, handled: set[str]) -> int:
@@ -1090,6 +1280,9 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
         state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
+    eval_dir, eval_plan = write_experiment_eval_plan(
+        epoch_dir, experiment_id=exp_id, targets=targets,
+        exp_cfg=exp_cfg, baseline=baseline_snapshot())
 
     queue = _write_experiment_queue(targets, exp_id)
 
@@ -1200,6 +1393,7 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
 
     epoch_dir.mkdir(parents=True, exist_ok=True)
     verdict_path.write_text(json.dumps(verdict, indent=2))
+    write_experiment_eval_verdict(eval_dir, plan=eval_plan, verdict=verdict)
     print(f"[runner] EXPERIMENT: verdict={verdict['status']}  delta={verdict.get('acceptance_delta', 'n/a')}", file=sys.stderr)
 
     queue.unlink(missing_ok=True)
@@ -1242,6 +1436,9 @@ def phase_implement(cfg: dict, state: dict) -> None:
         # PROMPT_UPDATE proposals go through promote_prompt.sh, not implement.sh.
         if kind == "PROMPT_UPDATE":
             print(f"  -> PROMPT_UPDATE: promoting via promote_prompt.sh", file=sys.stderr)
+            eval_baseline = baseline_snapshot(include_prompt=True)
+            eval_dir, eval_plan = write_proposal_eval_plan(
+                cfg, prop, kind=kind, rule=None, baseline=eval_baseline)
             pre_state_json = snapshot_state_json()
             pre_prompt = (PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md").read_bytes()
 
@@ -1251,6 +1448,9 @@ def phase_implement(cfg: dict, state: dict) -> None:
 
             r = run([str(PROJECT_ROOT / "scripts" / "promote_prompt.sh"), str(prop)])
             if r.returncode == 75:
+                write_proposal_eval_verdict(
+                    eval_dir, plan=eval_plan, status="paused_quota",
+                    promoted=False, reason="promote_prompt.sh quota")
                 _revert_prompt()
                 state["resume_phase"] = "IMPLEMENT"
                 _write_pause_state(cfg, state, "PAUSED_QUOTA", resume_phase="IMPLEMENT")
@@ -1259,6 +1459,13 @@ def phase_implement(cfg: dict, state: dict) -> None:
                 # promote_prompt.sh exits 2 (DENIED), 3 (no Promote section), 4 (no addenda),
                 # 5 (checkpoint exists). All are safe no-ops or explicit rejections.
                 print(f"  -> promote_prompt.sh rc={r.returncode}; marking handled", file=sys.stderr)
+                write_change_manifest(
+                    eval_dir, plan=eval_plan, baseline=eval_baseline,
+                    post_snapshot=baseline_snapshot(include_prompt=True),
+                    implement_rc=r.returncode)
+                write_proposal_eval_verdict(
+                    eval_dir, plan=eval_plan, status="implementation_rejected",
+                    promoted=False, reason=f"promote_prompt.sh rc={r.returncode}")
                 _revert_prompt()
                 handled.add(prop.name)
                 state["proposals_handled"] = sorted(handled)
@@ -1267,6 +1474,13 @@ def phase_implement(cfg: dict, state: dict) -> None:
                     break
                 continue
 
+            write_change_manifest(
+                eval_dir, plan=eval_plan, baseline=eval_baseline,
+                post_snapshot=baseline_snapshot(include_prompt=True),
+                implement_rc=r.returncode)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="promoted",
+                promoted=True, reason="promote_prompt.sh rc=0")
             print(f"  -> PROMOTED prompt (promote_prompt.sh rc=0)", file=sys.stderr)
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
@@ -1275,6 +1489,12 @@ def phase_implement(cfg: dict, state: dict) -> None:
 
         if kind not in ("NEW_VALIDATOR", "STRENGTHEN_VALIDATOR", "WEAKEN_VALIDATOR", "BUGFIX"):
             print(f"  -> skip kind={kind!r} (not a validator, prompt, or bugfix change)", file=sys.stderr)
+            eval_baseline = baseline_snapshot()
+            eval_dir, eval_plan = write_proposal_eval_plan(
+                cfg, prop, kind=kind, rule=None, baseline=eval_baseline)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="skipped",
+                promoted=False, reason=f"unsupported kind {kind!r}")
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
@@ -1283,10 +1503,19 @@ def phase_implement(cfg: dict, state: dict) -> None:
         rule = affected_rule_from_proposal(prop)
         if not rule:
             print("  -> skip: validator proposal has no affected rule", file=sys.stderr)
+            eval_baseline = baseline_snapshot()
+            eval_dir, eval_plan = write_proposal_eval_plan(
+                cfg, prop, kind=kind, rule=None, baseline=eval_baseline)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="skipped",
+                promoted=False, reason="missing affected rule")
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
+        eval_baseline = baseline_snapshot(rule=rule)
+        eval_dir, eval_plan = write_proposal_eval_plan(
+            cfg, prop, kind=kind, rule=rule, baseline=eval_baseline)
         pre_validator_v = validator_version()
         pre_validator_snapshot = snapshot_validator(rule)
         pre_state_json = snapshot_state_json()
@@ -1298,6 +1527,9 @@ def phase_implement(cfg: dict, state: dict) -> None:
         # 1. Implement
         r = run([str(PROJECT_ROOT / "scripts" / "implement.sh"), str(prop)])
         if r.returncode == 75:
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="paused_quota",
+                promoted=False, reason="implement.sh quota")
             _revert_to_pre()
             state["resume_phase"] = "IMPLEMENT"
             state["phase"] = "PAUSED_QUOTA"
@@ -1306,6 +1538,13 @@ def phase_implement(cfg: dict, state: dict) -> None:
             return
         if r.returncode != 0:
             print(f"  -> implement.sh failed rc={r.returncode}; marking handled", file=sys.stderr)
+            write_change_manifest(
+                eval_dir, plan=eval_plan, baseline=eval_baseline,
+                post_snapshot=baseline_snapshot(rule=rule),
+                implement_rc=r.returncode)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="implementation_failed",
+                promoted=False, reason=f"implement.sh rc={r.returncode}")
             _revert_to_pre()
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
@@ -1313,10 +1552,17 @@ def phase_implement(cfg: dict, state: dict) -> None:
             if stop_on_fail:
                 break
             continue
+        write_change_manifest(
+            eval_dir, plan=eval_plan, baseline=eval_baseline,
+            post_snapshot=baseline_snapshot(rule=rule),
+            implement_rc=r.returncode)
 
         # 2. Closure test
         r = run([str(PROJECT_ROOT / "scripts" / "closure_test.sh"), str(prop)])
         if r.returncode == 75:
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="paused_quota",
+                promoted=False, reason="closure_test.sh quota")
             _revert_to_pre()
             state["resume_phase"] = "IMPLEMENT"
             state["phase"] = "PAUSED_QUOTA"
@@ -1326,6 +1572,9 @@ def phase_implement(cfg: dict, state: dict) -> None:
         closure_sidecar = prop.with_name(prop.stem + "_closure.json")
         if not closure_sidecar.exists():
             print(f"  -> closure_test produced no sidecar; treating as FAILED", file=sys.stderr)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="evaluation_failed",
+                promoted=False, reason="closure sidecar missing")
             _revert_to_pre()
             handled.add(prop.name)
             state["proposals_handled"] = sorted(handled)
@@ -1336,29 +1585,38 @@ def phase_implement(cfg: dict, state: dict) -> None:
         closure = json.loads(closure_sidecar.read_text())
         lift = closure.get("lift_fraction", 0.0)
         regressed = closure.get("holdout_regressed")
+        promoted = lift >= min_lift and (not regressed or not revert_on_regress)
 
-        if lift >= min_lift and (not regressed or not revert_on_regress):
+        if promoted:
             print(f"  -> PROMOTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
             # validator_version was bumped by implement.sh after LLM success; nothing more to do
             # BUGFIX promotion: auto-generate regression corpus entries from
             # the reproduction case so the fix cannot silently regress.
+            regression_summary = None
             if kind == "BUGFIX":
                 repro = reproduction_from_proposal(prop)
                 seed_id = seed_id_from_proposal(prop) or "unknown"
                 if repro:
                     try:
-                        summary = write_regression_tests(rule, repro, seed_id)
+                        regression_summary = write_regression_tests(rule, repro, seed_id)
                         print(f"  -> REGRESSION TESTS: "
-                              f"positive={summary['positive_written']} "
-                              f"negative={summary['negative_written']} "
-                              f"-> {summary['positive_path']}", file=sys.stderr)
+                              f"positive={regression_summary['positive_written']} "
+                              f"negative={regression_summary['negative_written']} "
+                              f"-> {regression_summary['positive_path']}", file=sys.stderr)
                     except Exception as e:
                         print(f"  -> WARN: regression test generation failed: {e}", file=sys.stderr)
                 else:
                     print(f"  -> WARN: BUGFIX proposal has no parseable reproduction case; "
                           f"no auto regression tests written", file=sys.stderr)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="promoted", promoted=True,
+                closure=closure, regression_summary=regression_summary)
         else:
             print(f"  -> REVERTED  lift={lift:.2%}  regressed={regressed}", file=sys.stderr)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="reverted", promoted=False,
+                closure=closure,
+                reason=f"lift={lift:.4f}, holdout_regressed={regressed}")
             # Revert validator code AND state.json to exact pre-implementation state.
             _revert_to_pre()
             if stop_on_fail:

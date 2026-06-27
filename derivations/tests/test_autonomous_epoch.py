@@ -352,6 +352,12 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
         self.assertEqual(self.rule_path.read_bytes(), b"# original validator code\n")
         restored_state = json.loads(self.state_json.read_text())
         self.assertEqual(restored_state["validator_version"], "v2")
+        eval_dir = self.reports_dir / "evals" / self.proposal.stem
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(plan["adapter"], "validator_lift_replay")
+        self.assertEqual(verdict["status"], "reverted")
+        self.assertFalse(verdict["promoted"])
 
     def test_promote_on_sufficient_lift_keeps_changes(self) -> None:
         self._run_phase(
@@ -751,6 +757,12 @@ class ExperimentVerdictTests(unittest.TestCase):
         self.assertEqual(verdict["status"], "treatment_won")
         self.assertEqual(verdict["acceptance_delta"], 0.5)
         self.assertNotIn("promoted_experiment", state)
+        eval_dir = self.epoch_dir / "evals" / state["experiment_id"]
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        eval_verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(plan["adapter"], "pipeline_mode_ab")
+        self.assertEqual(eval_verdict["status"], "treatment_won")
+        self.assertFalse(eval_verdict["promoted"])
 
     def test_promote_on_win_sets_promoted_experiment(self) -> None:
         cfg = {"runner": {"experiment": {
@@ -931,6 +943,11 @@ class PromptUpdateProposalTests(unittest.TestCase):
         state = self._run_phase(promote_rc=0)
         self.assertIn("proposal_01_prompt_fix.md", state["proposals_handled"])
         self.assertEqual(state["phase"], "EXPERIMENT")
+        eval_dir = self.reports_dir / "evals" / self.proposal.stem
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(plan["adapter"], "prompt_promotion")
+        self.assertTrue(verdict["promoted"])
         # Prompt was modified (not reverted)
         self.assertIn(b"Addendum", self.prompt_path.read_bytes())
 

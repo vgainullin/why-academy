@@ -42,6 +42,14 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("proceed to `EXPERIMENT` after", prompt)
         self.assertIn("A/B experiment after implementation", prompt)
 
+    def test_structured_eval_verdicts_are_authoritative(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "outer_loop_epoch.md").read_text()
+
+        self.assertIn("eval_verdict.json", prompt)
+        self.assertIn("authoritative implementation/evaluation record", prompt)
+        self.assertIn("promotion/regression contract", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

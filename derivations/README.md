@@ -124,6 +124,24 @@ scripts/experiment_agents.sh render \
 The generated prompts are written under
 `derivations/_evolutions/experiment_agents/<experiment_id>/`.
 
+## Evaluation Artifacts
+
+Autonomous implementation writes structured evaluation artifacts under
+`derivations/reports/epoch_<NNN>/evals/`.
+
+- Proposal changes use `evals/<proposal_stem>/eval_plan.json`,
+  `change_manifest.json`, and `eval_verdict.json`.
+- BUGFIX proposals use the `bugfix_reproduction_replay` adapter: replay the
+  concrete reproduction case, run holdout, then write regression corpus entries
+  only after promotion.
+- Validator proposals use the `validator_lift_replay` adapter: replay the
+  affected rule's previously failing targets and compare lift against the
+  configured promotion gate.
+- Prompt proposals use the `prompt_promotion` adapter.
+- Pipeline experiments use the `pipeline_mode_ab` adapter and write
+  `evals/<experiment_id>/eval_plan.json` plus `eval_verdict.json` alongside
+  the legacy `experiment_verdict.json`.
+
 For a completed paired control/treatment run, render the A/B introspection gate
 directly from the batch directories:
 

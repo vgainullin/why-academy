@@ -48,7 +48,10 @@ Schema:
 Use statuses this way:
 
 - `BUGFIX_CANDIDATE`: you produced an actionable `proposal_bug_*.md` with a
-  concrete reproduction or deterministic failure description.
+  concrete reproduction that the current closure harness can replay:
+  - validator bug: `from_srepr`, `to_srepr`, `args`, `expected`, `actual`;
+  - judge/system bug: a fenced JSON object containing `judge_eval.verdicts`
+    and `judge_eval.overall`, plus any explicit expected outcome.
 - `INVESTIGATE`: the pattern is real but not actionable enough for a bugfix.
 - `FEATURE_GAP`: the system lacks a capability rather than containing a bug.
 - `NO_REPRO`: the evidence does not reproduce or support the hypothesis.
@@ -77,7 +80,37 @@ Proposal schema:
 ## Reproduction case
 
 Include this section only if the reproduction is concrete enough for
-`closure_test.sh` or a future deterministic check.
+`closure_test.sh` now.
+
+For validator bugs, use bullet fields:
+
+```markdown
+- from_srepr: ...
+- to_srepr: ...
+- args: {...}
+- expected: PASS
+- actual: FAIL
+```
+
+For judge/system bugs, set `Affected rule` to `none` and include a fenced JSON
+fixture:
+
+```json
+{
+  "judge_eval": {
+    "verdicts": {
+      "one_rule_per_edge": {"verdict": "PASS"},
+      "given_facts_visible": {"verdict": "SKIP"},
+      "target_goal_reached": {"verdict": "PASS"}
+    },
+    "overall": "FAIL"
+  },
+  "expected": {"overall": "PASS"}
+}
+```
+
+If you cannot provide one of those replayable forms, do not mark the result
+`BUGFIX_CANDIDATE`; use `INVESTIGATE` or `NO_ACTIONABLE_BUGFIX`.
 
 ## Proposed change
 

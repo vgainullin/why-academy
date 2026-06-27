@@ -45,6 +45,7 @@ ANALYSIS_ROUTES = {"CONTINUE_EPOCH", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 KIND_RE = re.compile(r"^\*\*Kind\*\*:\s*`?([A-Za-z_]+)`?", re.MULTILINE)
 SEED_RE = re.compile(r"^\*\*Seed hypothesis\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
+JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 RESUMABLE_PAUSE_STATES = {"PAUSED_QUOTA", "PAUSED_ERROR", "PAUSED_WALLCLOCK", "PAUSED_SIGNAL"}
 STATE_JSON = "derivations/state.json"
 
@@ -125,6 +126,21 @@ def seed_id_from_proposal(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def is_system_bug_rule(rule: str | None) -> bool:
+    return str(rule or "").strip().strip("`").lower() in ("", "none", "null", "system", "judge")
+
+
+def _proposal_section(text: str, header: str) -> str:
+    m = re.search(rf"^##\s+{re.escape(header)}\s*$", text, re.IGNORECASE | re.MULTILINE)
+    if not m:
+        return ""
+    block = text[m.end():]
+    next_hdr = re.search(r"^##\s+", block, re.MULTILINE)
+    if next_hdr:
+        block = block[:next_hdr.start()]
+    return block
+
+
 def reproduction_from_proposal(path: Path) -> dict | None:
     """Parse the `## Reproduction case` block emitted by _write_bugfix_proposal.
 
@@ -182,8 +198,54 @@ def reproduction_from_proposal(path: Path) -> dict | None:
     return None
 
 
+def judge_fixture_from_proposal(path: Path) -> dict | None:
+    """Parse a judge/system BUGFIX fixture from `## Reproduction case`.
+
+    A judge BUGFIX must carry a fenced JSON block containing either
+    `{"judge_eval": {...}}` or a raw judge record with `verdicts` and `overall`.
+    """
+    block = _proposal_section(path.read_text(), "Reproduction case")
+    if not block:
+        return None
+    for m in JSON_FENCE_RE.finditer(block):
+        raw = m.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        judge_eval = data.get("judge_eval")
+        if judge_eval is None and "verdicts" in data and "overall" in data:
+            judge_eval = data
+            data = {"judge_eval": judge_eval}
+        if not isinstance(judge_eval, dict):
+            continue
+        if isinstance(judge_eval.get("verdicts"), dict) and isinstance(judge_eval.get("overall"), str):
+            return data
+    return None
+
+
 def is_bugfix_proposal(path: Path) -> bool:
     return kind_from_proposal(path) == "BUGFIX"
+
+
+def proposal_eval_adapter_for_proposal(kind: str, rule: str | None, prop: Path | None) -> str:
+    if kind == "BUGFIX":
+        if prop and reproduction_from_proposal(prop):
+            return "bugfix_reproduction_replay"
+        if prop and is_system_bug_rule(rule) and judge_fixture_from_proposal(prop):
+            return "judge_aggregation_replay"
+        return "bugfix_missing_replay_contract"
+    return proposal_eval_adapter(kind)
+
+
+def implementation_file_paths(kind: str, rule: str | None, prop: Path | None) -> list[Path]:
+    if kind == "BUGFIX" and proposal_eval_adapter_for_proposal(kind, rule, prop) == "judge_aggregation_replay":
+        return [PROJECT_ROOT / "derivations" / "judge.py"]
+    if rule and not is_system_bug_rule(rule):
+        return [PROJECT_ROOT / "derivations" / "validators" / f"{rule}.py"]
+    return []
 
 
 def snapshot_validator(rule: str | None) -> dict | None:
@@ -207,6 +269,28 @@ def restore_validator_snapshot(snapshot: dict | None) -> None:
         path.write_bytes(snapshot["content"])
     else:
         path.unlink(missing_ok=True)
+
+
+def snapshot_files(paths: list[Path]) -> list[dict]:
+    snapshots = []
+    for path in paths:
+        existed = path.exists()
+        snapshots.append({
+            "path": path,
+            "existed": existed,
+            "content": path.read_bytes() if existed else None,
+        })
+    return snapshots
+
+
+def restore_file_snapshots(snapshots: list[dict]) -> None:
+    for snapshot in snapshots:
+        path = snapshot["path"]
+        if snapshot["existed"]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(snapshot["content"])
+        else:
+            path.unlink(missing_ok=True)
 
 
 def _relative_path(path: Path) -> str:
@@ -242,13 +326,16 @@ def _git_output(*args: str) -> str | None:
     return r.stdout.strip()
 
 
-def baseline_snapshot(*, rule: str | None = None, include_prompt: bool = False) -> dict:
+def baseline_snapshot(*, rule: str | None = None, include_prompt: bool = False,
+                      include_judge: bool = False) -> dict:
     """Lightweight reproducibility snapshot for evaluation artifacts."""
     files = []
     if rule:
         files.append(_file_snapshot(PROJECT_ROOT / "derivations" / "validators" / f"{rule}.py"))
     if include_prompt:
         files.append(_file_snapshot(PROJECT_ROOT / "derivations" / "prompts" / "generate_derivation.md"))
+    if include_judge:
+        files.append(_file_snapshot(PROJECT_ROOT / "derivations" / "judge.py"))
     try:
         state_json = _read_state_json()
     except Exception:
@@ -287,7 +374,7 @@ def _write_json(path: Path, data: dict) -> None:
 def write_proposal_eval_plan(cfg: dict, prop: Path, *, kind: str, rule: str | None,
                              baseline: dict) -> tuple[Path, dict]:
     runner_cfg = cfg.get("runner", {})
-    adapter = proposal_eval_adapter(kind)
+    adapter = proposal_eval_adapter_for_proposal(kind, rule, prop)
     plan = {
         "schema_version": EVAL_SCHEMA_VERSION,
         "plan_type": "proposal_change",
@@ -307,6 +394,7 @@ def write_proposal_eval_plan(cfg: dict, prop: Path, *, kind: str, rule: str | No
         },
         "inputs": {
             "reproduction": reproduction_from_proposal(prop) if kind == "BUGFIX" else None,
+            "judge_fixture": judge_fixture_from_proposal(prop) if kind == "BUGFIX" else None,
             "closure_test": runner_cfg.get("closure_test", {}),
         },
         "commands": [],
@@ -1513,15 +1601,32 @@ def phase_implement(cfg: dict, state: dict) -> None:
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
-        eval_baseline = baseline_snapshot(rule=rule)
+
+        adapter = proposal_eval_adapter_for_proposal(kind, rule, prop)
+        if adapter == "bugfix_missing_replay_contract":
+            print("  -> skip: BUGFIX has no closure replay contract", file=sys.stderr)
+            eval_baseline = baseline_snapshot()
+            eval_dir, eval_plan = write_proposal_eval_plan(
+                cfg, prop, kind=kind, rule=rule, baseline=eval_baseline)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="skipped",
+                promoted=False, reason="BUGFIX missing validator reproduction or judge fixture")
+            handled.add(prop.name)
+            state["proposals_handled"] = sorted(handled)
+            save_state(cfg, state)
+            continue
+
+        include_judge = adapter == "judge_aggregation_replay"
+        validator_rule = None if include_judge or is_system_bug_rule(rule) else rule
+        eval_baseline = baseline_snapshot(rule=validator_rule, include_judge=include_judge)
         eval_dir, eval_plan = write_proposal_eval_plan(
             cfg, prop, kind=kind, rule=rule, baseline=eval_baseline)
         pre_validator_v = validator_version()
-        pre_validator_snapshot = snapshot_validator(rule)
+        pre_change_snapshots = snapshot_files(implementation_file_paths(kind, rule, prop))
         pre_state_json = snapshot_state_json()
 
         def _revert_to_pre() -> None:
-            restore_validator_snapshot(pre_validator_snapshot)
+            restore_file_snapshots(pre_change_snapshots)
             restore_state_json(pre_state_json)
 
         # 1. Implement
@@ -1540,7 +1645,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             print(f"  -> implement.sh failed rc={r.returncode}; marking handled", file=sys.stderr)
             write_change_manifest(
                 eval_dir, plan=eval_plan, baseline=eval_baseline,
-                post_snapshot=baseline_snapshot(rule=rule),
+                post_snapshot=baseline_snapshot(rule=validator_rule, include_judge=include_judge),
                 implement_rc=r.returncode)
             write_proposal_eval_verdict(
                 eval_dir, plan=eval_plan, status="implementation_failed",
@@ -1554,7 +1659,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             continue
         write_change_manifest(
             eval_dir, plan=eval_plan, baseline=eval_baseline,
-            post_snapshot=baseline_snapshot(rule=rule),
+            post_snapshot=baseline_snapshot(rule=validator_rule, include_judge=include_judge),
             implement_rc=r.returncode)
 
         # 2. Closure test
@@ -1593,7 +1698,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             # BUGFIX promotion: auto-generate regression corpus entries from
             # the reproduction case so the fix cannot silently regress.
             regression_summary = None
-            if kind == "BUGFIX":
+            if kind == "BUGFIX" and adapter == "bugfix_reproduction_replay":
                 repro = reproduction_from_proposal(prop)
                 seed_id = seed_id_from_proposal(prop) or "unknown"
                 if repro:

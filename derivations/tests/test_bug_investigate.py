@@ -302,6 +302,49 @@ class CandidateEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence[0]["data"]["problem_id"], "first")
 
 
+class ProposalFixtureParsingTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.proposal = self.tmp / "proposal_bug_judge.md"
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_judge_fixture_parses_from_fenced_json(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "judge_eval": {\n'
+            '    "verdicts": {"one_rule_per_edge": {"verdict": "PASS"}},\n'
+            '    "overall": "FAIL"\n'
+            "  },\n"
+            '  "expected": {"overall": "PASS"}\n'
+            "}\n"
+            "```\n"
+        )
+
+        fixture = ae.judge_fixture_from_proposal(self.proposal)
+
+        self.assertIsNotNone(fixture)
+        assert fixture is not None
+        self.assertEqual(fixture["judge_eval"]["overall"], "FAIL")
+        self.assertEqual(fixture["expected"]["overall"], "PASS")
+
+    def test_judge_fixture_missing_without_fenced_json(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n\n"
+            "## Reproduction case\n\n"
+            "overall FAIL despite PASS criteria\n"
+        )
+
+        self.assertIsNone(ae.judge_fixture_from_proposal(self.proposal))
+
+
 # ── Cross-epoch log loading ──────────────────────────────────────────────
 class LoadAllEpochLogsTests(unittest.TestCase):
 
@@ -885,7 +928,8 @@ class PhaseImplementBugfixTests(unittest.TestCase):
 
     def _run_phase(self, *, implement_rc: int, closure_rc: int,
                    closure_data: dict | None = None,
-                   initial_state: dict | None = None) -> dict:
+                   initial_state: dict | None = None,
+                   on_implement=None) -> dict:
         state = initial_state or {"phase": "IMPLEMENT", "proposals_handled": []}
 
         def fake_save_state(cfg, s):
@@ -894,11 +938,14 @@ class PhaseImplementBugfixTests(unittest.TestCase):
         def fake_run(cmd, **kw):
             result = MagicMock()
             if "implement.sh" in str(cmd[0]):
+                if on_implement:
+                    on_implement()
                 result.returncode = implement_rc
             elif "closure_test.sh" in str(cmd[0]):
                 result.returncode = closure_rc
                 if closure_data is not None:
-                    sidecar = self.bugfix.with_name(self.bugfix.stem + "_closure.json")
+                    prop = Path(cmd[1])
+                    sidecar = prop.with_name(prop.stem + "_closure.json")
                     sidecar.write_text(json.dumps(closure_data))
             else:
                 result.returncode = 0
@@ -964,6 +1011,74 @@ class PhaseImplementBugfixTests(unittest.TestCase):
         # Validator restored to original.
         self.assertEqual((self.validators_dir / "divide_both_sides.py").read_bytes(), b"# original\n")
         self.assertIn("proposal_bug_orientation.md", state["proposals_handled"])
+
+    def test_judge_bugfix_uses_judge_adapter_and_no_validator_regression_tests(self) -> None:
+        self.bugfix.unlink()
+        self.ordinary.unlink()
+        judge_path = self.tmp / "derivations" / "judge.py"
+        judge_path.write_bytes(b"# original judge\n")
+        judge_prop = self.reports_dir / "proposal_bug_judge.md"
+        judge_prop.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n"
+            "**Seed hypothesis**: judge_overall_pass_skip_mismatch\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "judge_eval": {\n'
+            '    "verdicts": {\n'
+            '      "one_rule_per_edge": {"verdict": "PASS"},\n'
+            '      "given_facts_visible": {"verdict": "SKIP"}\n'
+            "    },\n"
+            '    "overall": "FAIL"\n'
+            "  },\n"
+            '  "expected": {"overall": "PASS"}\n'
+            "}\n"
+            "```\n"
+        )
+        calls = []
+
+        with patch.object(ae, "write_regression_tests",
+                          side_effect=lambda *a, **k: calls.append((a, k))):
+            state = self._run_phase(
+                implement_rc=0, closure_rc=0,
+                closure_data={"lift_fraction": 1.0, "holdout_regressed": None},
+            )
+
+        self.assertEqual(state["phase"], "EXPERIMENT")
+        self.assertEqual(calls, [])
+        eval_dir = self.reports_dir / "evals" / judge_prop.stem
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(plan["adapter"], "judge_aggregation_replay")
+        self.assertEqual(plan["inputs"]["judge_fixture"]["judge_eval"]["overall"], "FAIL")
+        self.assertTrue(verdict["promoted"])
+
+    def test_judge_bugfix_revert_restores_judge_file(self) -> None:
+        self.bugfix.unlink()
+        self.ordinary.unlink()
+        judge_path = self.tmp / "derivations" / "judge.py"
+        judge_path.write_bytes(b"# original judge\n")
+        judge_prop = self.reports_dir / "proposal_bug_judge.md"
+        judge_prop.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n"
+            "**Seed hypothesis**: judge_overall_pass_skip_mismatch\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "judge_eval": {"verdicts": {"one_rule_per_edge": {"verdict": "PASS"}}, "overall": "FAIL"}\n'
+            "}\n"
+            "```\n"
+        )
+
+        self._run_phase(
+            implement_rc=0, closure_rc=0,
+            closure_data={"lift_fraction": 0.0, "holdout_regressed": None},
+            on_implement=lambda: judge_path.write_bytes(b"# changed judge\n"),
+        )
+
+        self.assertEqual(judge_path.read_bytes(), b"# original judge\n")
 
     def test_bugfix_implement_failure_restores(self) -> None:
         state = self._run_phase(implement_rc=1, closure_rc=0)
@@ -1032,6 +1147,53 @@ class ClosureBugfixTests(unittest.TestCase):
         cfg = {"runner": {"auto_promote": {"min_lift_fraction": 0.4}}}
         with patch.object(ct, "load_config", return_value=(cfg, "v5")), \
              patch.object(ct, "_run_reproduction", return_value=("PASS", "")), \
+             patch.object(ct, "_holdout_regression", return_value=None):
+            with patch.object(sys, "argv", ["closure_test.py", str(self.proposal)]):
+                rc = ct.main()
+        self.assertEqual(rc, 1)
+
+    def test_judge_fixture_pass_no_holdout_returns_zero(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n"
+            "**Seed hypothesis**: judge_overall_pass_skip_mismatch\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "judge_eval": {"verdicts": {"one_rule_per_edge": {"verdict": "PASS"}}, "overall": "FAIL"}\n'
+            "}\n"
+            "```\n"
+        )
+        cfg = {"runner": {"auto_promote": {"min_lift_fraction": 0.4}}}
+        with patch.object(ct, "load_config", return_value=(cfg, "v5")), \
+             patch.object(ct, "_run_judge_fixture",
+                          return_value=("PASS", "resolved", {"overall": "PASS"})), \
+             patch.object(ct, "_holdout_regression", return_value=None):
+            with patch.object(sys, "argv", ["closure_test.py", str(self.proposal)]):
+                rc = ct.main()
+        self.assertEqual(rc, 0)
+        sidecar = self.proposal.with_name(self.proposal.stem + "_closure.json")
+        rec = json.loads(sidecar.read_text())
+        self.assertEqual(rec["scoring_surface"], "judge aggregation fixture")
+        self.assertEqual(rec["actual_status"], "PASS")
+        self.assertEqual(rec["lift_fraction"], 1.0)
+
+    def test_judge_fixture_fail_returns_one(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: none\n"
+            "**Seed hypothesis**: judge_overall_pass_skip_mismatch\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "judge_eval": {"verdicts": {"one_rule_per_edge": {"verdict": "PASS"}}, "overall": "FAIL"}\n'
+            "}\n"
+            "```\n"
+        )
+        cfg = {"runner": {"auto_promote": {"min_lift_fraction": 0.4}}}
+        with patch.object(ct, "load_config", return_value=(cfg, "v5")), \
+             patch.object(ct, "_run_judge_fixture",
+                          return_value=("FAIL", "still mismatched", {"overall": "FAIL"})), \
              patch.object(ct, "_holdout_regression", return_value=None):
             with patch.object(sys, "argv", ["closure_test.py", str(self.proposal)]):
                 rc = ct.main()

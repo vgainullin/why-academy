@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Implement-Proposal wrapper. Invokes the implement_proposal.md prompt against
 # a specific approved proposal file. The most consequential step in the
-# pipeline -- it's the only one that modifies validator code.
+# pipeline -- it's the only one that modifies validator or judge code.
 #
 # Usage:
 #   scripts/implement.sh derivations/reports/epoch_000/proposal_01_NEW_VALIDATOR.md

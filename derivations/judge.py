@@ -129,6 +129,16 @@ def apply_adversarial(record: dict, adv: dict) -> dict:
     return out
 
 
+def normalize_primary_record(record: dict) -> dict:
+    """Deterministic hook for primary judge consistency fixes.
+
+    The default behavior preserves the model's primary record exactly. Judge
+    BUGFIX proposals may narrow this function when a concrete fixture proves an
+    internally inconsistent primary verdict.
+    """
+    return dict(record)
+
+
 def run_adversarial_judge(problem: dict, target: str, record: dict, settings: dict) -> dict:
     base = {
         "adversarial_version": ADVERSARIAL_VERSION,
@@ -259,6 +269,8 @@ def main() -> int:
             "verdicts": {k: parsed_json.get(k) for k in RUBRIC_KEYS},
             "overall": parsed_json.get("overall", "FAIL"),
         }
+
+    record = normalize_primary_record(record)
 
     settings = adversarial_settings(cfg)
     run_adv = settings["enabled"] and not args.no_adversarial

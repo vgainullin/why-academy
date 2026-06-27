@@ -50,6 +50,22 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("authoritative implementation/evaluation record", prompt)
         self.assertIn("promotion/regression contract", prompt)
 
+    def test_bug_investigate_requires_replayable_bugfix_fixture(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "bug_investigate_candidate.md").read_text()
+
+        self.assertIn("current closure harness can replay", prompt)
+        self.assertIn("judge_eval.verdicts", prompt)
+        self.assertIn("If you cannot provide one of those replayable forms", prompt)
+
+    def test_implement_prompt_allows_only_typed_judge_bugfixes(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "implement_proposal.md").read_text()
+
+        self.assertIn("Judge/system BUGFIX", prompt)
+        self.assertIn("judge.normalize_primary_record", prompt)
+        self.assertIn("**Do NOT modify** `judge.py` unless", prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

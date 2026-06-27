@@ -31,6 +31,8 @@ PROJECT_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
 from autonomous_epoch import (  # noqa: E402
+    is_system_bug_rule,
+    judge_fixture_from_proposal,
     kind_from_proposal,
     reproduction_from_proposal,
     seed_id_from_proposal,
@@ -80,6 +82,117 @@ def _run_reproduction(rule: str, repro: dict) -> tuple[str, str]:
     return verify_edge(from_expr, to_expr, rule, repro.get("args") or {})
 
 
+def _judge_criterion_statuses(record: dict) -> list[str]:
+    verdicts = record.get("verdicts") or {}
+    if not isinstance(verdicts, dict):
+        return []
+    statuses: list[str] = []
+    for payload in verdicts.values():
+        raw = payload.get("verdict") if isinstance(payload, dict) else payload
+        if isinstance(raw, str) and raw.strip():
+            statuses.append(raw.strip().upper())
+    return statuses
+
+
+def _judge_aggregation_mismatch(record: dict) -> str | None:
+    overall = str(record.get("overall") or "").strip().upper()
+    statuses = _judge_criterion_statuses(record)
+    if not overall or not statuses:
+        return None
+    if overall == "PASS" and any(s in ("FAIL", "ERROR") for s in statuses):
+        return "overall_pass_with_failed_criterion"
+    if overall in ("FAIL", "ERROR") and all(s in ("PASS", "SKIP") for s in statuses):
+        return "overall_nonpass_with_no_failed_criteria"
+    return None
+
+
+def _judge_fixture_record(fixture: dict) -> dict:
+    judge_eval = fixture.get("judge_eval") if isinstance(fixture, dict) else None
+    if not isinstance(judge_eval, dict):
+        raise ValueError("judge fixture must contain a judge_eval object")
+    # Isolate closure replay from in-place mutations by judge helpers.
+    return json.loads(json.dumps(judge_eval))
+
+
+def _run_judge_fixture(fixture: dict) -> tuple[str, str, dict | None]:
+    """Replay a judge/system BUGFIX fixture against the current judge normalizer."""
+    try:
+        before = _judge_fixture_record(fixture)
+    except Exception as e:
+        return "ERROR", f"invalid judge fixture: {e}", None
+    mismatch = _judge_aggregation_mismatch(before)
+    if not mismatch:
+        return "FAIL", "fixture is not a judge aggregation mismatch", before
+    try:
+        import judge  # noqa: E402
+        normalizer = getattr(judge, "normalize_primary_record", None)
+    except Exception as e:
+        return "ERROR", f"could not import judge normalizer: {e}", before
+    if not callable(normalizer):
+        return "FAIL", "judge.normalize_primary_record is missing", before
+    try:
+        after = normalizer(before)
+    except Exception as e:
+        return "ERROR", f"judge normalizer raised: {e}", before
+    if not isinstance(after, dict):
+        return "ERROR", "judge normalizer returned non-object", before
+
+    expected_overall = fixture.get("expected_overall")
+    if expected_overall is None and isinstance(fixture.get("expected"), dict):
+        expected_overall = fixture["expected"].get("overall")
+    if expected_overall:
+        actual = str(after.get("overall") or "").upper()
+        if actual != str(expected_overall).upper():
+            return "FAIL", f"expected overall {expected_overall}, got {actual}", after
+        return "PASS", "judge fixture matched expected overall", after
+
+    after_mismatch = _judge_aggregation_mismatch(after)
+    rejected = str(after.get("overall") or "").upper() == "ERROR" and bool(
+        after.get("consistency_error") or after.get("_consistency_error")
+    )
+    if after_mismatch and not rejected:
+        return "FAIL", f"judge aggregation mismatch still present: {after_mismatch}", after
+    return "PASS", "judge aggregation mismatch resolved", after
+
+
+def _run_judge_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
+                              proposal_path: Path, rule: str, fixture: dict) -> int:
+    seed_id = seed_id_from_proposal(proposal_path)
+    status, reason, normalized = _run_judge_fixture(fixture)
+    passes = status == "PASS"
+    lift_fraction = 1.0 if passes else 0.0
+    holdout_regressed = _holdout_regression()
+
+    record = {
+        "rule": rule,
+        "kind": "BUGFIX",
+        "proposal_path": str(proposal_path),
+        "seed_hypothesis": seed_id,
+        "judge_fixture": fixture,
+        "actual_status": status,
+        "judge_reason": reason,
+        "normalized_judge_eval": normalized,
+        "lift_fraction": lift_fraction,
+        "holdout_regressed": holdout_regressed,
+        "scoring_surface": "judge aggregation fixture",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "config_version": cfg_version,
+        "min_lift_threshold": runner.get("auto_promote", {}).get("min_lift_fraction", 0.4),
+    }
+    out_path = proposal_path.with_name(proposal_path.stem + "_closure.json")
+    out_path.write_text(json.dumps(record, indent=2))
+
+    print()
+    print(f"[closure] BUGFIX judge fixture rule={rule} seed={seed_id}")
+    print(f"[closure] actual={status} reason={reason}")
+    print(f"[closure] lift fraction: {lift_fraction:.2%}")
+    print(f"[closure] holdout regression: {holdout_regressed or 'none'}")
+    verdict = "REPRO_CONFIRMED" if passes and not holdout_regressed else "REPRO_FAILED"
+    print(f"[closure] verdict: {verdict}")
+    print(f"[closure] sidecar: {out_path}")
+    return 0 if (passes and not holdout_regressed) else 1
+
+
 def _run_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
                         proposal_path: Path, rule: str) -> int:
     """Closure path for BUGFIX proposals: verify the reproduction case now passes.
@@ -89,6 +202,11 @@ def _run_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
     the validator now returns the expected status on that case, else 0.0.
     Holdout regression is still enforced.
     """
+    if is_system_bug_rule(rule):
+        fixture = judge_fixture_from_proposal(proposal_path)
+        if fixture:
+            return _run_judge_bugfix_closure(cfg, cfg_version, runner, proposal_path, rule, fixture)
+
     repro = reproduction_from_proposal(proposal_path)
     seed_id = seed_id_from_proposal(proposal_path)
     if not repro:

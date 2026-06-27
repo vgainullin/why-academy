@@ -85,6 +85,17 @@ class AnalyzeRoutingTests(unittest.TestCase):
         self.assertEqual(state["phase"], "PAUSED_ERROR")
         self.assertIn("invalid route", state["error"])
 
+    def test_invalid_proposal_paths_pauses(self) -> None:
+        self._write_summary_and_decision({
+            "route": "IMPLEMENT",
+            "rationale": "proposal ready",
+            "proposal_paths": "derivations/reports/epoch_000/proposal.md",
+        })
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "PAUSED_ERROR")
+        self.assertIn("proposal_paths must be a list of strings", state["error"])
+
     def test_bug_investigate_route_records_candidate_and_return(self) -> None:
         candidate = {
             "component": "validator",
@@ -154,6 +165,18 @@ class AnalyzeRoutingTests(unittest.TestCase):
         state = {"phase": "ANALYZE"}
         self._run(state)
         self.assertEqual(state["phase"], "IMPLEMENT")
+
+    def test_implement_route_records_explicit_proposal_paths(self) -> None:
+        paths = ["derivations/reports/epoch_000/proposal_bug_previous.md"]
+        self._write_summary_and_decision({
+            "route": "IMPLEMENT",
+            "rationale": "prior proposal ready",
+            "proposal_paths": paths,
+        })
+        state = {"phase": "ANALYZE"}
+        self._run(state)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["analysis_proposal_paths"], paths)
 
 
 # ── Seed evidence matching ───────────────────────────────────────────────
@@ -1079,6 +1102,42 @@ class PhaseImplementBugfixTests(unittest.TestCase):
         )
 
         self.assertEqual(judge_path.read_bytes(), b"# original judge\n")
+
+    def test_explicit_prior_epoch_proposal_is_implemented(self) -> None:
+        self.bugfix.unlink()
+        self.ordinary.unlink()
+        prior_dir = self.tmp / "derivations" / "reports" / "epoch_000"
+        prior_dir.mkdir(parents=True)
+        prior_prop = prior_dir / "proposal_bug_previous.md"
+        prior_prop.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: `divide_both_sides`\n"
+            "**Seed hypothesis**: prior_bug\n\n"
+            "## Reproduction case\n\n"
+            "- from_srepr: Eq(5*R/2, h)\n"
+            "- to_srepr: Eq(h, 5*R/2)\n"
+            "- args: {}\n"
+            "- expected: PASS\n"
+            "- actual: FAIL\n"
+        )
+
+        state = self._run_phase(
+            implement_rc=0,
+            closure_rc=0,
+            closure_data={"lift_fraction": 1.0, "holdout_regressed": None},
+            initial_state={
+                "phase": "IMPLEMENT",
+                "proposals_handled": [],
+                "analysis_proposal_paths": [
+                    "derivations/reports/epoch_000/proposal_bug_previous.md",
+                ],
+            },
+        )
+
+        rel = "derivations/reports/epoch_000/proposal_bug_previous.md"
+        self.assertIn(rel, state["proposals_handled"])
+        eval_dir = prior_dir / "evals" / prior_prop.stem
+        self.assertTrue((eval_dir / "eval_plan.json").exists())
 
     def test_bugfix_implement_failure_restores(self) -> None:
         state = self._run_phase(implement_rc=1, closure_rc=0)

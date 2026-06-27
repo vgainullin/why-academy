@@ -34,6 +34,7 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("Do not investigate it again", prompt)
         self.assertIn("route to", prompt)
         self.assertIn("`IMPLEMENT`", prompt)
+        self.assertIn("proposal_paths", prompt)
 
     def test_experiment_is_post_implementation(self) -> None:
         prompt = (PROJECT_ROOT / "derivations" / "prompts" /

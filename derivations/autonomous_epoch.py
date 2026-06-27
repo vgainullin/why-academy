@@ -538,6 +538,10 @@ def load_analysis_decision(epoch_dir: Path) -> tuple[dict | None, str | None]:
         decision["fallback_route"] = fallback_route
     if route == "BUG_INVESTIGATE" and not isinstance(decision.get("candidate"), dict):
         return None, f"{path} route BUG_INVESTIGATE requires a candidate object"
+    proposal_paths = decision.get("proposal_paths")
+    if proposal_paths is not None:
+        if not isinstance(proposal_paths, list) or not all(isinstance(p, str) for p in proposal_paths):
+            return None, f"{path} proposal_paths must be a list of strings"
     return decision, None
 
 
@@ -547,6 +551,7 @@ def apply_analysis_decision(state: dict, decision: dict) -> None:
     state["analysis_decision"] = decision
     state["analysis_route"] = route
     state["proposals_handled"] = state.get("proposals_handled", [])
+    state.pop("analysis_proposal_paths", None)
 
     if route == "CONTINUE_EPOCH":
         state.pop("batch_id", None)
@@ -558,6 +563,7 @@ def apply_analysis_decision(state: dict, decision: dict) -> None:
         state["force_analyze"] = True
         state["phase"] = "BUG_INVESTIGATE"
     elif route == "IMPLEMENT":
+        state["analysis_proposal_paths"] = decision.get("proposal_paths", [])
         state["phase"] = "IMPLEMENT"
     elif route == "EXPERIMENT":
         state["phase"] = "EXPERIMENT"
@@ -610,6 +616,7 @@ def resolve_repeated_bug_investigation(epoch_dir: Path, decision: dict) -> dict:
         "recommended_route": result.get("recommended_route"),
         "proposal_paths": proposal_paths,
     }
+    resolved["proposal_paths"] = proposal_paths
     return resolved
 
 
@@ -1489,6 +1496,57 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     save_state(cfg, state)
 
 
+def _resolve_proposal_path(raw: str) -> Path | None:
+    path = Path(raw)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.exists() or not path.is_file():
+        return None
+    if not path.name.startswith("proposal_") or "_closure" in path.name:
+        return None
+    return path
+
+
+def _analysis_proposal_paths(state: dict) -> list[Path]:
+    raw_paths = state.get("analysis_proposal_paths")
+    if raw_paths is None and isinstance(state.get("analysis_decision"), dict):
+        raw_paths = state["analysis_decision"].get("proposal_paths")
+    if not isinstance(raw_paths, list):
+        raw_paths = []
+    out: list[Path] = []
+    for raw in raw_paths:
+        if not isinstance(raw, str):
+            continue
+        path = _resolve_proposal_path(raw)
+        if path:
+            out.append(path)
+    return out
+
+
+def _proposal_handled_keys(prop: Path) -> set[str]:
+    return {prop.name, _relative_path(prop)}
+
+
+def _mark_proposal_handled(handled: set[str], prop: Path) -> None:
+    handled.update(_proposal_handled_keys(prop))
+
+
+def implementation_proposals(epoch_dir: Path, state: dict, max_proposals: int) -> list[Path]:
+    explicit = _analysis_proposal_paths(state)
+    current = sorted(p for p in epoch_dir.glob("proposal_*.md") if "_closure" not in p.name)
+    ranked: list[tuple[int, Path]] = [(0, p) for p in explicit] + [(1, p) for p in current]
+    seen: set[str] = set()
+    deduped: list[tuple[int, Path]] = []
+    for rank, path in ranked:
+        key = _relative_path(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append((rank, path))
+    deduped.sort(key=lambda item: (item[0], 0 if is_bugfix_proposal(item[1]) else 1, item[1].name))
+    return [p for _, p in deduped[:max_proposals]]
+
+
 # ── PHASE: IMPLEMENT ────────────────────────────────────────────────────
 def phase_implement(cfg: dict, state: dict) -> None:
     """For each top-K proposal: implement, closure_test, auto-promote or auto-revert."""
@@ -1500,19 +1558,14 @@ def phase_implement(cfg: dict, state: dict) -> None:
     revert_on_regress = bool(runner_cfg.get("auto_promote", {}).get("revert_on_holdout_regression", True))
 
     epoch_dir = PROJECT_ROOT / "derivations" / "reports" / f"epoch_{epoch_num():03d}"
-    all_proposals = sorted(p for p in epoch_dir.glob("proposal_*.md") if "_closure" not in p.name)
-    # BUGFIX proposals bypass the evidence floor; prioritize them ahead of
-    # ordinary validator/prompt proposals so they aren't squeezed out by the
-    # per-epoch cap.
-    all_proposals.sort(key=lambda p: (0 if is_bugfix_proposal(p) else 1, p.name))
-    proposals = all_proposals[:max_proposals]
+    proposals = implementation_proposals(epoch_dir, state, max_proposals)
     handled = set(state.get("proposals_handled", []))
 
     for prop in proposals:
-        if prop.name in handled:
-            print(f"[runner] IMPLEMENT: skip {prop.name} (already handled)", file=sys.stderr)
+        if handled & _proposal_handled_keys(prop):
+            print(f"[runner] IMPLEMENT: skip {_relative_path(prop)} (already handled)", file=sys.stderr)
             continue
-        print(f"[runner] IMPLEMENT: {prop.name}", file=sys.stderr)
+        print(f"[runner] IMPLEMENT: {_relative_path(prop)}", file=sys.stderr)
 
         # Skip non-actionable proposals (INVESTIGATE etc.)
         kind = ""
@@ -1555,7 +1608,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
                     eval_dir, plan=eval_plan, status="implementation_rejected",
                     promoted=False, reason=f"promote_prompt.sh rc={r.returncode}")
                 _revert_prompt()
-                handled.add(prop.name)
+                _mark_proposal_handled(handled, prop)
                 state["proposals_handled"] = sorted(handled)
                 save_state(cfg, state)
                 if stop_on_fail:
@@ -1570,7 +1623,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
                 eval_dir, plan=eval_plan, status="promoted",
                 promoted=True, reason="promote_prompt.sh rc=0")
             print(f"  -> PROMOTED prompt (promote_prompt.sh rc=0)", file=sys.stderr)
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
@@ -1583,7 +1636,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             write_proposal_eval_verdict(
                 eval_dir, plan=eval_plan, status="skipped",
                 promoted=False, reason=f"unsupported kind {kind!r}")
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
@@ -1597,7 +1650,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             write_proposal_eval_verdict(
                 eval_dir, plan=eval_plan, status="skipped",
                 promoted=False, reason="missing affected rule")
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
@@ -1611,7 +1664,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
             write_proposal_eval_verdict(
                 eval_dir, plan=eval_plan, status="skipped",
                 promoted=False, reason="BUGFIX missing validator reproduction or judge fixture")
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             continue
@@ -1651,7 +1704,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
                 eval_dir, plan=eval_plan, status="implementation_failed",
                 promoted=False, reason=f"implement.sh rc={r.returncode}")
             _revert_to_pre()
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             if stop_on_fail:
@@ -1681,7 +1734,7 @@ def phase_implement(cfg: dict, state: dict) -> None:
                 eval_dir, plan=eval_plan, status="evaluation_failed",
                 promoted=False, reason="closure sidecar missing")
             _revert_to_pre()
-            handled.add(prop.name)
+            _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)
             save_state(cfg, state)
             if stop_on_fail:
@@ -1725,12 +1778,12 @@ def phase_implement(cfg: dict, state: dict) -> None:
             # Revert validator code AND state.json to exact pre-implementation state.
             _revert_to_pre()
             if stop_on_fail:
-                handled.add(prop.name)
+                _mark_proposal_handled(handled, prop)
                 state["proposals_handled"] = sorted(handled)
                 save_state(cfg, state)
                 break
 
-        handled.add(prop.name)
+        _mark_proposal_handled(handled, prop)
         state["proposals_handled"] = sorted(handled)
         save_state(cfg, state)
 

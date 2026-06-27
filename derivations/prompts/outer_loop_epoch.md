@@ -207,6 +207,7 @@ Use this schema:
   "rationale": "<why this route is the best next action>",
   "confidence": "low | medium | high",
   "candidate": null,
+  "proposal_paths": [],
   "fallback_route": "CONTINUE_EPOCH | IMPLEMENT | EXPERIMENT | CLOSE"
 }
 ```
@@ -224,8 +225,10 @@ Route meanings:
   `IMPLEMENT` so the gated implementation path can evaluate it before A/B.
 - `IMPLEMENT`: existing proposals, including any `proposal_bug_*.md` produced by
   a prior bug-investigation branch, are ready to attempt through the gated
-  implementation path. The runner will proceed to `EXPERIMENT` after
-  implementation attempts complete.
+  implementation path. If the proposal is not in the current epoch report
+  directory, include its path in `proposal_paths` so the runner can evaluate it.
+  The runner will proceed to `EXPERIMENT` after implementation attempts
+  complete.
 - `EXPERIMENT`: run the configured A/B experiment after implementation, or
   directly only when no implementation attempt is needed before close.
 - `CLOSE`: end the epoch without further generation or implementation.
@@ -255,7 +258,8 @@ Choose `CONTINUE_EPOCH`, `IMPLEMENT`, or `CLOSE`.
 Before choosing `BUG_INVESTIGATE`, inspect existing `proposal_bug_*.md` files in
 the epoch report directory. If one already covers the suspected candidate, the
 bug-investigation branch has completed. Do not investigate it again; route to
-`IMPLEMENT` unless there is a concrete reason to close or experiment first.
+`IMPLEMENT` unless there is a concrete reason to close or experiment first, and
+include that proposal path in `proposal_paths`.
 
 If any `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
 `BUG_INVESTIGATE` over `CONTINUE_EPOCH` and provide a judge candidate like:

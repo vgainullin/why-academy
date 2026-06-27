@@ -23,6 +23,9 @@ If any section is missing or empty, **stop** and print:
 PROPOSAL INCOMPLETE: <which section is missing>
 ```
 Do not implement. Do not write any files. The proposal author must revise.
+Exception: for a judge/system BUGFIX (`Affected rule: none`), a fenced JSON
+fixture under `## Reproduction case` is sufficient even when `## Test cases
+required` is absent, because that fixture is the closure test.
 
 If `Kind` is `INVESTIGATE`, stop and print `KIND IS INVESTIGATE — no implementation step exists; the proposal is for human follow-up.`
 

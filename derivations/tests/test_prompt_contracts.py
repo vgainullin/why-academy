@@ -66,6 +66,7 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("Judge/system BUGFIX", prompt)
         self.assertIn("judge.normalize_primary_record", prompt)
         self.assertIn("**Do NOT modify** `judge.py` unless", prompt)
+        self.assertIn("a fenced JSON", prompt)
 
 
 if __name__ == "__main__":

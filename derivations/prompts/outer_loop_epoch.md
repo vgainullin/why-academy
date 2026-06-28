@@ -221,6 +221,9 @@ Use this schema:
   "confidence": "low | medium | high",
   "candidate": null,
   "proposal_paths": [],
+  "experiment_spec": null,
+  "success_criteria": {},
+  "failure_policy": "NONE | PARK_TREATMENT",
   "fallback_route": "CONTINUE_EPOCH | IMPLEMENT | EXPERIMENT | CLOSE"
 }
 ```
@@ -243,8 +246,47 @@ Route meanings:
   The runner will proceed to `EXPERIMENT` after implementation attempts
   complete.
 - `EXPERIMENT`: run the configured A/B experiment after implementation, or
-  directly only when no implementation attempt is needed before close.
+  directly only when no implementation attempt is needed before close. Prefer
+  providing `experiment_spec`, `success_criteria`, and `failure_policy` so the
+  runner executes the experiment you selected rather than the config default.
 - `CLOSE`: end the epoch without further generation or implementation.
+
+For `EXPERIMENT`, or for `IMPLEMENT` when the next step should be a specific
+A/B experiment after implementation, `experiment_spec` may be an object:
+
+```json
+{
+  "hypothesis": "explicit executor contract prompting reduces rule_executor failures enough to justify continuing that path",
+  "control": {"inner_mode": "json"},
+  "treatment": {
+    "inner_mode": "rule_executor",
+    "normalization_mode": "preserve-executor-boundaries"
+  },
+  "targets": {"selector": "failure_frontier", "max_targets": 5}
+}
+```
+
+Supported `inner_mode` values are `agent`, `json`, and `rule_executor`.
+Supported target selectors are `failure_frontier` and `queue_order`.
+Supported treatment `normalization_mode` values are `legacy` and
+`preserve-executor-boundaries`.
+
+`success_criteria` is an object with any of these numeric checks:
+
+```json
+{
+  "min_acceptance_delta": 0.0,
+  "max_rule_plan_invalid_rate": 0.2,
+  "max_rule_executor_fail_rate": 0.2
+}
+```
+
+The runner records the observed criteria in `experiment_verdict.json`. If
+`failure_policy` is `PARK_TREATMENT` and the criteria fail, the runner parks
+that treatment for default config-driven experiments until a later `ANALYZE`
+decision explicitly chooses a new experiment spec. Use this to answer questions
+like "continue executor path vs. park it and focus on JSON generation /
+validator coverage" without adding a meta-meta loop.
 
 When `derivations/reports/epoch_<NNN>/evals/*/eval_verdict.json` files exist,
 use them as the authoritative implementation/evaluation record. Do not infer

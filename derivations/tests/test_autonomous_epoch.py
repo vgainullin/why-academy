@@ -601,6 +601,114 @@ class PromptForbidsStateJsonTests(unittest.TestCase):
         self.assertIn("implement.sh wrapper", prompt)
 
 
+class AnalysisDecisionExperimentSpecTests(unittest.TestCase):
+    """ANALYZE can own the next A/B experiment instead of relying on runner heuristics."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.epoch_dir = self.tmp / "epoch_001"
+        self.epoch_dir.mkdir()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_decision(self, decision: dict) -> None:
+        (self.epoch_dir / ae.ANALYSIS_DECISION_FILE).write_text(json.dumps(decision))
+
+    def test_loads_and_applies_experiment_spec(self) -> None:
+        self._write_decision({
+            "route": "IMPLEMENT",
+            "rationale": "Try the executor path after proposals.",
+            "confidence": "medium",
+            "proposal_paths": [],
+            "experiment_spec": {
+                "hypothesis": "executor contract prompting reduces executor failures",
+                "control": {"inner_mode": "json"},
+                "treatment": {
+                    "inner_mode": "rule_executor",
+                    "normalization_mode": "preserve-executor-boundaries",
+                },
+                "targets": {"selector": "failure_frontier", "max_targets": 4},
+            },
+            "success_criteria": {
+                "min_acceptance_delta": 0.0,
+                "max_rule_plan_invalid_rate": 0.2,
+                "max_rule_executor_fail_rate": 0.2,
+            },
+            "failure_policy": "PARK_TREATMENT",
+        })
+        decision, error = ae.load_analysis_decision(self.epoch_dir)
+        self.assertIsNone(error)
+        assert decision is not None
+        self.assertEqual(decision["experiment_spec"]["targets"]["max_targets"], 4)
+        self.assertEqual(decision["success_criteria"]["max_rule_plan_invalid_rate"], 0.2)
+
+        state: dict = {}
+        ae.apply_analysis_decision(state, decision)
+        self.assertEqual(state["phase"], "IMPLEMENT")
+        self.assertEqual(state["analysis_experiment_spec"]["failure_policy"], "PARK_TREATMENT")
+        self.assertEqual(state["analysis_experiment_spec"]["treatment"]["inner_mode"], "rule_executor")
+
+    def test_invalid_experiment_spec_is_rejected(self) -> None:
+        self._write_decision({
+            "route": "EXPERIMENT",
+            "rationale": "Bad treatment.",
+            "confidence": "low",
+            "experiment_spec": {
+                "treatment": {"inner_mode": "made_up_mode"},
+                "targets": {"selector": "queue_order", "max_targets": 2},
+            },
+        })
+        decision, error = ae.load_analysis_decision(self.epoch_dir)
+        self.assertIsNone(decision)
+        self.assertIn("inner_mode", error)
+        self.assertIn("made_up_mode", error)
+
+    def test_default_policy_with_null_experiment_spec_does_not_create_spec(self) -> None:
+        self._write_decision({
+            "route": "CONTINUE_EPOCH",
+            "rationale": "Need another batch.",
+            "confidence": "high",
+            "candidate": None,
+            "proposal_paths": [],
+            "experiment_spec": None,
+            "success_criteria": {},
+            "failure_policy": "NONE",
+            "fallback_route": "CONTINUE_EPOCH",
+        })
+        decision, error = ae.load_analysis_decision(self.epoch_dir)
+        self.assertIsNone(error)
+        assert decision is not None
+        self.assertNotIn("experiment_spec", decision)
+        self.assertNotIn("success_criteria", decision)
+        self.assertNotIn("failure_policy", decision)
+
+        state: dict = {}
+        ae.apply_analysis_decision(state, decision)
+        self.assertEqual(state["phase"], "GENERATE")
+        self.assertNotIn("analysis_experiment_spec", state)
+
+    def test_continue_epoch_does_not_carry_experiment_spec_forward(self) -> None:
+        self._write_decision({
+            "route": "CONTINUE_EPOCH",
+            "rationale": "Spec is premature until another batch.",
+            "confidence": "medium",
+            "experiment_spec": {
+                "control": {"inner_mode": "json"},
+                "treatment": {"inner_mode": "rule_executor"},
+            },
+            "failure_policy": "NONE",
+        })
+        decision, error = ae.load_analysis_decision(self.epoch_dir)
+        self.assertIsNone(error)
+        assert decision is not None
+
+        state: dict = {}
+        ae.apply_analysis_decision(state, decision)
+        self.assertEqual(state["phase"], "GENERATE")
+        self.assertNotIn("analysis_experiment_spec", state)
+
+
 class ExperimentPhaseTests(unittest.TestCase):
     """Tests for the EXPERIMENT phase: config gating, target selection, verdict logic."""
 
@@ -820,13 +928,18 @@ class ExperimentVerdictTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _run_with_mock_batches(self, cfg: dict, *, comparison_data: dict | None) -> dict:
-        state = {"phase": "EXPERIMENT"}
+    def _run_with_mock_batches(self, cfg: dict, *, comparison_data: dict | None,
+                               state: dict | None = None,
+                               seen_cmds: list[list] | None = None) -> dict:
+        if state is None:
+            state = {"phase": "EXPERIMENT"}
 
         def fake_save_state(c, s):
             self.state_path.write_text(json.dumps(s))
 
         def fake_run(cmd, **kw):
+            if seen_cmds is not None:
+                seen_cmds.append(list(cmd))
             result = MagicMock()
             cmd_str = " ".join(str(c) for c in cmd)
             if "batch.sh" in cmd_str:
@@ -970,6 +1083,113 @@ class ExperimentVerdictTests(unittest.TestCase):
         state = self._run_with_mock_batches(cfg, comparison_data=None)
         verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
         self.assertEqual(verdict["status"], "comparison_failed")
+
+    def test_analysis_experiment_spec_overrides_runner_defaults(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True,
+            "max_targets": 3,
+            "control_inner_mode": "agent",
+            "treatment_inner_mode": "json",
+            "treatment_normalization_mode": "preserve-executor-boundaries",
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": False,
+        }}}
+        state = {
+            "phase": "EXPERIMENT",
+            "analysis_experiment_spec": {
+                "hypothesis": "executor contract prompting reduces failures",
+                "control": {"inner_mode": "json"},
+                "treatment": {"inner_mode": "rule_executor", "normalization_mode": "legacy"},
+                "targets": {"selector": "queue_order", "max_targets": 2},
+                "success_criteria": {"min_acceptance_delta": 0.0},
+                "failure_policy": "NONE",
+            },
+        }
+        comparison = {"paired": {
+            "acceptance_delta": 0.0,
+            "control_acceptance_rate": 0.0,
+            "treatment_acceptance_rate": 0.0,
+            "first_try_pass_delta": 0.0,
+            "n_pairs": 2,
+        }}
+        seen_cmds: list[list] = []
+        self._run_with_mock_batches(cfg, comparison_data=comparison, state=state, seen_cmds=seen_cmds)
+
+        eval_dir = self.epoch_dir / "evals" / state["experiment_id"]
+        plan = json.loads((eval_dir / "eval_plan.json").read_text())
+        self.assertEqual(plan["control"]["inner_mode"], "json")
+        self.assertEqual(plan["treatment"]["inner_mode"], "rule_executor")
+        self.assertEqual(plan["treatment"]["normalization_mode"], "legacy")
+        self.assertEqual(plan["target_selection"]["mode"], "queue_order")
+        self.assertEqual(len(plan["targets"]), 2)
+        self.assertEqual(plan["hypothesis"], "executor contract prompting reduces failures")
+
+        treatment_cmd = next(
+            cmd for cmd in seen_cmds
+            if "batch.sh" in " ".join(str(c) for c in cmd)
+            and "_treatment" in " ".join(str(c) for c in cmd)
+        )
+        self.assertEqual(treatment_cmd[treatment_cmd.index("--inner-mode") + 1], "rule_executor")
+        self.assertEqual(treatment_cmd[treatment_cmd.index("--normalization-mode") + 1], "legacy")
+
+    def test_failure_policy_parks_treatment_when_criteria_fail(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True,
+            "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": True,
+        }}}
+        state = {
+            "phase": "EXPERIMENT",
+            "analysis_experiment_spec": {
+                "control": {"inner_mode": "json"},
+                "treatment": {
+                    "inner_mode": "rule_executor",
+                    "normalization_mode": "preserve-executor-boundaries",
+                },
+                "targets": {"selector": "queue_order", "max_targets": 3},
+                "success_criteria": {
+                    "min_acceptance_delta": 0.0,
+                    "max_rule_plan_invalid_rate": 0.0,
+                },
+                "failure_policy": "PARK_TREATMENT",
+            },
+        }
+        comparison = {
+            "paired": {
+                "acceptance_delta": -0.25,
+                "control_acceptance_rate": 0.5,
+                "treatment_acceptance_rate": 0.25,
+                "first_try_pass_delta": -0.25,
+                "n_pairs": 3,
+            },
+            "treatment_batch": {
+                "n_targets": 3,
+                "iter_status_counts": {"rule_plan_invalid": 2, "rule_executor_fail": 1, "missing": 1},
+                "treatment_failure_counts": {"rule_plan_invalid": 2, "rule_executor_fail": 1},
+            },
+        }
+        self._run_with_mock_batches(cfg, comparison_data=comparison, state=state)
+
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual(verdict["failure_policy_applied"], "PARK_TREATMENT")
+        self.assertFalse(verdict["criteria_results"]["passed"])
+        self.assertNotIn("promoted_experiment", state)
+        self.assertTrue(state["parked_treatments"])
+
+    def test_parked_treatment_skips_configured_experiment(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True,
+            "max_targets": 3,
+            "treatment_inner_mode": "rule_executor",
+            "treatment_normalization_mode": "preserve-executor-boundaries",
+        }}}
+        key = ae._experiment_treatment_key(cfg["runner"]["experiment"])
+        state = {"phase": "EXPERIMENT", "parked_treatments": {key: {"experiment_id": "old"}}}
+        seen_cmds: list[list] = []
+        self._run_with_mock_batches(cfg, comparison_data={"paired": {}}, state=state, seen_cmds=seen_cmds)
+        self.assertEqual(state["phase"], "CLOSE")
+        self.assertFalse(seen_cmds)
 
     def test_quota_pause_during_control(self) -> None:
         cfg = {"runner": {"experiment": {

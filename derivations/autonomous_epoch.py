@@ -42,6 +42,15 @@ ANALYSIS_DECISION_FILE = "analysis_decision.json"
 BUG_INVESTIGATION_RESULT_FILE = "bug_investigate_result.json"
 EVAL_SCHEMA_VERSION = 1
 ANALYSIS_ROUTES = {"CONTINUE_EPOCH", "BUG_INVESTIGATE", "IMPLEMENT", "EXPERIMENT", "CLOSE"}
+EXPERIMENT_INNER_MODES = {"agent", "json", "rule_executor"}
+EXPERIMENT_TARGET_SELECTORS = {"failure_frontier", "queue_order"}
+EXPERIMENT_NORMALIZATION_MODES = {"legacy", "preserve-executor-boundaries"}
+EXPERIMENT_FAILURE_POLICIES = {"NONE", "PARK_TREATMENT"}
+EXPERIMENT_SUCCESS_CRITERIA = {
+    "min_acceptance_delta",
+    "max_rule_plan_invalid_rate",
+    "max_rule_executor_fail_rate",
+}
 RULE_RE = re.compile(r"^\*\*Affected rule\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
 KIND_RE = re.compile(r"^\*\*Kind\*\*:\s*`?([A-Za-z_]+)`?", re.MULTILINE)
 SEED_RE = re.compile(r"^\*\*Seed hypothesis\*\*:\s*`?([^\s`]+)`?", re.MULTILINE)
@@ -460,6 +469,9 @@ def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: 
                                exp_cfg: dict, baseline: dict,
                                target_selection: dict | None = None) -> tuple[Path, dict]:
     treatment_mode = exp_cfg.get("treatment_inner_mode", "rule_executor")
+    experiment_spec = exp_cfg.get("analysis_experiment_spec")
+    if not isinstance(experiment_spec, dict):
+        experiment_spec = None
     plan = {
         "schema_version": EVAL_SCHEMA_VERSION,
         "plan_type": "pipeline_ab",
@@ -480,6 +492,10 @@ def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: 
             "frontier_targets": [],
             "fallback_targets": targets,
         },
+        "experiment_spec": experiment_spec,
+        "hypothesis": exp_cfg.get("hypothesis"),
+        "success_criteria": exp_cfg.get("success_criteria", {}),
+        "failure_policy": exp_cfg.get("failure_policy", "NONE"),
         "thresholds": {
             "min_acceptance_delta": exp_cfg.get("min_acceptance_delta", 0.0),
             "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
@@ -491,13 +507,16 @@ def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: 
 
 
 def write_experiment_eval_verdict(eval_dir: Path, *, plan: dict, verdict: dict) -> None:
+    promoted = verdict.get("promoted")
+    if promoted is None:
+        promoted = bool(verdict.get("status") == "treatment_won" and verdict.get("promote_on_win"))
     out = {
         "schema_version": EVAL_SCHEMA_VERSION,
         "plan_type": plan["plan_type"],
         "adapter": plan["adapter"],
         "experiment_id": plan["experiment_id"],
         "status": verdict.get("status"),
-        "promoted": bool(verdict.get("status") == "treatment_won" and verdict.get("promote_on_win")),
+        "promoted": bool(promoted),
         "verdict": verdict,
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -531,6 +550,132 @@ def analysis_decision_path(epoch_dir: Path) -> Path:
     return epoch_dir / ANALYSIS_DECISION_FILE
 
 
+def _json_field(path: Path, *parts: str) -> str:
+    return f"{path} " + ".".join(parts)
+
+
+def _normalize_choice(path: Path, field: str, value: object, allowed: set[str]) -> tuple[str | None, str | None]:
+    item = str(value or "").strip()
+    if item not in allowed:
+        return None, f"{_json_field(path, field)} has invalid value {value!r}; expected one of {sorted(allowed)}"
+    return item, None
+
+
+def _normalize_experiment_endpoint(path: Path, spec: dict, side: str) -> tuple[dict | None, str | None]:
+    raw = spec.get(side)
+    if raw is None:
+        return {}, None
+    if not isinstance(raw, dict):
+        return None, f"{_json_field(path, 'experiment_spec', side)} must be an object"
+    out: dict = {}
+    if "inner_mode" in raw:
+        mode, error = _normalize_choice(
+            path, f"experiment_spec.{side}.inner_mode", raw.get("inner_mode"), EXPERIMENT_INNER_MODES)
+        if error:
+            return None, error
+        out["inner_mode"] = mode
+    if "normalization_mode" in raw:
+        mode, error = _normalize_choice(
+            path, f"experiment_spec.{side}.normalization_mode",
+            raw.get("normalization_mode"), EXPERIMENT_NORMALIZATION_MODES)
+        if error:
+            return None, error
+        out["normalization_mode"] = mode
+    return out, None
+
+
+def _normalize_experiment_targets_spec(path: Path, spec: dict) -> tuple[dict | None, str | None]:
+    raw = spec.get("targets")
+    if raw is None:
+        return {}, None
+    if not isinstance(raw, dict):
+        return None, f"{_json_field(path, 'experiment_spec', 'targets')} must be an object"
+    out: dict = {}
+    if "selector" in raw:
+        selector, error = _normalize_choice(
+            path, "experiment_spec.targets.selector", raw.get("selector"), EXPERIMENT_TARGET_SELECTORS)
+        if error:
+            return None, error
+        out["selector"] = selector
+    if "max_targets" in raw:
+        try:
+            max_targets = int(raw["max_targets"])
+        except Exception:
+            return None, f"{_json_field(path, 'experiment_spec', 'targets', 'max_targets')} must be an integer"
+        if max_targets < 0:
+            return None, f"{_json_field(path, 'experiment_spec', 'targets', 'max_targets')} must be >= 0"
+        out["max_targets"] = max_targets
+    return out, None
+
+
+def _normalize_success_criteria(path: Path, raw: object) -> tuple[dict | None, str | None]:
+    if raw is None:
+        return {}, None
+    if not isinstance(raw, dict):
+        return None, f"{_json_field(path, 'success_criteria')} must be an object"
+    out: dict = {}
+    for key, value in raw.items():
+        if key not in EXPERIMENT_SUCCESS_CRITERIA:
+            return None, (
+                f"{_json_field(path, 'success_criteria')} has unsupported key {key!r}; "
+                f"expected one of {sorted(EXPERIMENT_SUCCESS_CRITERIA)}"
+            )
+        try:
+            out[key] = float(value)
+        except Exception:
+            return None, f"{_json_field(path, 'success_criteria', key)} must be numeric"
+    return out, None
+
+
+def _normalize_experiment_spec(path: Path, decision: dict) -> tuple[dict | None, str | None]:
+    raw = decision.get("experiment_spec")
+    criteria_raw = decision.get("success_criteria")
+    policy_raw = decision.get("failure_policy")
+    if raw is None and criteria_raw is None and policy_raw is None:
+        return None, None
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        return None, f"{_json_field(path, 'experiment_spec')} must be an object"
+
+    out: dict = {}
+    hypothesis = str(raw.get("hypothesis") or "").strip()
+    if hypothesis:
+        out["hypothesis"] = hypothesis
+
+    for side in ("control", "treatment"):
+        endpoint, error = _normalize_experiment_endpoint(path, raw, side)
+        if error:
+            return None, error
+        if endpoint:
+            out[side] = endpoint
+
+    targets, error = _normalize_experiment_targets_spec(path, raw)
+    if error:
+        return None, error
+    if targets:
+        out["targets"] = targets
+
+    criteria_source = criteria_raw if criteria_raw is not None else raw.get("success_criteria")
+    criteria, error = _normalize_success_criteria(path, criteria_source)
+    if error:
+        return None, error
+    if criteria:
+        out["success_criteria"] = criteria
+
+    policy_source = policy_raw if policy_raw is not None else raw.get("failure_policy")
+    if policy_source is not None:
+        policy, error = _normalize_choice(path, "failure_policy", policy_source, EXPERIMENT_FAILURE_POLICIES)
+        if error:
+            return None, error
+        if policy != "NONE" or out:
+            out["failure_policy"] = policy
+    elif criteria:
+        out["failure_policy"] = "NONE"
+
+    return (out, None) if out else (None, None)
+
+
 def load_analysis_decision(epoch_dir: Path) -> tuple[dict | None, str | None]:
     """Load and validate the meta-analysis route packet."""
     path = analysis_decision_path(epoch_dir)
@@ -561,6 +706,17 @@ def load_analysis_decision(epoch_dir: Path) -> tuple[dict | None, str | None]:
     if proposal_paths is not None:
         if not isinstance(proposal_paths, list) or not all(isinstance(p, str) for p in proposal_paths):
             return None, f"{path} proposal_paths must be a list of strings"
+    experiment_spec, error = _normalize_experiment_spec(path, decision)
+    if error:
+        return None, error
+    if experiment_spec is None:
+        decision.pop("experiment_spec", None)
+        decision.pop("success_criteria", None)
+        decision.pop("failure_policy", None)
+    else:
+        decision["experiment_spec"] = experiment_spec
+        decision["success_criteria"] = experiment_spec.get("success_criteria", {})
+        decision["failure_policy"] = experiment_spec.get("failure_policy", "NONE")
     return decision, None
 
 
@@ -571,6 +727,10 @@ def apply_analysis_decision(state: dict, decision: dict) -> None:
     state["analysis_route"] = route
     state["proposals_handled"] = state.get("proposals_handled", [])
     state.pop("analysis_proposal_paths", None)
+    state.pop("analysis_experiment_spec", None)
+    if route in {"IMPLEMENT", "EXPERIMENT"} and isinstance(decision.get("experiment_spec"), dict) and decision["experiment_spec"]:
+        state["analysis_experiment_spec"] = decision["experiment_spec"]
+        state.pop("experiment_id", None)
 
     if route == "CONTINUE_EPOCH":
         state.pop("batch_id", None)
@@ -1311,6 +1471,123 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
 
 
 # ── PHASE: EXPERIMENT ───────────────────────────────────────────────────
+def _effective_experiment_cfg(cfg: dict, state: dict) -> dict:
+    """Merge runner experiment defaults with the ANALYZE-selected experiment spec."""
+    exp_cfg = dict(cfg.get("runner", {}).get("experiment", {}) or {})
+    spec = state.get("analysis_experiment_spec")
+    if not isinstance(spec, dict) or not spec:
+        return exp_cfg
+
+    exp_cfg["analysis_experiment_spec"] = spec
+    if spec.get("hypothesis"):
+        exp_cfg["hypothesis"] = spec["hypothesis"]
+
+    control = spec.get("control") if isinstance(spec.get("control"), dict) else {}
+    if control.get("inner_mode"):
+        exp_cfg["control_inner_mode"] = control["inner_mode"]
+
+    treatment = spec.get("treatment") if isinstance(spec.get("treatment"), dict) else {}
+    if treatment.get("inner_mode"):
+        exp_cfg["treatment_inner_mode"] = treatment["inner_mode"]
+    if treatment.get("normalization_mode"):
+        exp_cfg["treatment_normalization_mode"] = treatment["normalization_mode"]
+
+    targets = spec.get("targets") if isinstance(spec.get("targets"), dict) else {}
+    if targets.get("selector"):
+        exp_cfg["target_selector"] = targets["selector"]
+    if "max_targets" in targets:
+        exp_cfg["max_targets"] = targets["max_targets"]
+
+    criteria = spec.get("success_criteria") if isinstance(spec.get("success_criteria"), dict) else {}
+    if criteria:
+        exp_cfg["success_criteria"] = criteria
+        if "min_acceptance_delta" in criteria:
+            exp_cfg["min_acceptance_delta"] = criteria["min_acceptance_delta"]
+
+    if spec.get("failure_policy"):
+        exp_cfg["failure_policy"] = spec["failure_policy"]
+
+    return exp_cfg
+
+
+def _experiment_treatment_key(exp_cfg: dict) -> str:
+    payload = {
+        "inner_mode": exp_cfg.get("treatment_inner_mode", "rule_executor"),
+        "normalization_mode": exp_cfg.get(
+            "treatment_normalization_mode", "preserve-executor-boundaries"),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _treatment_is_parked(state: dict, exp_cfg: dict) -> bool:
+    parked = state.get("parked_treatments")
+    return isinstance(parked, dict) and _experiment_treatment_key(exp_cfg) in parked
+
+
+def _treatment_status_rate(comparison: dict, status: str) -> float:
+    treatment = comparison.get("treatment_batch") if isinstance(comparison.get("treatment_batch"), dict) else {}
+    counts = treatment.get("treatment_failure_counts") if isinstance(treatment.get("treatment_failure_counts"), dict) else {}
+    status_counts = treatment.get("iter_status_counts") if isinstance(treatment.get("iter_status_counts"), dict) else {}
+    numerator = int(counts.get(status) or status_counts.get(status) or 0)
+    denominator = sum(int(v or 0) for v in status_counts.values()) or int(treatment.get("n_targets") or 0)
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _experiment_criteria_results(comparison: dict, criteria: dict) -> dict:
+    checks: dict = {}
+    passed = True
+    paired = comparison.get("paired") if isinstance(comparison.get("paired"), dict) else {}
+
+    if "min_acceptance_delta" in criteria:
+        observed = float(paired.get("acceptance_delta") or 0.0)
+        threshold = float(criteria["min_acceptance_delta"])
+        ok = observed >= threshold
+        checks["min_acceptance_delta"] = {
+            "observed": observed,
+            "threshold": threshold,
+            "passed": ok,
+        }
+        passed = passed and ok
+
+    for key, status in (
+        ("max_rule_plan_invalid_rate", "rule_plan_invalid"),
+        ("max_rule_executor_fail_rate", "rule_executor_fail"),
+    ):
+        if key not in criteria:
+            continue
+        observed = _treatment_status_rate(comparison, status)
+        threshold = float(criteria[key])
+        ok = observed <= threshold
+        checks[key] = {
+            "observed": observed,
+            "threshold": threshold,
+            "passed": ok,
+        }
+        passed = passed and ok
+
+    return {"passed": bool(passed), "checks": checks}
+
+
+def _apply_experiment_failure_policy(state: dict, exp_cfg: dict, verdict: dict) -> None:
+    policy = str(exp_cfg.get("failure_policy") or "NONE")
+    if policy != "PARK_TREATMENT":
+        return
+    criteria_results = verdict.get("criteria_results")
+    if not isinstance(criteria_results, dict) or criteria_results.get("passed", True):
+        return
+    key = _experiment_treatment_key(exp_cfg)
+    parked = state.setdefault("parked_treatments", {})
+    parked[key] = {
+        "experiment_id": verdict.get("experiment_id"),
+        "status": verdict.get("status"),
+        "criteria_results": criteria_results,
+        "parked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    verdict["failure_policy_applied"] = policy
+
+
 def _queue_targets(queue_path: Path) -> list[str]:
     targets: list[str] = []
     for line in queue_path.read_text().splitlines():
@@ -1388,6 +1665,9 @@ def _experiment_targets(cfg: dict, state: dict, queue_path: Path) -> list[str]:
     """Select up to max_targets targets for the A/B experiment."""
     exp_cfg = cfg.get("runner", {}).get("experiment", {})
     max_targets = int(exp_cfg.get("max_targets", 5))
+    selector = str(exp_cfg.get("target_selector") or "failure_frontier").strip()
+    if selector not in EXPERIMENT_TARGET_SELECTORS:
+        selector = "failure_frontier"
     queue_targets = _queue_targets(queue_path)
     if max_targets <= 0 or not queue_targets:
         state["experiment_target_selection"] = {
@@ -1398,6 +1678,17 @@ def _experiment_targets(cfg: dict, state: dict, queue_path: Path) -> list[str]:
             "fallback_targets": [],
         }
         return []
+
+    if selector == "queue_order":
+        selected = queue_targets[:max_targets]
+        state["experiment_target_selection"] = {
+            "mode": "queue_order",
+            "epoch": epoch_num(),
+            "batch_id": state.get("batch_id"),
+            "frontier_targets": [],
+            "fallback_targets": selected,
+        }
+        return selected
 
     allowed = set(queue_targets)
     queue_index = {target: idx for idx, target in enumerate(queue_targets)}
@@ -1483,9 +1774,16 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     If experiment is not enabled in config, already has a verdict, or lacks
     enough targets, skip directly to CLOSE.
     """
-    exp_cfg = cfg.get("runner", {}).get("experiment", {})
+    exp_cfg = _effective_experiment_cfg(cfg, state)
     if not exp_cfg.get("enabled", False):
         print("[runner] EXPERIMENT: disabled in config; skipping to CLOSE", file=sys.stderr)
+        state["phase"] = "CLOSE"
+        save_state(cfg, state)
+        return
+
+    has_analysis_spec = isinstance(state.get("analysis_experiment_spec"), dict) and bool(state["analysis_experiment_spec"])
+    if not has_analysis_spec and _treatment_is_parked(state, exp_cfg):
+        print("[runner] EXPERIMENT: treatment is parked by prior failure policy; skipping to CLOSE", file=sys.stderr)
         state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
@@ -1510,7 +1808,7 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     print(f"[runner] EXPERIMENT: experiment_id={exp_id}", file=sys.stderr)
 
     # Select targets
-    targets = _experiment_targets(cfg, state, queue_path)
+    targets = _experiment_targets({"runner": {"experiment": exp_cfg}}, state, queue_path)
     if len(targets) < 2:
         print(f"[runner] EXPERIMENT: need >=2 targets, got {len(targets)}; skipping", file=sys.stderr)
         state["phase"] = "CLOSE"
@@ -1602,6 +1900,8 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
             "experiment_id": exp_id,
             "status": "comparison_failed",
             "ab_compare_rc": r.returncode,
+            "promoted": False,
+            "failure_policy": exp_cfg.get("failure_policy", "NONE"),
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
     else:
@@ -1610,6 +1910,10 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
         delta = paired.get("acceptance_delta", 0.0)
         min_delta = float(exp_cfg.get("min_acceptance_delta", 0.0))
         won = delta > min_delta
+        criteria = exp_cfg.get("success_criteria")
+        if not isinstance(criteria, dict):
+            criteria = {}
+        criteria_results = _experiment_criteria_results(comparison, criteria)
 
         verdict = {
             "experiment_id": exp_id,
@@ -1624,17 +1928,23 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
             "control_only_accepted": paired.get("control_only_accepted"),
             "both_failed": paired.get("both_failed"),
             "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
+            "promoted": False,
+            "success_criteria": criteria,
+            "criteria_results": criteria_results,
+            "failure_policy": exp_cfg.get("failure_policy", "NONE"),
             "comparison_path": str(comparison_path),
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
 
-        if won and exp_cfg.get("promote_on_win", False):
+        if won and criteria_results.get("passed", True) and exp_cfg.get("promote_on_win", False):
             print(f"[runner] EXPERIMENT: treatment won (delta={delta:.2%}); promoting config", file=sys.stderr)
             # Promote treatment settings as the new default for next epoch's GENERATE
             state["promoted_experiment"] = {
                 "inner_mode": treatment_mode,
                 "normalization_mode": norm_mode,
             }
+            verdict["promoted"] = True
+        _apply_experiment_failure_policy(state, exp_cfg, verdict)
 
     epoch_dir.mkdir(parents=True, exist_ok=True)
     verdict_path.write_text(json.dumps(verdict, indent=2))

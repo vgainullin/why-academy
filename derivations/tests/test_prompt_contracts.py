@@ -53,6 +53,11 @@ class OuterLoopPromptContractTests(unittest.TestCase):
 
         self.assertIn("proceed to `EXPERIMENT` after", prompt)
         self.assertIn("A/B experiment after implementation", prompt)
+        self.assertIn("experiment_spec", prompt)
+        self.assertIn("success_criteria", prompt)
+        self.assertIn("failure_policy", prompt)
+        self.assertIn("PARK_TREATMENT", prompt)
+        self.assertIn("without adding a meta-meta loop", prompt)
 
     def test_structured_eval_verdicts_are_authoritative(self) -> None:
         prompt = (PROJECT_ROOT / "derivations" / "prompts" /

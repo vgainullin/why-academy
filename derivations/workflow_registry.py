@@ -36,26 +36,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from python_env import reexec_with_derivation_python
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DERIVATIONS = Path(__file__).resolve().parent
 WORKFLOWS_DIR = DERIVATIONS / "workflows"
 
 
 def _reexec_with_derivation_python() -> None:
-    if os.environ.get("WORKFLOW_REGISTRY_REEXECED") == "1":
-        return
-    candidates: list[Path] = []
-    configured = os.environ.get("DERIVATION_PYTHON")
-    if configured:
-        candidates.append(Path(configured))
-    for parent in Path(__file__).resolve().parents:
-        candidates.append(parent / "derivations" / ".venv" / "bin" / "python")
-        candidates.append(parent / ".venv" / "bin" / "python")
-    current = Path(sys.executable).resolve()
-    for candidate in candidates:
-        if candidate.exists() and candidate.resolve() != current:
-            os.environ["WORKFLOW_REGISTRY_REEXECED"] = "1"
-            os.execv(str(candidate), [str(candidate), *sys.argv])
+    reexec_with_derivation_python("WORKFLOW_REGISTRY_REEXECED", Path(__file__))
 
 
 # ── Workflow protocol ────────────────────────────────────────────────────

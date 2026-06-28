@@ -34,24 +34,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from python_env import reexec_with_derivation_python
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _reexec_with_derivation_python() -> None:
-    if os.environ.get("WORKTREE_COMPARE_REEXECED") == "1":
-        return
-    candidates: list[Path] = []
-    configured = os.environ.get("DERIVATION_PYTHON")
-    if configured:
-        candidates.append(Path(configured))
-    for parent in Path(__file__).resolve().parents:
-        candidates.append(parent / "derivations" / ".venv" / "bin" / "python")
-        candidates.append(parent / ".venv" / "bin" / "python")
-    current = Path(sys.executable).resolve()
-    for candidate in candidates:
-        if candidate.exists() and candidate.resolve() != current:
-            os.environ["WORKTREE_COMPARE_REEXECED"] = "1"
-            os.execv(str(candidate), [str(candidate), *sys.argv])
+    reexec_with_derivation_python("WORKTREE_COMPARE_REEXECED", Path(__file__))
 
 
 def read_json(path: Path, default: Any = None) -> Any:

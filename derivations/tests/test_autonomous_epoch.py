@@ -682,26 +682,124 @@ class ExperimentTargetSelectionTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def _write_epoch_log(self, records: list[dict], epoch: int = 1) -> None:
+        log_dir = self.tmp / "derivations" / "logs" / f"epoch_{epoch:03d}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with (log_dir / "batch_current.jsonl").open("w") as f:
+            for record in records:
+                f.write(json.dumps(record) + "\n")
+
     def test_selects_up_to_max(self) -> None:
         cfg = {"runner": {"experiment": {"max_targets": 3}}}
         state = {}
-        targets = ae._experiment_targets(cfg, state, self.queue)
+        with patch.object(ae, "_load_epoch_logs", return_value=[]), \
+             patch.object(ae, "epoch_num", return_value=1):
+            targets = ae._experiment_targets(cfg, state, self.queue)
         self.assertEqual(len(targets), 3)
         self.assertNotIn("# header comment", targets)
 
     def test_selects_all_if_fewer_than_max(self) -> None:
         cfg = {"runner": {"experiment": {"max_targets": 10}}}
         state = {}
-        targets = ae._experiment_targets(cfg, state, self.queue)
+        with patch.object(ae, "_load_epoch_logs", return_value=[]), \
+             patch.object(ae, "epoch_num", return_value=1):
+            targets = ae._experiment_targets(cfg, state, self.queue)
         self.assertEqual(len(targets), 5)
 
     def test_ignores_comments_and_blanks(self) -> None:
         cfg = {"runner": {"experiment": {"max_targets": 100}}}
         state = {}
-        targets = ae._experiment_targets(cfg, state, self.queue)
+        with patch.object(ae, "_load_epoch_logs", return_value=[]), \
+             patch.object(ae, "epoch_num", return_value=1):
+            targets = ae._experiment_targets(cfg, state, self.queue)
         for t in targets:
             self.assertFalse(t.startswith("#"))
             self.assertTrue(t.strip())
+
+    def test_prefers_current_batch_failure_frontier(self) -> None:
+        target_a = "solve x + 2 = 5 for x"
+        target_c = "solve 3x = 12"
+        target_d = "factor x^2 - 9"
+        self._write_epoch_log([
+            {
+                "batch_id": "current",
+                "target": target_a,
+                "problem_id": "p0",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 1, "FAIL": 0, "UNCOVERED": 0, "ERROR": 0},
+                "judge_eval": {"overall": "PASS"},
+                "target_check": {"status": "PASS"},
+            },
+            {
+                "batch_id": "current",
+                "target": target_c,
+                "problem_id": "p1",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 0, "FAIL": 0, "UNCOVERED": 1, "ERROR": 0},
+            },
+            {
+                "batch_id": "current",
+                "target": target_d,
+                "problem_id": "p2",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 0, "FAIL": 1, "UNCOVERED": 0, "ERROR": 0},
+                "target_check": {"status": "FAIL"},
+            },
+            {
+                "batch_id": "older",
+                "target": "derive E = mc^2",
+                "problem_id": "p3",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 0, "FAIL": 3, "UNCOVERED": 0, "ERROR": 0},
+            },
+        ])
+        cfg = {"runner": {"experiment": {"max_targets": 3}}}
+        state = {"batch_id": "current"}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "epoch_num", return_value=1):
+            targets = ae._experiment_targets(cfg, state, self.queue)
+        self.assertEqual(targets, [target_d, target_c, target_a])
+        selection = state["experiment_target_selection"]
+        self.assertEqual(selection["mode"], "failure_frontier")
+        self.assertEqual(selection["record_scope"], "state_batch")
+        self.assertEqual(selection["frontier_targets"], [target_d, target_c])
+        self.assertEqual(selection["fallback_targets"], [target_a])
+
+    def test_treatment_failures_rank_above_other_failures(self) -> None:
+        target_b = "derive E = mc^2"
+        target_c = "solve 3x = 12"
+        target_d = "factor x^2 - 9"
+        self._write_epoch_log([
+            {
+                "batch_id": "main",
+                "target": target_c,
+                "problem_id": "p1",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 0, "FAIL": 1, "UNCOVERED": 0, "ERROR": 0},
+            },
+            {
+                "batch_id": "main",
+                "target": target_d,
+                "problem_id": "p2",
+                "n_edges": 1,
+                "edge_summary": {"PASS": 1, "FAIL": 0, "UNCOVERED": 0, "ERROR": 0},
+                "target_check": {"status": "FAIL"},
+            },
+            {
+                "batch_id": "main",
+                "target": target_b,
+                "problem_id": "p3",
+                "n_edges": 0,
+                "edge_summary": {"PASS": 0, "FAIL": 0, "UNCOVERED": 0, "ERROR": 0},
+                "treatment_failure": {"status": "rule_executor_coverage_gap"},
+            },
+        ])
+        cfg = {"runner": {"experiment": {"max_targets": 3}}}
+        state = {}
+        with patch.object(ae, "PROJECT_ROOT", self.tmp), \
+             patch.object(ae, "epoch_num", return_value=1):
+            targets = ae._experiment_targets(cfg, state, self.queue)
+        self.assertEqual(targets, [target_b, target_d, target_c])
 
 
 class ExperimentVerdictTests(unittest.TestCase):

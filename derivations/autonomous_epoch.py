@@ -457,7 +457,8 @@ def experiment_eval_dir(epoch_dir: Path, experiment_id: str) -> Path:
 
 
 def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: list[str],
-                               exp_cfg: dict, baseline: dict) -> tuple[Path, dict]:
+                               exp_cfg: dict, baseline: dict,
+                               target_selection: dict | None = None) -> tuple[Path, dict]:
     treatment_mode = exp_cfg.get("treatment_inner_mode", "rule_executor")
     plan = {
         "schema_version": EVAL_SCHEMA_VERSION,
@@ -474,6 +475,11 @@ def write_experiment_eval_plan(epoch_dir: Path, *, experiment_id: str, targets: 
                 "treatment_normalization_mode", "preserve-executor-boundaries"),
         },
         "targets": targets,
+        "target_selection": target_selection or {
+            "mode": "queue_order",
+            "frontier_targets": [],
+            "fallback_targets": targets,
+        },
         "thresholds": {
             "min_acceptance_delta": exp_cfg.get("min_acceptance_delta", 0.0),
             "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
@@ -1305,18 +1311,140 @@ def phase_bug_investigate(cfg: dict, state: dict) -> None:
 
 
 # ── PHASE: EXPERIMENT ───────────────────────────────────────────────────
-def _experiment_targets(cfg: dict, state: dict, queue_path: Path) -> list[str]:
-    """Select up to max_targets targets for the A/B experiment."""
-    exp_cfg = cfg.get("runner", {}).get("experiment", {})
-    max_targets = int(exp_cfg.get("max_targets", 5))
-    targets = []
+def _queue_targets(queue_path: Path) -> list[str]:
+    targets: list[str] = []
     for line in queue_path.read_text().splitlines():
         line = line.strip()
         if line and not line.startswith("#"):
             targets.append(line)
-            if len(targets) >= max_targets:
-                break
     return targets
+
+
+def _record_failure_score(rec: dict) -> int:
+    score = 0
+    if rec.get("treatment_failure"):
+        score += 100
+
+    edge_summary = rec.get("edge_summary") if isinstance(rec.get("edge_summary"), dict) else {}
+    score += int(edge_summary.get("ERROR") or 0) * 25
+    score += int(edge_summary.get("FAIL") or 0) * 20
+    score += int(edge_summary.get("UNCOVERED") or 0) * 15
+    score += int(edge_summary.get("WEAK_PASS") or 0) * 5
+    if rec.get("n_edges") == 0 and rec.get("problem_id"):
+        score += 5
+
+    canvas = rec.get("canvas_check") if isinstance(rec.get("canvas_check"), dict) else {}
+    canvas_summary = canvas.get("summary") if isinstance(canvas.get("summary"), dict) else {}
+    for key in ("PARSE_ERROR_IN", "RENDER_ERROR", "PARSE_ERROR_OUT"):
+        score += int(canvas_summary.get(key) or 0) * 8
+
+    target_check = rec.get("target_check") if isinstance(rec.get("target_check"), dict) else {}
+    if target_check.get("status") in {"FAIL", "ERROR"}:
+        score += 30
+
+    judge = rec.get("judge_eval") if isinstance(rec.get("judge_eval"), dict) else {}
+    judge_overalls = {judge.get("overall"), judge.get("primary_overall")}
+    if judge_overalls & {"FAIL", "ERROR"}:
+        score += 30
+    verdicts = judge.get("verdicts") if isinstance(judge.get("verdicts"), dict) else {}
+    for verdict in verdicts.values():
+        if isinstance(verdict, dict) and verdict.get("verdict") in {"FAIL", "ERROR"}:
+            score += 8
+    adversarial = judge.get("adversarial") if isinstance(judge.get("adversarial"), dict) else {}
+    adv_overall = adversarial.get("overall") or adversarial.get("verdict")
+    if adv_overall in {"FAIL", "ERROR"}:
+        score += 20
+    return score
+
+
+def _main_epoch_records(records: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for rec in records:
+        batch_id = str(rec.get("batch_id") or "")
+        if rec.get("experiment_id"):
+            continue
+        if batch_id.startswith("closure_") or "_experiment_" in batch_id:
+            continue
+        out.append(rec)
+    return out
+
+
+def _frontier_scores(records: list[dict], allowed: set[str]) -> dict[str, dict]:
+    scored: dict[str, dict] = {}
+    for rec in records:
+        target = rec.get("target")
+        if not isinstance(target, str) or target not in allowed:
+            continue
+        score = _record_failure_score(rec)
+        if score <= 0:
+            continue
+        item = scored.setdefault(target, {"score": 0, "count": 0})
+        item["score"] = max(int(item["score"]), score)
+        item["count"] = int(item["count"]) + 1
+    return scored
+
+
+def _experiment_targets(cfg: dict, state: dict, queue_path: Path) -> list[str]:
+    """Select up to max_targets targets for the A/B experiment."""
+    exp_cfg = cfg.get("runner", {}).get("experiment", {})
+    max_targets = int(exp_cfg.get("max_targets", 5))
+    queue_targets = _queue_targets(queue_path)
+    if max_targets <= 0 or not queue_targets:
+        state["experiment_target_selection"] = {
+            "mode": "queue_order",
+            "epoch": epoch_num(),
+            "batch_id": state.get("batch_id"),
+            "frontier_targets": [],
+            "fallback_targets": [],
+        }
+        return []
+
+    allowed = set(queue_targets)
+    queue_index = {target: idx for idx, target in enumerate(queue_targets)}
+    epoch = epoch_num()
+    records = _load_epoch_logs(epoch)
+    preferred_batch_id = state.get("batch_id")
+    preferred_records = [
+        rec for rec in records
+        if preferred_batch_id and rec.get("batch_id") == preferred_batch_id
+    ]
+    frontier_records = preferred_records or _main_epoch_records(records)
+    scores = _frontier_scores(frontier_records, allowed)
+    frontier_targets = sorted(
+        scores,
+        key=lambda target: (
+            -int(scores[target]["score"]),
+            -int(scores[target]["count"]),
+            queue_index[target],
+        ),
+    )
+
+    selected: list[str] = []
+    for target in frontier_targets:
+        if len(selected) >= max_targets:
+            break
+        selected.append(target)
+    for target in queue_targets:
+        if len(selected) >= max_targets:
+            break
+        if target not in selected:
+            selected.append(target)
+
+    fallback_targets = [target for target in selected if target not in scores]
+    state["experiment_target_selection"] = {
+        "mode": "failure_frontier" if scores else "queue_order",
+        "epoch": epoch,
+        "batch_id": preferred_batch_id,
+        "record_scope": "state_batch" if preferred_records else "main_epoch",
+        "frontier_targets": [target for target in selected if target in scores],
+        "fallback_targets": fallback_targets,
+        "frontier_scores": {
+            target: scores[target]
+            for target in selected
+            if target in scores
+        },
+    }
+    return selected
 
 
 def _write_experiment_queue(targets: list[str], batch_id: str) -> Path:
@@ -1388,9 +1516,18 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
         state["phase"] = "CLOSE"
         save_state(cfg, state)
         return
+    target_selection = state.get("experiment_target_selection")
+    if isinstance(target_selection, dict):
+        print(
+            f"[runner] EXPERIMENT: target_selection={target_selection.get('mode')} "
+            f"frontier={len(target_selection.get('frontier_targets') or [])} "
+            f"fallback={len(target_selection.get('fallback_targets') or [])}",
+            file=sys.stderr,
+        )
     eval_dir, eval_plan = write_experiment_eval_plan(
         epoch_dir, experiment_id=exp_id, targets=targets,
-        exp_cfg=exp_cfg, baseline=baseline_snapshot())
+        exp_cfg=exp_cfg, baseline=baseline_snapshot(),
+        target_selection=target_selection if isinstance(target_selection, dict) else None)
 
     queue = _write_experiment_queue(targets, exp_id)
 

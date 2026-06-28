@@ -293,6 +293,19 @@ def restore_file_snapshots(snapshots: list[dict]) -> None:
             path.unlink(missing_ok=True)
 
 
+def file_snapshots_unchanged(snapshots: list[dict]) -> bool:
+    if not snapshots:
+        return False
+    for snapshot in snapshots:
+        path = snapshot["path"]
+        exists = path.exists()
+        if exists != snapshot["existed"]:
+            return False
+        if exists and path.read_bytes() != snapshot["content"]:
+            return False
+    return True
+
+
 def _relative_path(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(PROJECT_ROOT.resolve()))
@@ -1703,6 +1716,23 @@ def phase_implement(cfg: dict, state: dict) -> None:
             write_proposal_eval_verdict(
                 eval_dir, plan=eval_plan, status="implementation_failed",
                 promoted=False, reason=f"implement.sh rc={r.returncode}")
+            _revert_to_pre()
+            _mark_proposal_handled(handled, prop)
+            state["proposals_handled"] = sorted(handled)
+            save_state(cfg, state)
+            if stop_on_fail:
+                break
+            continue
+        if file_snapshots_unchanged(pre_change_snapshots):
+            print("  -> NO-OP implementation; restoring state and marking handled", file=sys.stderr)
+            write_change_manifest(
+                eval_dir, plan=eval_plan, baseline=eval_baseline,
+                post_snapshot=baseline_snapshot(rule=validator_rule, include_judge=include_judge),
+                implement_rc=r.returncode)
+            write_proposal_eval_verdict(
+                eval_dir, plan=eval_plan, status="implementation_noop",
+                promoted=False,
+                reason="implement.sh returned 0 but affected implementation files were unchanged")
             _revert_to_pre()
             _mark_proposal_handled(handled, prop)
             state["proposals_handled"] = sorted(handled)

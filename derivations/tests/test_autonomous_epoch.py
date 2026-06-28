@@ -279,7 +279,8 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _run_phase(self, implement_rc: int, closure_rc: int,
-                   closure_data: dict | None = None) -> None:
+                   closure_data: dict | None = None,
+                   on_implement=None) -> dict:
         state = {"phase": "IMPLEMENT", "proposals_handled": []}
 
         def fake_save_state(cfg, s):
@@ -288,6 +289,8 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
         def fake_run(cmd, **kw):
             result = MagicMock()
             if "implement.sh" in str(cmd[0]):
+                if on_implement:
+                    on_implement()
                 result.returncode = implement_rc
             elif "closure_test.sh" in str(cmd[0]):
                 result.returncode = closure_rc
@@ -306,6 +309,7 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
              patch.object(ae, "_state_path", lambda c: self.state_path), \
              patch.object(ae, "save_state", side_effect=fake_save_state):
             ae.phase_implement(self.cfg, state)
+        return state
 
     def test_implement_failure_restores_validator_and_state(self) -> None:
         # Simulate LLM modifying both the validator and state.json during implement.sh
@@ -341,13 +345,19 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
         self.assertEqual(restored_state["validator_version"], "v2")
 
     def test_closure_no_sidecar_restores_validator_and_state(self) -> None:
-        self._run_phase(implement_rc=0, closure_rc=0, closure_data=None)
+        self._run_phase(
+            implement_rc=0,
+            closure_rc=0,
+            closure_data=None,
+            on_implement=lambda: self.rule_path.write_bytes(b"# changed validator code\n"),
+        )
         self.assertEqual(self.rule_path.read_bytes(), b"# original validator code\n")
 
     def test_revert_on_low_lift_restores_validator_and_state(self) -> None:
         self._run_phase(
             implement_rc=0, closure_rc=0,
             closure_data={"lift_fraction": 0.1, "holdout_regressed": False},
+            on_implement=lambda: self.rule_path.write_bytes(b"# changed validator code\n"),
         )
         self.assertEqual(self.rule_path.read_bytes(), b"# original validator code\n")
         restored_state = json.loads(self.state_json.read_text())
@@ -363,9 +373,31 @@ class PhaseImplementSnapshotRestoreTests(unittest.TestCase):
         self._run_phase(
             implement_rc=0, closure_rc=0,
             closure_data={"lift_fraction": 0.5, "holdout_regressed": False},
+            on_implement=lambda: self.rule_path.write_bytes(b"# changed validator code\n"),
         )
-        # Validator not restored (stays as-is since we didn't modify it in this test)
-        self.assertEqual(self.rule_path.read_bytes(), b"# original validator code\n")
+        self.assertEqual(self.rule_path.read_bytes(), b"# changed validator code\n")
+
+    def test_noop_implementation_restores_state_and_skips_closure(self) -> None:
+        def bump_state_only() -> None:
+            d = json.loads(self.state_json.read_text())
+            d["validator_version"] = "v3"
+            self.state_json.write_text(json.dumps(d, indent=2))
+
+        state = self._run_phase(
+            implement_rc=0,
+            closure_rc=0,
+            closure_data={"lift_fraction": 0.5, "holdout_regressed": False},
+            on_implement=bump_state_only,
+        )
+
+        self.assertIn("proposal_01_divide_both_sides.md", state["proposals_handled"])
+        self.assertFalse(self.proposal.with_name(self.proposal.stem + "_closure.json").exists())
+        restored_state = json.loads(self.state_json.read_text())
+        self.assertEqual(restored_state["validator_version"], "v2")
+        eval_dir = self.reports_dir / "evals" / self.proposal.stem
+        verdict = json.loads((eval_dir / "eval_verdict.json").read_text())
+        self.assertEqual(verdict["status"], "implementation_noop")
+        self.assertFalse(verdict["promoted"])
 
     def test_quota_during_implement_restores_and_pauses(self) -> None:
         state = {"phase": "IMPLEMENT", "proposals_handled": []}

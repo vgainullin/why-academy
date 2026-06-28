@@ -43,7 +43,13 @@ Read all `.jsonl` files in the specified epoch range. Each line is a generation 
     {"from": "n0", "to": "n1", "rule": "u_substitution", "status": "PASS|FAIL|UNCOVERED|WEAK_PASS", "reason": "..."}
   ],
   "canvas_check": {"summary": {...}, "n_duplicates": N, "duplicates": [...]} | null,
-  "judge_eval":   {"overall": "PASS|FAIL|ERROR", "verdicts": {...}} | null
+  "judge_eval": {
+    "overall": "PASS|FAIL|ERROR",
+    "primary_overall": "PASS|FAIL|ERROR",          // optional, before adversarial pass
+    "verdicts": {...},
+    "adversarial": {"status": "refuted|upheld|error|...", "criterion": "...", "reason": "..."} | null,
+    "consistency_error": "..."                     // optional explicit judge-system explanation
+  } | null
 }
 ```
 
@@ -67,21 +73,28 @@ This pipeline does not maintain a separate rule library; the existence of `deriv
 
 - `CANVAS_DUPLICATE`: `canvas_check.n_duplicates > 0`. Two or more nodes in the graph rendered to the same LaTeX -- almost always sympy auto-simplification eating a pedagogically-distinct step. Surface as a prompt-level signal (the LLM needs to avoid the offending construction). Do not propose validator work.
 - `JUDGE_REJECTED`: `judge_eval.overall == "FAIL"` and at least one judge
-  criterion verdict is `FAIL`. The math was correct but the derivation failed a
-  pedagogical rubric criterion (one-rule-per-edge, given-facts-visible, etc.).
-  Sub-categorize by which judge criterion failed; concentrated single-criterion
-  failures across many attempts are the cleanest signal for prompt-level
-  updates. Do not propose validator work for these -- they're
+  criterion verdict is `FAIL`, OR `judge_eval.adversarial.status == "refuted"`.
+  The math was correct but the derivation failed a pedagogical rubric criterion
+  (one-rule-per-edge, given-facts-visible, target-goal-reached, etc.). When an
+  adversarial refutation exists, prefer its `criterion` and `reason` as the
+  explanation. Sub-categorize by which judge criterion failed; concentrated
+  single-criterion failures across many attempts are the cleanest signal for
+  prompt-level updates. Do not propose validator work for these -- they're
   prompt-engineering candidates.
 - `JUDGE_AGGREGATION_MISMATCH`: `judge_eval.overall` is `FAIL` or `ERROR` while
-  every criterion verdict is `PASS` or `SKIP`. This is not a prompt-level
-  rejection. Treat it as a suspected judge aggregation/system bug and preserve
-  concrete evidence refs. A single clear instance is enough to route to
-  `BUG_INVESTIGATE`, because the bug-investigation branch exists to falsify or
-  confirm this kind of system defect.
+  every criterion verdict is `PASS` or `SKIP` and there is no explicit
+  explanation serialized in `judge_eval` such as
+  `judge_eval.adversarial.status == "refuted"`,
+  `judge_eval.adversarial.status == "error"`, or `judge_eval.consistency_error`.
+  This is not a prompt-level rejection. Treat it as a suspected judge
+  aggregation/system bug and preserve concrete evidence refs. A single clear
+  unexplained instance is enough to route to `BUG_INVESTIGATE`, because the
+  bug-investigation branch exists to falsify or confirm this kind of system
+  defect.
 - `JUDGE_ERROR`: `judge_eval.overall == "ERROR"` and the record does not fit
-  `JUDGE_AGGREGATION_MISMATCH` (for example, a missing/malformed judge result or
-  a criterion-level error). Account for it separately from `JUDGE_REJECTED`.
+  `JUDGE_AGGREGATION_MISMATCH` (for example, a missing/malformed judge result,
+  `judge_eval.adversarial.status == "error"`, `judge_eval.consistency_error`,
+  or a criterion-level error). Account for it separately from `JUDGE_REJECTED`.
   Route to `BUG_INVESTIGATE` when you can form a concrete falsifiable system
   hypothesis with evidence refs; otherwise route to `CONTINUE_EPOCH`.
 
@@ -261,7 +274,7 @@ bug-investigation branch has completed. Do not investigate it again; route to
 `IMPLEMENT` unless there is a concrete reason to close or experiment first, and
 include that proposal path in `proposal_paths`.
 
-If any `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
+If any unexplained `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
 `BUG_INVESTIGATE` over `CONTINUE_EPOCH` and provide a judge candidate like:
 
 ```json
@@ -309,7 +322,11 @@ Wait for the human reviewer to either:
 - **Do not drop judge anomalies.** Every non-PASS `judge_eval.overall` must be
   accounted for as `JUDGE_REJECTED`, `JUDGE_AGGREGATION_MISMATCH`, or
   `JUDGE_ERROR`. Never describe an epoch as having only prompt-level judge
-  rejections if there is an aggregate/criterion mismatch.
+  rejections if there is an unexplained aggregate/criterion mismatch.
+  Adversarial metadata is authoritative context: a refutation is `JUDGE_REJECTED`, an
+  adversarial fail-closed error is `JUDGE_ERROR`, and only non-PASS outcomes
+  with all PASS/SKIP criteria and no explicit explanation are
+  `JUDGE_AGGREGATION_MISMATCH`.
 - **Do not loop bug investigation.** A matching actionable `proposal_bug_*.md`
   means the bug-investigation branch has already produced its candidate output.
   The next route should be `IMPLEMENT` or `CLOSE`, not `BUG_INVESTIGATE` again

@@ -14,6 +14,7 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("JUDGE_AGGREGATION_MISMATCH", prompt)
         self.assertIn('judge_eval.overall` is `FAIL` or `ERROR`', prompt)
         self.assertIn("every criterion verdict is `PASS` or `SKIP`", prompt)
+        self.assertIn("no explicit", prompt)
         self.assertIn("strongly prefer", prompt)
         self.assertIn("`BUG_INVESTIGATE` over `CONTINUE_EPOCH`", prompt)
         self.assertIn("Validator proposal thresholds do not block this route", prompt)
@@ -25,6 +26,16 @@ class OuterLoopPromptContractTests(unittest.TestCase):
         self.assertIn("Every non-PASS `judge_eval.overall` must be", prompt)
         self.assertIn("`JUDGE_REJECTED`, `JUDGE_AGGREGATION_MISMATCH`, or", prompt)
         self.assertIn("`JUDGE_ERROR`", prompt)
+
+    def test_adversarial_judge_context_controls_attempt_classification(self) -> None:
+        prompt = (PROJECT_ROOT / "derivations" / "prompts" /
+                  "outer_loop_epoch.md").read_text()
+
+        self.assertIn("primary_overall", prompt)
+        self.assertIn("judge_eval.adversarial.status == \"refuted\"", prompt)
+        self.assertIn("judge_eval.adversarial.status == \"error\"", prompt)
+        self.assertIn("judge_eval.consistency_error", prompt)
+        self.assertIn("Adversarial metadata is authoritative context", prompt)
 
     def test_completed_bug_investigation_routes_to_implementation(self) -> None:
         prompt = (PROJECT_ROOT / "derivations" / "prompts" /

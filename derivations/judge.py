@@ -58,18 +58,38 @@ def render_graph(problem: dict) -> str:
     return "\n".join(lines)
 
 
+def _decode_first_json_object(text: str) -> dict:
+    decoder = json.JSONDecoder()
+    last_error: json.JSONDecodeError | None = None
+    for match in re.finditer(r"\{", text):
+        try:
+            parsed, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError as e:
+            last_error = e
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        raise json.JSONDecodeError("adversarial verdict must be a JSON object", text, match.start())
+    if last_error:
+        raise last_error
+    raise json.JSONDecodeError("no JSON object found", text, 0)
+
+
 def _extract_json(text: str) -> dict:
     """Pull the first JSON object out of `text`, tolerating code fences / extra prose."""
     text = text.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
+    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL):
+        try:
+            return _decode_first_json_object(match.group(1).strip())
+        except json.JSONDecodeError:
+            continue
     try:
-        return json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if not match:
-            raise
-        return json.loads(match.group(0))
+        return _decode_first_json_object(text)
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("adversarial verdict must be a JSON object", text, 0)
+    return parsed
 
 
 def adversarial_settings(cfg: dict) -> dict:
@@ -129,6 +149,45 @@ def apply_adversarial(record: dict, adv: dict) -> dict:
     return out
 
 
+def _adversarial_from_parsed(parsed: dict, base: dict | None = None) -> dict:
+    base = dict(base or {})
+    ok, why = validate_refutation(parsed)
+    if not ok:
+        return {**base, "status": "error", "error": f"malformed adversarial verdict: {why}", "parsed": parsed}
+    if parsed["refuted"]:
+        return {
+            **base,
+            "status": "refuted",
+            "criterion": parsed["criterion"],
+            "reason": parsed["reason"].strip(),
+        }
+    return {**base, "status": "upheld", "reason": str(parsed.get("reason", "")).strip()}
+
+
+def _repair_adversarial_parse_error(record: dict) -> dict | None:
+    adversarial = record.get("adversarial")
+    if not isinstance(adversarial, dict) or adversarial.get("status") != "error":
+        return None
+    raw_tail = adversarial.get("raw_tail")
+    if not isinstance(raw_tail, str) or not raw_tail.strip():
+        return None
+    try:
+        parsed = _extract_json(raw_tail)
+    except Exception:
+        return None
+    base = {
+        k: adversarial[k]
+        for k in ("adversarial_version", "engine", "model", "fail_mode")
+        if k in adversarial
+    }
+    repaired_adv = _adversarial_from_parsed(parsed, base)
+    if repaired_adv.get("status") == "error":
+        return None
+    primary = dict(record)
+    primary["overall"] = record.get("primary_overall") or "PASS"
+    return apply_adversarial(primary, repaired_adv)
+
+
 def normalize_primary_record(record: dict) -> dict:
     """Deterministic hook for primary judge consistency fixes.
 
@@ -136,7 +195,8 @@ def normalize_primary_record(record: dict) -> dict:
     a failing/error overall result. A FAIL/ERROR with only PASS/SKIP criteria
     is an aggregation mismatch unless a hidden failure has been serialized.
     """
-    out = dict(record)
+    repaired = _repair_adversarial_parse_error(record)
+    out = dict(repaired or record)
     verdicts = out.get("verdicts")
     if not isinstance(verdicts, dict):
         return out
@@ -148,11 +208,17 @@ def normalize_primary_record(record: dict) -> dict:
             statuses.append(raw.strip().upper())
 
     overall = str(out.get("overall") or "").strip().upper()
+    adversarial = out.get("adversarial")
+    adversarial_explains_nonpass = (
+        isinstance(adversarial, dict)
+        and adversarial.get("status") in ("refuted", "error")
+    )
     if (
         statuses
         and len(statuses) == len(verdicts)
         and overall in ("FAIL", "ERROR")
         and all(s in ("PASS", "SKIP") for s in statuses)
+        and not adversarial_explains_nonpass
     ):
         out["overall"] = "ERROR"
         out["consistency_error"] = "overall is non-pass but all criterion verdicts are PASS/SKIP"
@@ -198,12 +264,7 @@ def run_adversarial_judge(problem: dict, target: str, record: dict, settings: di
             "error": f"could not parse adversarial JSON: {e}",
             "raw_tail": result.stdout[-300:],
         }
-    ok, why = validate_refutation(parsed)
-    if not ok:
-        return {**base, "status": "error", "error": f"malformed adversarial verdict: {why}", "parsed": parsed}
-    if parsed["refuted"]:
-        return {**base, "status": "refuted", "criterion": parsed["criterion"], "reason": parsed["reason"].strip()}
-    return {**base, "status": "upheld", "reason": str(parsed.get("reason", "")).strip()}
+    return _adversarial_from_parsed(parsed, base)
 
 
 def _run_primary_deepseek(problem_path: Path, target: str, model: str, timeout: str, out_suffix: str) -> int:

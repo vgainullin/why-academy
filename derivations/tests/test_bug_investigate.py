@@ -963,6 +963,15 @@ class PhaseImplementBugfixTests(unittest.TestCase):
             if "implement.sh" in str(cmd[0]):
                 if on_implement:
                     on_implement()
+                elif implement_rc == 0:
+                    prop = Path(cmd[1])
+                    rule = ae.affected_rule_from_proposal(prop)
+                    if ae.is_system_bug_rule(rule):
+                        (self.tmp / "derivations" / "judge.py").write_bytes(b"# changed judge\n")
+                    else:
+                        path = self.validators_dir / f"{rule}.py"
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(b"# changed validator\n")
                 result.returncode = implement_rc
             elif "closure_test.sh" in str(cmd[0]):
                 result.returncode = closure_rc

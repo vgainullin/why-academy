@@ -13,6 +13,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
+def _judge_section(judge: dict) -> dict:
+    section = {
+        "judge_version": judge["judge_version"],
+        "backend": judge.get("backend", "claude"),
+        "model": judge["model"],
+        "verdicts": judge["verdicts"],
+        "overall": judge["overall"],
+    }
+    for key in ("primary_overall", "adversarial", "consistency_error"):
+        if key in judge:
+            section[key] = judge[key]
+    return section
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sidecar", required=True, help="path to <problem>.verifier.json")
@@ -43,12 +57,7 @@ def main() -> int:
     judge_section = None
     if judge_path.exists():
         jdata = json.loads(judge_path.read_text())
-        judge_section = {
-            "judge_version": jdata["judge_version"],
-            "model": jdata["model"],
-            "verdicts": jdata["verdicts"],
-            "overall": jdata["overall"],
-        }
+        judge_section = _judge_section(jdata)
 
     record = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),

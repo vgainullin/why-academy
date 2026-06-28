@@ -75,6 +75,28 @@ class ApplyAdversarialTests(unittest.TestCase):
         self.assertEqual(out["overall"], "PASS")
 
 
+class ExtractAdversarialJsonTests(unittest.TestCase):
+    def test_extracts_fenced_json_after_prose(self) -> None:
+        parsed = judge._extract_json(
+            "No violation.\n\n```json\n"
+            '{"refuted": false, "criterion": null, "reason": ""}'
+            "\n```"
+        )
+
+        self.assertEqual(parsed["refuted"], False)
+        self.assertIsNone(parsed["criterion"])
+
+    def test_prefers_fenced_json_over_earlier_braces(self) -> None:
+        parsed = judge._extract_json(
+            "Ignore this set {not json}.\n\n```json\n"
+            '{"refuted": true, "criterion": "one_rule_per_edge", "reason": "fused"}'
+            "\n```"
+        )
+
+        self.assertEqual(parsed["refuted"], True)
+        self.assertEqual(parsed["criterion"], "one_rule_per_edge")
+
+
 class NormalizePrimaryRecordTests(unittest.TestCase):
     def test_nonpass_with_only_pass_skip_criteria_is_explicit_error(self) -> None:
         out = judge.normalize_primary_record({
@@ -112,6 +134,54 @@ class NormalizePrimaryRecordTests(unittest.TestCase):
 
         self.assertEqual(out["overall"], "FAIL")
         self.assertNotIn("consistency_error", out)
+
+    def test_repairs_adversarial_parse_error_uphold_from_raw_tail(self) -> None:
+        out = judge.normalize_primary_record({
+            "overall": "ERROR",
+            "primary_overall": "PASS",
+            "verdicts": {
+                "one_rule_per_edge": {"verdict": "PASS"},
+                "given_facts_visible": {"verdict": "SKIP"},
+                "target_goal_reached": {"verdict": "PASS"},
+            },
+            "adversarial": {
+                "status": "error",
+                "error": "could not parse adversarial JSON",
+                "raw_tail": (
+                    "No violation.\n\n```json\n"
+                    '{"refuted": false, "criterion": null, "reason": ""}'
+                    "\n```"
+                ),
+            },
+        })
+
+        self.assertEqual(out["overall"], "PASS")
+        self.assertEqual(out["adversarial"]["status"], "upheld")
+        self.assertNotIn("consistency_error", out)
+
+    def test_repairs_adversarial_parse_error_refutation_from_raw_tail(self) -> None:
+        out = judge.normalize_primary_record({
+            "overall": "ERROR",
+            "primary_overall": "PASS",
+            "verdicts": {
+                "one_rule_per_edge": {"verdict": "PASS"},
+                "given_facts_visible": {"verdict": "SKIP"},
+                "target_goal_reached": {"verdict": "PASS"},
+            },
+            "adversarial": {
+                "status": "error",
+                "error": "could not parse adversarial JSON",
+                "raw_tail": (
+                    "Found a violation.\n\n```json\n"
+                    '{"refuted": true, "criterion": "one_rule_per_edge", "reason": "fused"}'
+                    "\n```"
+                ),
+            },
+        })
+
+        self.assertEqual(out["overall"], "FAIL")
+        self.assertEqual(out["adversarial"]["status"], "refuted")
+        self.assertEqual(out["adversarial"]["criterion"], "one_rule_per_edge")
 
 
 class AdversarialSettingsTests(unittest.TestCase):

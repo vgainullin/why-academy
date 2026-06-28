@@ -1,6 +1,6 @@
 {
-  "epoch": 6,
+  "epoch": 7,
   "prompt_version": "v1",
-  "validator_version": "v3",
+  "validator_version": "v4",
   "config_version": "v5"
 }

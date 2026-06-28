@@ -115,6 +115,20 @@ def _normalization_bridge_summary(iter_dir: Path) -> dict | None:
     }
 
 
+def _judge_section(judge: dict) -> dict:
+    section = {
+        "judge_version": judge["judge_version"],
+        "backend": judge.get("backend", "claude"),
+        "model": judge["model"],
+        "verdicts": judge["verdicts"],
+        "overall": judge["overall"],
+    }
+    for key in ("primary_overall", "adversarial", "consistency_error"):
+        if key in judge:
+            section[key] = judge[key]
+    return section
+
+
 def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> list[dict]:
     """One target dir -> one record per iter (so outer loop sees every attempt)."""
     records = []
@@ -172,13 +186,7 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
                 "n_duplicates": cc["n_duplicates"],
                 "duplicates": cc["duplicates"],
             } if cc else None,
-            "judge_eval": {
-                "judge_version": judge["judge_version"],
-                "backend": judge.get("backend", "claude"),
-                "model": judge["model"],
-                "verdicts": judge["verdicts"],
-                "overall": judge["overall"],
-            } if judge else None,
+            "judge_eval": _judge_section(judge) if judge else None,
             "target_check": {
                 "target_check_version": target_check.get("target_check_version"),
                 "status": target_check.get("status"),

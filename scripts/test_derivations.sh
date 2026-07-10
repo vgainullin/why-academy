@@ -18,6 +18,9 @@ source "$ROOT/scripts/_derivation_python.sh"
   derivations/experiment_agents.py \
   derivations/introspective_log_review.py \
   derivations/rule_contracts.py \
+  derivations/graph_contract.py \
+  derivations/task_contract.py \
+  derivations/algebra_linear_practice.py \
   derivations/canvas_check.py \
   derivations/target_check.py \
   derivations/verify.py

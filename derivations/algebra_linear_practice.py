@@ -15,6 +15,13 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from task_contract import (
+    CORPUS_SCHEMA_VERSION,
+    TASK_CONTRACT_VERSION,
+    build_task_contract,
+    validate_task_contract,
+)
+
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_JSON = ROOT / "practice" / "algebra_linear_8th_grade_summer.json"
@@ -482,25 +489,28 @@ def build_corpus(total: int = 240, set_size: int = 10) -> dict[str, Any]:
     if total % set_size != 0:
         raise ValueError("total must be divisible by set_size")
 
-    problems = []
+    source_problems = []
     ordinal = 1
     cycles = total // len(STRANDS)
     for cycle in range(cycles):
         for strand in STRANDS:
-            problems.append(make_problem(ProblemSpec(strand=strand, cycle=cycle, ordinal=ordinal)))
+            source_problems.append(make_problem(ProblemSpec(strand=strand, cycle=cycle, ordinal=ordinal)))
             ordinal += 1
 
+    tasks = [build_task_contract(problem) for problem in source_problems]
+
     daily_sets = []
-    for start in range(0, len(problems), set_size):
+    for start in range(0, len(tasks), set_size):
         set_index = start // set_size + 1
         daily_sets.append({
             "id": f"alg8-linear-day-{set_index:02d}",
             "title": f"Day {set_index}: Grade 8 algebra practice",
-            "problem_ids": [p["id"] for p in problems[start:start + set_size]],
+            "task_ids": [task["id"] for task in tasks[start:start + set_size]],
         })
 
     return {
-        "schema_version": "grade8_algebra_linear_practice.v2",
+        "schema_version": CORPUS_SCHEMA_VERSION,
+        "task_contract_version": TASK_CONTRACT_VERSION,
         "course": "Grade 8 mathematics",
         "frontier": "algebra, linear equations, linear functions, and systems",
         "use_case": "summer school practice",
@@ -513,7 +523,7 @@ def build_corpus(total: int = 240, set_size: int = 10) -> dict[str, Any]:
             "note": "This corpus targets the Grade 8 algebra and linear-function frontier, not the full Grade 8 course.",
         },
         "standards": STANDARDS,
-        "total_problems": len(problems),
+        "total_tasks": len(tasks),
         "set_size": set_size,
         "daily_set_count": len(daily_sets),
         "strands": [
@@ -525,12 +535,13 @@ def build_corpus(total: int = 240, set_size: int = 10) -> dict[str, Any]:
             for strand in STRANDS
         ],
         "daily_sets": daily_sets,
-        "problems": problems,
+        "contract_manifest": {task["id"]: task["contract_digest"] for task in tasks},
+        "tasks": tasks,
     }
 
 
-def _problem_by_id(corpus: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {p["id"]: p for p in corpus["problems"]}
+def _task_by_id(corpus: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {task["id"]: task for task in corpus["tasks"]}
 
 
 def parse_fraction(value: str | int) -> Fraction:
@@ -635,49 +646,61 @@ def verify_problem(problem: dict[str, Any]) -> None:
 
 
 def verify_corpus(corpus: dict[str, Any]) -> None:
-    ids = [p["id"] for p in corpus["problems"]]
+    if corpus.get("schema_version") != CORPUS_SCHEMA_VERSION:
+        raise AssertionError(f"unexpected corpus schema: {corpus.get('schema_version')!r}")
+    if corpus.get("task_contract_version") != TASK_CONTRACT_VERSION:
+        raise AssertionError(f"unexpected task contract version: {corpus.get('task_contract_version')!r}")
+    tasks = corpus["tasks"]
+    ids = [task["id"] for task in tasks]
     if len(ids) != len(set(ids)):
-        raise AssertionError("duplicate problem ids")
-    prompts = [p["prompt"] for p in corpus["problems"]]
+        raise AssertionError("duplicate task ids")
+    prompts = [task["display"]["prompt"] for task in tasks]
     if len(prompts) != len(set(prompts)):
         raise AssertionError("duplicate prompts")
-    counts = Counter(p["strand"] for p in corpus["problems"])
-    expected = corpus["total_problems"] // len(STRANDS)
+    if corpus["total_tasks"] != len(tasks):
+        raise AssertionError("total_tasks does not match tasks")
+    counts = Counter(task["metadata"]["strand"] for task in tasks)
+    expected = corpus["total_tasks"] // len(STRANDS)
     if set(counts) != set(STRANDS):
         raise AssertionError(f"missing strands: {set(STRANDS) - set(counts)}")
     if any(count != expected for count in counts.values()):
         raise AssertionError(f"unbalanced strand counts: {counts}")
-    for problem in corpus["problems"]:
-        verify_problem(problem)
-    problem_by_id = _problem_by_id(corpus)
+    manifest = corpus["contract_manifest"]
+    if set(manifest) != set(ids):
+        raise AssertionError("contract_manifest task ids do not match tasks")
+    for task in tasks:
+        validate_task_contract(task)
+        if manifest[task["id"]] != task["contract_digest"]:
+            raise AssertionError(f"{task['id']} manifest digest mismatch")
+    task_by_id = _task_by_id(corpus)
     for daily_set in corpus["daily_sets"]:
-        if len(daily_set["problem_ids"]) != corpus["set_size"]:
+        if len(daily_set["task_ids"]) != corpus["set_size"]:
             raise AssertionError(f"{daily_set['id']} has wrong set size")
-        for problem_id in daily_set["problem_ids"]:
-            if problem_id not in problem_by_id:
-                raise AssertionError(f"{daily_set['id']} references missing problem {problem_id}")
+        for task_id in daily_set["task_ids"]:
+            if task_id not in task_by_id:
+                raise AssertionError(f"{daily_set['id']} references missing task {task_id}")
 
 
 def render_targets(corpus: dict[str, Any]) -> str:
     lines = [
         "# Grade 8 algebra: linear equations, linear functions, and systems",
         "# Generated from derivations/algebra_linear_practice.py",
-        f"# Total targets: {corpus['total_problems']}",
+        f"# Total targets: {corpus['total_tasks']}",
         "# Standards focus: 8.EE.B.5, 8.EE.C.7, 8.EE.C.8, 8.F.A.2, 8.F.A.3, 8.F.B.4",
         "",
     ]
-    for problem in corpus["problems"]:
-        lines.append(problem["target_prompt"])
+    for task in corpus["tasks"]:
+        lines.append(task["display"]["prompt"])
     return "\n".join(lines) + "\n"
 
 
 def render_markdown(corpus: dict[str, Any]) -> str:
-    problem_by_id = _problem_by_id(corpus)
+    task_by_id = _task_by_id(corpus)
     lines = [
         "# Grade 8 Algebra Summer Practice",
         "",
         "Focus: linear equations, linear functions, and systems.",
-        f"Total problems: {corpus['total_problems']}",
+        f"Total problems: {corpus['total_tasks']}",
         f"Daily sets: {corpus['daily_set_count']} sets of {corpus['set_size']}",
         "",
         "## Skill Mix",
@@ -688,30 +711,37 @@ def render_markdown(corpus: dict[str, Any]) -> str:
     lines.extend(["", "## Practice Sets", ""])
     for daily_set in corpus["daily_sets"]:
         lines.extend([f"### {daily_set['title']}", ""])
-        for index, problem_id in enumerate(daily_set["problem_ids"], start=1):
-            problem = problem_by_id[problem_id]
-            lines.append(f"{index}. {problem['prompt']}")
+        for index, task_id in enumerate(daily_set["task_ids"], start=1):
+            task = task_by_id[task_id]
+            lines.append(f"{index}. {task['display']['prompt']}")
         lines.append("")
 
     lines.extend(["## Answer Key", ""])
     for daily_set in corpus["daily_sets"]:
         answers = []
-        for index, problem_id in enumerate(daily_set["problem_ids"], start=1):
-            answers.append(f"{index}. {problem_by_id[problem_id]['answer']}")
+        for index, task_id in enumerate(daily_set["task_ids"], start=1):
+            answers.append(f"{index}. {task_by_id[task_id]['display']['answer']}")
         lines.append(f"### {daily_set['title']}")
         lines.append("; ".join(answers))
         lines.append("")
     return "\n".join(lines)
 
 
-def write_outputs(corpus: dict[str, Any], json_path: Path, markdown_path: Path, targets_path: Path) -> None:
+def write_outputs(
+    corpus: dict[str, Any],
+    json_path: Path,
+    markdown_path: Path | None,
+    targets_path: Path | None,
+) -> None:
     verify_corpus(corpus)
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    targets_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(corpus, indent=2, sort_keys=True) + "\n")
-    markdown_path.write_text(render_markdown(corpus))
-    targets_path.write_text(render_targets(corpus))
+    if markdown_path is not None:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        markdown_path.write_text(render_markdown(corpus))
+    if targets_path is not None:
+        targets_path.parent.mkdir(parents=True, exist_ok=True)
+        targets_path.write_text(render_targets(corpus))
 
 
 def main() -> int:
@@ -721,15 +751,18 @@ def main() -> int:
     parser.add_argument("--json", default=str(DEFAULT_JSON))
     parser.add_argument("--markdown", default=str(DEFAULT_MD))
     parser.add_argument("--targets", default=str(DEFAULT_TARGETS))
+    parser.add_argument("--json-only", action="store_true")
     args = parser.parse_args()
 
     corpus = build_corpus(total=args.total, set_size=args.set_size)
-    write_outputs(corpus, Path(args.json), Path(args.markdown), Path(args.targets))
+    markdown_path = None if args.json_only else Path(args.markdown)
+    targets_path = None if args.json_only else Path(args.targets)
+    write_outputs(corpus, Path(args.json), markdown_path, targets_path)
     print(json.dumps({
         "json": args.json,
-        "markdown": args.markdown,
-        "targets": args.targets,
-        "total_problems": corpus["total_problems"],
+        "markdown": None if args.json_only else args.markdown,
+        "targets": None if args.json_only else args.targets,
+        "total_tasks": corpus["total_tasks"],
         "daily_set_count": corpus["daily_set_count"],
         "strand_count": len(corpus["strands"]),
     }, indent=2))

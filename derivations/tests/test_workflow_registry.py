@@ -224,8 +224,7 @@ class AutoDetectTests(unittest.TestCase):
         # Default repo has no logs, so should return epoch.
         import subprocess
         r = subprocess.run(
-            [str(DERIVATIONS / ".venv" / "bin" / "python"),
-             str(DERIVATIONS / "workflow_registry.py"), "auto-detect"],
+            [sys.executable, str(DERIVATIONS / "workflow_registry.py"), "auto-detect"],
             capture_output=True, text=True, cwd=str(ROOT)
         )
         self.assertEqual(r.returncode, 0)

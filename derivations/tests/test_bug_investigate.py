@@ -324,6 +324,36 @@ class CandidateEvidenceTests(unittest.TestCase):
         self.assertEqual(evidence[0]["line"], 1)
         self.assertEqual(evidence[0]["data"]["problem_id"], "first")
 
+    def test_evidence_ref_includes_iteration_artifacts_when_available(self) -> None:
+        batch_id = "b_target_bug"
+        _write_log(self.tmp, 1, "batch.jsonl", [{
+            "problem_id": "p0",
+            "batch_id": batch_id,
+            "target_index": 0,
+            "iter": 1,
+        }])
+        iter_dir = (
+            self.tmp / "derivations" / "_evolutions" / "batches" / batch_id
+            / "targets" / "target_000" / "iter_01"
+        )
+        iter_dir.mkdir(parents=True)
+        problem = {"id": "p0", "root_node": "n0", "goal_node": "n0", "nodes": [], "edges": []}
+        target_check = {"status": "PASS", "reason": "bad pass"}
+        (iter_dir / "problem.json").write_text(json.dumps(problem))
+        (iter_dir / "problem.target_check.json").write_text(json.dumps(target_check))
+        (iter_dir / "status.txt").write_text("PASS")
+        candidate = {"evidence_refs": [
+            {"epoch": 1, "jsonl": "batch.jsonl", "record": 1}
+        ]}
+
+        with patch.object(ae, "PROJECT_ROOT", self.tmp):
+            evidence = ae.collect_candidate_evidence(candidate)
+
+        artifact = evidence[0]["artifact"]
+        self.assertEqual(artifact["problem"], problem)
+        self.assertEqual(artifact["target_check"], target_check)
+        self.assertEqual(artifact["status"], "PASS")
+
 
 class ProposalFixtureParsingTests(unittest.TestCase):
 
@@ -366,6 +396,30 @@ class ProposalFixtureParsingTests(unittest.TestCase):
         )
 
         self.assertIsNone(ae.judge_fixture_from_proposal(self.proposal))
+
+    def test_target_check_fixture_parses_from_fenced_json(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: target_check\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "target_check_fixture": {\n'
+            '    "target": "solve 4x = 8 by collecting variable terms",\n'
+            '    "problem": {"id": "p", "root_node": "n0", "goal_node": "n0", "nodes": [], "edges": []},\n'
+            '    "target_check": {"status": "PASS"},\n'
+            '    "expected": {"status": "FAIL"}\n'
+            "  }\n"
+            "}\n"
+            "```\n"
+        )
+
+        fixture = ae.target_check_fixture_from_proposal(self.proposal)
+
+        self.assertIsNotNone(fixture)
+        assert fixture is not None
+        self.assertEqual(fixture["expected"]["status"], "FAIL")
+        self.assertEqual(fixture["problem"]["id"], "p")
 
 
 # ── Cross-epoch log loading ──────────────────────────────────────────────
@@ -543,6 +597,30 @@ class ProposalParserTests(unittest.TestCase):
         try:
             self.assertIsNone(ae.reproduction_from_proposal(tmp))
             self.assertFalse(ae.is_bugfix_proposal(tmp))
+        finally:
+            tmp.unlink()
+
+    def test_target_check_bugfix_uses_target_check_adapter(self) -> None:
+        tmp = Path(tempfile.mktemp(suffix=".md"))
+        tmp.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: target_check\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "target_check_fixture": {\n'
+            '    "target": "solve 4x = 8 by collecting variable terms",\n'
+            '    "problem": {"id": "p", "root_node": "n0", "goal_node": "n0", "nodes": [], "edges": []},\n'
+            '    "expected": {"status": "FAIL"}\n'
+            "  }\n"
+            "}\n"
+            "```\n"
+        )
+        try:
+            adapter = ae.proposal_eval_adapter_for_proposal("BUGFIX", "target_check", tmp)
+            self.assertEqual(adapter, "target_check_replay")
+            paths = ae.implementation_file_paths("BUGFIX", "target_check", tmp)
+            self.assertEqual(paths, [ae.PROJECT_ROOT / "derivations" / "target_check.py"])
         finally:
             tmp.unlink()
 
@@ -1266,6 +1344,36 @@ class ClosureBugfixTests(unittest.TestCase):
             with patch.object(sys, "argv", ["closure_test.py", str(self.proposal)]):
                 rc = ct.main()
         self.assertEqual(rc, 1)
+
+    def test_target_check_fixture_pass_no_holdout_returns_zero(self) -> None:
+        self.proposal.write_text(
+            "**Kind**: BUGFIX\n"
+            "**Affected rule**: target_check\n"
+            "**Seed hypothesis**: target_goal_false_accept\n\n"
+            "## Reproduction case\n\n"
+            "```json\n"
+            "{\n"
+            '  "target_check_fixture": {\n'
+            '    "target": "solve 4x = 8 by collecting variable terms",\n'
+            '    "problem": {"id": "p", "root_node": "n0", "goal_node": "n0", "nodes": [], "edges": []},\n'
+            '    "expected": {"status": "FAIL"}\n'
+            "  }\n"
+            "}\n"
+            "```\n"
+        )
+        cfg = {"runner": {"auto_promote": {"min_lift_fraction": 0.4}}}
+        with patch.object(ct, "load_config", return_value=(cfg, "v5")), \
+             patch.object(ct, "_run_target_check_fixture",
+                          return_value=("FAIL", "rejected bad goal", {"status": "FAIL"})), \
+             patch.object(ct, "_holdout_regression", return_value=None):
+            with patch.object(sys, "argv", ["closure_test.py", str(self.proposal)]):
+                rc = ct.main()
+        self.assertEqual(rc, 0)
+        sidecar = self.proposal.with_name(self.proposal.stem + "_closure.json")
+        rec = json.loads(sidecar.read_text())
+        self.assertEqual(rec["scoring_surface"], "target_check fixture")
+        self.assertEqual(rec["actual_status"], "FAIL")
+        self.assertEqual(rec["lift_fraction"], 1.0)
 
     def test_holdout_regression_skips_generated_sidecars(self) -> None:
         legacy = self.tmp / "derivations" / "test_corpus" / "holdout" / "problems_legacy_verifier"

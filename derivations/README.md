@@ -200,6 +200,33 @@ scripts/experiment_agents.sh compare-next-step \
   --output /path/to/run_02.txt
 ```
 
+Compare expensive outer-loop meta-analysis models from an immutable checkpoint:
+
+```bash
+scripts/meta_model_compare.sh freeze \
+  --name epoch_008_outer_b862 \
+  --prompt derivations/reports/epoch_008/run_b862a468-5b5e-4ba3-a94b-2a2d0ad2cbb9.prompt.md \
+  --log derivations/logs/epoch_008/batch_epoch_008_20260628_095140.jsonl \
+  --log derivations/logs/epoch_008/batch_epoch_008_20260628_100528.jsonl \
+  --baseline-console derivations/reports/epoch_008/run_b862a468-5b5e-4ba3-a94b-2a2d0ad2cbb9.console.log \
+  --baseline-decision derivations/reports/epoch_008/analysis_decision.json
+
+scripts/meta_model_compare.sh run \
+  --packet derivations/_evolutions/meta_model_comparisons/epoch_008_outer_b862/packet.json \
+  --arm gpt55_xhigh \
+  --model gpt-5.5 \
+  --reasoning-effort xhigh
+
+scripts/meta_model_compare.sh compare \
+  --packet derivations/_evolutions/meta_model_comparisons/epoch_008_outer_b862/packet.json
+```
+
+The comparison is valid only when every arm uses the same packet input digest,
+the same frozen workspace, explicit model and reasoning settings, and an
+uncontaminated epoch log directory. The report intentionally does not pick a
+subjective winner; it scores schema validity, generated artifacts, route fields,
+proposal paths, and contamination guards.
+
 ## Related
 
 - `derivations/DISTILLATION.md`: distillation and worker contract

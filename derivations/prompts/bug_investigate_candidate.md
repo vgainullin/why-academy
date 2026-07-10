@@ -52,6 +52,9 @@ Use statuses this way:
   - validator bug: `from_srepr`, `to_srepr`, `args`, `expected`, `actual`;
   - judge/system bug: a fenced JSON object containing `judge_eval.verdicts`
     and `judge_eval.overall`, plus any explicit expected outcome.
+  - target-check/system bug: a fenced JSON object containing
+    `target_check_fixture` with `target`, full `problem`, and
+    `expected.status`.
 - `INVESTIGATE`: the pattern is real but not actionable enough for a bugfix.
 - `FEATURE_GAP`: the system lacks a capability rather than containing a bug.
 - `NO_REPRO`: the evidence does not reproduce or support the hypothesis.
@@ -106,6 +109,20 @@ fixture:
     "overall": "FAIL"
   },
   "expected": {"overall": "PASS"}
+}
+```
+
+For target-check/system bugs, set `Affected rule` to `target_check` and include
+a fenced JSON fixture:
+
+```json
+{
+  "target_check_fixture": {
+    "target": "solve 4x - 10 = 8x - 2 by collecting variable terms",
+    "problem": {"id": "example", "root_node": "n0", "goal_node": "n0", "nodes": [], "edges": []},
+    "target_check": {"status": "PASS"},
+    "expected": {"status": "FAIL"}
+  }
 }
 ```
 

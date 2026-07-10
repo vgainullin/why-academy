@@ -136,7 +136,15 @@ def seed_id_from_proposal(path: Path) -> str | None:
 
 
 def is_system_bug_rule(rule: str | None) -> bool:
-    return str(rule or "").strip().strip("`").lower() in ("", "none", "null", "system", "judge")
+    return str(rule or "").strip().strip("`").lower() in (
+        "",
+        "none",
+        "null",
+        "system",
+        "judge",
+        "target",
+        "target_check",
+    )
 
 
 def _proposal_section(text: str, header: str) -> str:
@@ -235,6 +243,43 @@ def judge_fixture_from_proposal(path: Path) -> dict | None:
     return None
 
 
+def target_check_fixture_from_proposal(path: Path) -> dict | None:
+    """Parse a target-check BUGFIX fixture from `## Reproduction case`.
+
+    The fixture must contain a target string, a full problem object, and an
+    expected target-check status after the fix.
+    """
+    block = _proposal_section(path.read_text(), "Reproduction case")
+    if not block:
+        return None
+    for m in JSON_FENCE_RE.finditer(block):
+        raw = m.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        fixture = data.get("target_check_fixture") if isinstance(data.get("target_check_fixture"), dict) else data
+        target = fixture.get("target")
+        problem = fixture.get("problem")
+        expected = fixture.get("expected")
+        if not isinstance(expected, dict):
+            expected = {"status": fixture.get("expected_status")}
+        if (
+            isinstance(target, str)
+            and target.strip()
+            and isinstance(problem, dict)
+            and isinstance(expected.get("status"), str)
+        ):
+            out = dict(fixture)
+            out["target"] = target
+            out["problem"] = problem
+            out["expected"] = expected
+            return out
+    return None
+
+
 def is_bugfix_proposal(path: Path) -> bool:
     return kind_from_proposal(path) == "BUGFIX"
 
@@ -243,6 +288,8 @@ def proposal_eval_adapter_for_proposal(kind: str, rule: str | None, prop: Path |
     if kind == "BUGFIX":
         if prop and reproduction_from_proposal(prop):
             return "bugfix_reproduction_replay"
+        if prop and is_system_bug_rule(rule) and target_check_fixture_from_proposal(prop):
+            return "target_check_replay"
         if prop and is_system_bug_rule(rule) and judge_fixture_from_proposal(prop):
             return "judge_aggregation_replay"
         return "bugfix_missing_replay_contract"
@@ -250,8 +297,11 @@ def proposal_eval_adapter_for_proposal(kind: str, rule: str | None, prop: Path |
 
 
 def implementation_file_paths(kind: str, rule: str | None, prop: Path | None) -> list[Path]:
-    if kind == "BUGFIX" and proposal_eval_adapter_for_proposal(kind, rule, prop) == "judge_aggregation_replay":
+    adapter = proposal_eval_adapter_for_proposal(kind, rule, prop)
+    if kind == "BUGFIX" and adapter == "judge_aggregation_replay":
         return [PROJECT_ROOT / "derivations" / "judge.py"]
+    if kind == "BUGFIX" and adapter == "target_check_replay":
+        return [PROJECT_ROOT / "derivations" / "target_check.py"]
     if rule and not is_system_bug_rule(rule):
         return [PROJECT_ROOT / "derivations" / "validators" / f"{rule}.py"]
     return []
@@ -417,6 +467,7 @@ def write_proposal_eval_plan(cfg: dict, prop: Path, *, kind: str, rule: str | No
         "inputs": {
             "reproduction": reproduction_from_proposal(prop) if kind == "BUGFIX" else None,
             "judge_fixture": judge_fixture_from_proposal(prop) if kind == "BUGFIX" else None,
+            "target_check_fixture": target_check_fixture_from_proposal(prop) if kind == "BUGFIX" else None,
             "closure_test": runner_cfg.get("closure_test", {}),
         },
         "commands": [],
@@ -877,6 +928,48 @@ def _read_jsonl_record(path: Path, record: object) -> dict:
     return {"path": str(path), "record": record, "line": index + 1, "data": data}
 
 
+def _candidate_artifact_evidence(data: dict) -> dict | None:
+    batch_id = data.get("batch_id")
+    target_index = data.get("target_index")
+    iter_index = data.get("iter")
+    if not isinstance(batch_id, str) or target_index is None or iter_index is None:
+        return None
+    try:
+        target_dir = (
+            PROJECT_ROOT
+            / "derivations"
+            / "_evolutions"
+            / "batches"
+            / batch_id
+            / "targets"
+            / f"target_{int(target_index):03d}"
+        )
+        iter_dir = target_dir / f"iter_{int(iter_index):02d}"
+    except Exception:
+        return None
+    if not iter_dir.exists():
+        return {"iter_dir": str(iter_dir), "error": "artifact iter directory not found"}
+
+    artifact: dict = {"iter_dir": str(iter_dir)}
+    for key, filename in (
+        ("problem", "problem.json"),
+        ("target_check", "problem.target_check.json"),
+        ("judge_eval", "problem.judge.json"),
+        ("verifier", "problem.verifier.json"),
+    ):
+        path = iter_dir / filename
+        if not path.exists():
+            continue
+        try:
+            artifact[key] = json.loads(path.read_text())
+        except Exception as e:
+            artifact[f"{key}_error"] = f"{type(e).__name__}: {e}"
+    status_path = iter_dir / "status.txt"
+    if status_path.exists():
+        artifact["status"] = status_path.read_text().strip()
+    return artifact
+
+
 def collect_candidate_evidence(candidate: dict) -> list[dict]:
     evidence = []
     for ref in candidate.get("evidence_refs") or []:
@@ -898,7 +991,13 @@ def collect_candidate_evidence(candidate: dict) -> list[dict]:
         if not path.exists():
             evidence.append({"ref": ref, "path": str(path), "error": "jsonl not found"})
             continue
-        evidence.append({"ref": ref, **_read_jsonl_record(path, ref.get("record", 0))})
+        item = {"ref": ref, **_read_jsonl_record(path, ref.get("record", 0))}
+        data = item.get("data")
+        if isinstance(data, dict):
+            artifact = _candidate_artifact_evidence(data)
+            if artifact:
+                item["artifact"] = artifact
+        evidence.append(item)
     return evidence
 
 

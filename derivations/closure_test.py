@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -36,6 +37,7 @@ from autonomous_epoch import (  # noqa: E402
     kind_from_proposal,
     reproduction_from_proposal,
     seed_id_from_proposal,
+    target_check_fixture_from_proposal,
 )
 
 
@@ -157,6 +159,66 @@ def _run_judge_fixture(fixture: dict) -> tuple[str, str, dict | None]:
     return "PASS", "judge aggregation mismatch resolved", after
 
 
+def _run_target_check_fixture(fixture: dict) -> tuple[str, str, dict | None]:
+    """Replay a target-check BUGFIX fixture against the current target checker."""
+    target = fixture.get("target") if isinstance(fixture, dict) else None
+    problem = fixture.get("problem") if isinstance(fixture, dict) else None
+    if not isinstance(target, str) or not target.strip() or not isinstance(problem, dict):
+        return "ERROR", "invalid target_check fixture", None
+    try:
+        import target_check  # noqa: E402
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "problem.json"
+            path.write_text(json.dumps(problem))
+            _rc, payload = target_check.check(path, target)
+    except Exception as e:
+        return "ERROR", f"target_check replay raised: {type(e).__name__}: {e}", None
+    status = str(payload.get("status") or "ERROR")
+    reason = str(payload.get("reason") or "")
+    return status, reason, payload
+
+
+def _run_target_check_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
+                                     proposal_path: Path, rule: str, fixture: dict) -> int:
+    expected = fixture.get("expected") if isinstance(fixture.get("expected"), dict) else {}
+    expected_status = str(expected.get("status") or "PASS")
+    status, reason, payload = _run_target_check_fixture(fixture)
+    passes = status == expected_status
+    lift_fraction = 1.0 if passes else 0.0
+    holdout_regressed = _holdout_regression()
+    seed_id = seed_id_from_proposal(proposal_path)
+
+    record = {
+        "rule": rule,
+        "kind": "BUGFIX",
+        "proposal_path": str(proposal_path),
+        "seed_hypothesis": seed_id,
+        "target_check_fixture": fixture,
+        "expected_status": expected_status,
+        "actual_status": status,
+        "target_check_reason": reason,
+        "target_check_payload": payload,
+        "lift_fraction": lift_fraction,
+        "holdout_regressed": holdout_regressed,
+        "scoring_surface": "target_check fixture",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "config_version": cfg_version,
+        "min_lift_threshold": runner.get("auto_promote", {}).get("min_lift_fraction", 0.4),
+    }
+    out_path = proposal_path.with_name(proposal_path.stem + "_closure.json")
+    out_path.write_text(json.dumps(record, indent=2))
+
+    print()
+    print(f"[closure] BUGFIX target_check fixture rule={rule} seed={seed_id}")
+    print(f"[closure] actual={status} reason={reason}")
+    print(f"[closure] lift fraction: {lift_fraction:.2%}")
+    print(f"[closure] holdout regression: {holdout_regressed or 'none'}")
+    verdict = "REPRO_CONFIRMED" if passes and not holdout_regressed else "REPRO_FAILED"
+    print(f"[closure] verdict: {verdict}")
+    print(f"[closure] sidecar: {out_path}")
+    return 0 if (passes and not holdout_regressed) else 1
+
+
 def _run_judge_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
                               proposal_path: Path, rule: str, fixture: dict) -> int:
     seed_id = seed_id_from_proposal(proposal_path)
@@ -205,6 +267,9 @@ def _run_bugfix_closure(cfg: dict, cfg_version: str, runner: dict,
     Holdout regression is still enforced.
     """
     if is_system_bug_rule(rule):
+        fixture = target_check_fixture_from_proposal(proposal_path)
+        if fixture:
+            return _run_target_check_bugfix_closure(cfg, cfg_version, runner, proposal_path, rule, fixture)
         fixture = judge_fixture_from_proposal(proposal_path)
         if fixture:
             return _run_judge_bugfix_closure(cfg, cfg_version, runner, proposal_path, rule, fixture)

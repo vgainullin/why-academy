@@ -1,0 +1,245 @@
+# Grade 8 algebra: linear equations, linear functions, and systems
+# Generated from derivations/algebra_linear_practice.py
+# Total targets: 240
+# Standards focus: 8.EE.B.5, 8.EE.C.7, 8.EE.C.8, 8.F.A.2, 8.F.A.3, 8.F.B.4
+
+solve 2x - 15 = -39 for x
+solve 3(x - 12) - 5 = -59 for x by distributing first
+solve 4x - 10 = 8x - 2 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 5x - 9 = 5x - 8
+determine whether this equation has one solution, no solution, or infinitely many solutions: 6x - 7 = 6x - 7
+solve (1/2)x - 10 = -6 for x
+model and solve 4 + 8x = 12 for x
+find the slope of the line through (-2, 1) and (0, -3)
+decide whether the table [[0, 3], [1, -1], [2, -5], [3, -9]] represents a linear function
+write the linear function through (0, 4) and (2, 6) in slope-intercept form
+compare the rates of change of y = -3x + 5 and the table [[0, -4], [2, 0], [4, 4]]
+solve the system 3x + y = 33; 7x + 2y = 72
+solve 3x - 10 = -40 for x
+solve 4(x - 9) - 4 = -56 for x by distributing first
+solve 5x - 7 = 12x by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 6x - 5 = 6x - 3
+determine whether this equation has one solution, no solution, or infinitely many solutions: 7x - 4 = 7x - 4
+solve (2/3)x - 9/2 = 3/2 for x
+model and solve 3 + 9x = 21 for x
+find the slope of the line through (-1, 5) and (2, 2)
+decide whether the table [[0, 1], [1, 2], [2, 5], [3, 10]] represents a linear function
+write the linear function through (0, 7) and (2, 11) in slope-intercept form
+compare the rates of change of y = -2x + 9 and the table [[0, -3], [2, 3], [4, 9]]
+solve the system 4x + 2y = 4; 10x + 3y = 34
+solve 4x - 7 = -39 for x
+solve 5(x - 5) - 3 = -43 for x by distributing first
+solve 6x - 4 = 4x - 2 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 7x - 3 = 7x
+determine whether this equation has one solution, no solution, or infinitely many solutions: 8x + 3 = 8x + 3
+solve (3/4)x - 7/3 = 31/6 for x
+model and solve 5 + 10x = 35 for x
+find the slope of the line through (0, 7) and (4, 11)
+decide whether the table [[0, 9], [1, 7], [2, 5], [3, 3]] represents a linear function
+write the linear function through (0, 10) and (2, 16) in slope-intercept form
+compare the rates of change of y = -x + 12 and the table [[0, 3], [2, 11], [4, 19]]
+solve the system 5x + 3y = 10; 3x + 4y = -16
+solve 5x - 4 = -34 for x
+solve 6(x - 3) + 3 = -27 for x by distributing first
+solve 7x + 3 = 8x + 1 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 8x + 4 = 8x + 8
+determine whether this equation has one solution, no solution, or infinitely many solutions: 9x + 5 = 9x + 5
+solve (4/5)x - 5 = 23/5 for x
+model and solve 9 + 12x = 57 for x
+find the slope of the line through (1, 12) and (6, 22)
+decide whether the table [[0, 3], [1, 4], [2, 7], [3, 12]] represents a linear function
+write the linear function through (0, 15) and (2, 23) in slope-intercept form
+compare the rates of change of y = x - 15 and the table [[0, 4], [2, 14], [4, 24]]
+solve the system 6x + 4y = 22; 7x + 5y = 23
+solve 6x + 3 = -21 for x
+solve 7(x + 4) + 4 = 25 for x by distributing first
+solve 8x + 5 = 10x - 1 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 9x + 7 = 9x + 12
+determine whether this equation has one solution, no solution, or infinitely many solutions: 10x + 9 = 10x + 9
+solve (5/2)x - 2 = 71/2 for x
+model and solve 12 + 2x = 22 for x
+find the slope of the line through (2, 21) and (4, 27)
+decide whether the table [[0, -15], [1, -14], [2, -13], [3, -12]] represents a linear function
+write the linear function through (0, -12) and (2, -2) in slope-intercept form
+compare the rates of change of y = 2x - 10 and the table [[0, 5], [2, -3], [4, -11]]
+solve the system 7x + y = 64; 9x + 6y = 54
+solve 7x + 5 = -16 for x
+solve 8(x + 7) + 5 = 69 for x by distributing first
+solve 9x + 9 = 3x + 33 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 10x + 10 = 10x + 11
+determine whether this equation has one solution, no solution, or infinitely many solutions: 12x + 12 = 12x + 12
+solve (1/3)x - 1 = -5 for x
+model and solve 15 + 3x = 33 for x
+find the slope of the line through (3, 0) and (6, 12)
+decide whether the table [[0, 5], [1, 6], [2, 9], [3, 14]] represents a linear function
+write the linear function through (0, -9) and (2, -17) in slope-intercept form
+compare the rates of change of y = 3x - 7 and the table [[0, 7], [2, 1], [4, -5]]
+solve the system 8x + 2y = 88; 2x + 2y = 16
+solve 8x + 9 = -7 for x
+solve 9(x + 10) + 7 = 115 for x by distributing first
+solve 10x + 12 = 6x + 32 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 12x + 15 = 12x + 17
+determine whether this equation has one solution, no solution, or infinitely many solutions: 2x - 15 = 2x - 15
+solve (1/2)x + 3 = -2 for x
+model and solve 10 + 4x = 38 for x
+find the slope of the line through (-2, -19) and (2, 1)
+decide whether the table [[0, -7], [1, -4], [2, -1], [3, 2]] represents a linear function
+write the linear function through (0, -5) and (2, -11) in slope-intercept form
+compare the rates of change of y = 4x - 4 and the table [[0, 9], [2, 5], [4, 1]]
+solve the system 9x + 3y = 126; 5x + 3y = 66
+solve 9x + 12 = 3 for x
+solve 10(x + 15) + 9 = 189 for x by distributing first
+solve 12x - 15 = 9x + 3 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 2x - 12 = 2x - 9
+determine whether this equation has one solution, no solution, or infinitely many solutions: 3x - 10 = 3x - 10
+solve (3/5)x + 2 = -14/5 for x
+model and solve 7 + 5x = 47 for x
+find the slope of the line through (-1, -1) and (4, -21)
+decide whether the table [[0, 7], [1, 8], [2, 11], [3, 16]] represents a linear function
+write the linear function through (0, -3) and (2, -7) in slope-intercept form
+compare the rates of change of y = 5x + 3 and the table [[0, 10], [2, 8], [4, 6]]
+solve the system 10x + 4y = -128; 8x + 4y = -104
+solve 10x - 15 = -5 for x
+solve 12(x - 12) + 10 = -86 for x by distributing first
+solve 2x - 10 = 3x - 17 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 3x - 9 = 3x - 5
+determine whether this equation has one solution, no solution, or infinitely many solutions: 4x - 7 = 4x - 7
+solve 2x + 5/3 = -31/3 for x
+model and solve 4 + 6x = 58 for x
+find the slope of the line through (0, -3) and (2, -9)
+decide whether the table [[0, 3], [1, 8], [2, 13], [3, 18]] represents a linear function
+write the linear function through (0, 4) and (2, 2) in slope-intercept form
+compare the rates of change of y = -4x + 5 and the table [[0, 12], [2, 14], [4, 16]]
+solve the system 12x + y = -121; 13x + 5y = -135
+solve 12x - 10 = 14 for x
+solve 2(x - 9) + 12 = 4 for x by distributing first
+solve 3x - 7 = 5x - 23 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 4x - 5 = 4x
+determine whether this equation has one solution, no solution, or infinitely many solutions: 5x - 4 = 5x - 4
+solve (5/3)x + 7 = 1/3 for x
+model and solve 3 + 7x = 73 for x
+find the slope of the line through (1, 2) and (4, -4)
+decide whether the table [[0, 9], [1, 10], [2, 13], [3, 18]] represents a linear function
+write the linear function through (0, 7) and (2, 9) in slope-intercept form
+compare the rates of change of y = -3x + 9 and the table [[0, 15], [2, 19], [4, 23]]
+solve the system 2x + 2y = -14; 4x + 6y = -26
+solve 2x - 7 = -1 for x
+solve 3(x - 5) + 15 = 18 for x by distributing first
+solve 4x - 4 = 8x - 40 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 5x - 3 = 5x - 2
+determine whether this equation has one solution, no solution, or infinitely many solutions: 6x + 3 = 6x + 3
+solve (1/4)x + 9/2 = 15/4 for x
+model and solve 5 + 8x = 93 for x
+find the slope of the line through (2, 5) and (6, 1)
+decide whether the table [[0, 9], [1, 6], [2, 3], [3, 0]] represents a linear function
+write the linear function through (0, 10) and (2, 14) in slope-intercept form
+compare the rates of change of y = -2x + 12 and the table [[0, -15], [2, -9], [4, -3]]
+solve the system 3x + 3y = -12; 7x + 2y = -38
+solve 3x - 4 = 8 for x
+solve 4(x - 3) - 15 = 1 for x by distributing first
+solve 5x + 3 = 12x - 67 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 6x + 4 = 6x + 6
+determine whether this equation has one solution, no solution, or infinitely many solutions: 7x + 5 = 7x + 5
+solve (2/5)x + 10/3 = 38/15 for x
+model and solve 9 + 9x = 117 for x
+find the slope of the line through (3, 13) and (8, 18)
+decide whether the table [[0, 11], [1, 12], [2, 15], [3, 20]] represents a linear function
+write the linear function through (0, 15) and (2, 21) in slope-intercept form
+compare the rates of change of y = -x - 15 and the table [[0, -12], [2, -4], [4, 4]]
+solve the system 4x + 4y = -4; 10x + 3y = -31
+solve 4x + 3 = 23 for x
+solve 5(x + 4) - 12 = 48 for x by distributing first
+solve 6x + 5 = 4x + 29 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 7x + 7 = 7x + 10
+determine whether this equation has one solution, no solution, or infinitely many solutions: 8x + 9 = 8x + 9
+solve (3/2)x + 12 = 21/2 for x
+model and solve 12 + 10x = 22 for x
+find the slope of the line through (-2, 11) and (0, 15)
+decide whether the table [[0, -15], [1, -16], [2, -17], [3, -18]] represents a linear function
+write the linear function through (0, -12) and (2, -4) in slope-intercept form
+compare the rates of change of y = x - 10 and the table [[0, -10], [2, 0], [4, 10]]
+solve the system 5x + y = -11; 3x + 4y = 7
+solve 5x + 5 = 35 for x
+solve 6(x + 7) - 10 = 86 for x by distributing first
+solve 7x + 9 = 8x - 6 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 8x + 10 = 8x + 14
+determine whether this equation has one solution, no solution, or infinitely many solutions: 9x + 12 = 9x + 12
+solve (4/3)x + 15/2 = 53/6 for x
+model and solve 15 + 12x = 39 for x
+find the slope of the line through (-1, -15) and (2, -6)
+decide whether the table [[0, 13], [1, 14], [2, 17], [3, 22]] represents a linear function
+write the linear function through (0, -9) and (2, 1) in slope-intercept form
+compare the rates of change of y = 2x - 7 and the table [[0, -9], [2, -17], [4, -25]]
+solve the system 6x + 2y = -2; 7x + 5y = 11
+solve 6x + 9 = 51 for x
+solve 7(x + 10) - 9 = 131 for x by distributing first
+solve 8x + 12 = 10x + 36 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 9x + 15 = 9x + 20
+determine whether this equation has one solution, no solution, or infinitely many solutions: 10x - 15 = 10x - 15
+solve (5/4)x - 5 = -5/2 for x
+model and solve 10 + 2x = 16 for x
+find the slope of the line through (0, -9) and (4, 7)
+decide whether the table [[0, -7], [1, -5], [2, -3], [3, -1]] represents a linear function
+write the linear function through (0, -5) and (2, -13) in slope-intercept form
+compare the rates of change of y = 3x - 4 and the table [[0, -7], [2, -13], [4, -19]]
+solve the system 7x + 3y = 11; 9x + 6y = 27
+solve 7x + 12 = 68 for x
+solve 8(x + 15) - 7 = 209 for x by distributing first
+solve 9x - 15 = 3x - 75 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 10x - 12 = 10x - 11
+determine whether this equation has one solution, no solution, or infinitely many solutions: 12x - 10 = 12x - 10
+solve (1/5)x - 12 = -57/5 for x
+model and solve 7 + 3x = 19 for x
+find the slope of the line through (1, 0) and (6, 25)
+decide whether the table [[0, 15], [1, 16], [2, 19], [3, 24]] represents a linear function
+write the linear function through (0, -3) and (2, -9) in slope-intercept form
+compare the rates of change of y = 4x + 3 and the table [[0, -5], [2, -9], [4, -13]]
+solve the system 8x + 4y = 36; 2x + 2y = 16
+solve 8x - 15 = 57 for x
+solve 9(x - 12) - 5 = 22 for x by distributing first
+solve 10x - 10 = 6x - 42 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 12x - 9 = 12x - 7
+determine whether this equation has one solution, no solution, or infinitely many solutions: 2x - 7 = 2x - 7
+solve x - 5 = -1 for x
+model and solve 4 + 4x = 24 for x
+find the slope of the line through (2, -11) and (4, -19)
+decide whether the table [[0, 3], [1, 7], [2, 11], [3, 15]] represents a linear function
+write the linear function through (0, 4) and (2, 0) in slope-intercept form
+compare the rates of change of y = 5x + 5 and the table [[0, -4], [2, -6], [4, -8]]
+solve the system 9x + y = 26; 5x + 3y = 34
+solve 9x - 10 = 80 for x
+solve 10(x - 9) - 4 = -214 for x by distributing first
+solve 12x - 7 = 9x - 25 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 2x - 5 = 2x - 2
+determine whether this equation has one solution, no solution, or infinitely many solutions: 3x - 4 = 3x - 4
+solve x - 3 = 2 for x
+model and solve 3 + 5x = 33 for x
+find the slope of the line through (3, -5) and (6, -14)
+decide whether the table [[0, 17], [1, 18], [2, 21], [3, 26]] represents a linear function
+write the linear function through (0, 7) and (2, 5) in slope-intercept form
+compare the rates of change of y = -4x + 9 and the table [[0, -3], [2, -1], [4, 1]]
+solve the system 10x + 2y = 48; 8x + 4y = 60
+solve 10x - 7 = 113 for x
+solve 12(x - 5) - 3 = -183 for x by distributing first
+solve 2x - 4 = 3x by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 3x - 3 = 3x + 1
+determine whether this equation has one solution, no solution, or infinitely many solutions: 4x + 3 = 4x + 3
+solve x - 7 = -1 for x
+model and solve 5 + 6x = 47 for x
+find the slope of the line through (-2, 11) and (2, 3)
+decide whether the table [[0, 9], [1, 5], [2, 1], [3, -3]] represents a linear function
+write the linear function through (0, 10) and (2, 12) in slope-intercept form
+compare the rates of change of y = -3x + 12 and the table [[0, 3], [2, 7], [4, 11]]
+solve the system 12x + 3y = 78; 13x + 5y = 102
+solve 12x - 4 = 176 for x
+solve 2(x - 3) + 3 = -19 for x by distributing first
+solve 3x + 3 = 5x + 9 by collecting variable terms
+determine whether this equation has one solution, no solution, or infinitely many solutions: 4x + 4 = 4x + 9
+determine whether this equation has one solution, no solution, or infinitely many solutions: 5x + 5 = 5x + 5
+solve x - 5/2 = 9/2 for x
+model and solve 9 + 7x = 65 for x
+find the slope of the line through (-1, 11) and (4, 6)
+decide whether the table [[0, 19], [1, 20], [2, 23], [3, 28]] represents a linear function
+write the linear function through (0, 15) and (2, 19) in slope-intercept form
+compare the rates of change of y = -2x - 15 and the table [[0, 4], [2, 10], [4, 16]]
+solve the system 2x + 4y = 58; 4x + 6y = 92

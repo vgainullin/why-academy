@@ -97,6 +97,14 @@ This pipeline does not maintain a separate rule library; the existence of `deriv
   or a criterion-level error). Account for it separately from `JUDGE_REJECTED`.
   Route to `BUG_INVESTIGATE` when you can form a concrete falsifiable system
   hypothesis with evidence refs; otherwise route to `CONTINUE_EPOCH`.
+- `TARGET_GATE_SYSTEM_BUG`: a target-check or graph-contract inconsistency that
+  can falsely accept, falsely reject, or produce bad repair addenda. Examples:
+  `target_check.status == "PASS"` while `graph_shape.goal_is_terminal == false`
+  for a solve/derive target, `graph_shape.goal_reachable_from_root == false`
+  for a non-given goal, or `target_check.expected_goals` clearly extracts the
+  original source equation where the target asks to solve for a variable. This
+  is not prompt drift. Preserve evidence refs and route to `BUG_INVESTIGATE`
+  when one concrete falsifiable instance exists.
 
 ### 3. Rank by impact
 
@@ -328,6 +336,19 @@ If any unexplained `JUDGE_AGGREGATION_MISMATCH` exists, strongly prefer
   "evidence_refs": [
     {"epoch": 1, "jsonl": "batch_example.jsonl", "record": 2}
   ]
+}
+```
+
+If any `TARGET_GATE_SYSTEM_BUG` exists, strongly prefer `BUG_INVESTIGATE` and
+provide a target candidate like:
+
+```json
+{
+  "component": "target",
+  "rule": "target_check",
+  "hypothesis": "target_check extracts the source equation as the expected goal for solve prompts without 'for x', allowing graphs with goal_node at the root to pass",
+  "seed_ids": [],
+  "evidence_refs": [{"epoch": 9, "jsonl": "batch_example.jsonl", "record": 12}]
 }
 ```
 

@@ -98,6 +98,7 @@ def _failure_record(
         "judge_eval": None,
         "target_check": None,
         "normalization_bridge": _normalization_bridge_summary(iter_dir),
+        "graph_shape": None,
         "treatment_failure": treatment_failure,
     }
 
@@ -112,6 +113,57 @@ def _normalization_bridge_summary(iter_dir: Path) -> dict | None:
         "normalization_mode": report.get("normalization_mode"),
         "status": report.get("status"),
         "metrics": metrics,
+    }
+
+
+def _graph_shape(problem: dict) -> dict | None:
+    nodes = problem.get("nodes")
+    edges = problem.get("edges")
+    root = problem.get("root_node")
+    goal = problem.get("goal_node")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return None
+
+    node_ids = [
+        n.get("id")
+        for n in nodes
+        if isinstance(n, dict) and isinstance(n.get("id"), str)
+    ]
+    node_set = set(node_ids)
+    outgoing: dict[str, list[str]] = {}
+    incoming: dict[str, int] = {}
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get("from")
+        dst = edge.get("to")
+        if not isinstance(src, str) or not isinstance(dst, str):
+            continue
+        outgoing.setdefault(src, []).append(dst)
+        incoming[dst] = incoming.get(dst, 0) + 1
+
+    reachable: set[str] = set()
+    if isinstance(root, str) and root in node_set:
+        stack = [root]
+        while stack:
+            nid = stack.pop()
+            if nid in reachable:
+                continue
+            reachable.add(nid)
+            stack.extend(outgoing.get(nid, []))
+
+    terminal_nodes = sorted(nid for nid in node_set if not outgoing.get(nid))
+    disconnected_nonroot_nodes = sorted(
+        nid for nid in node_set
+        if nid != root and incoming.get(nid, 0) == 0
+    )
+    return {
+        "root_node": root,
+        "goal_node": goal,
+        "terminal_nodes": terminal_nodes,
+        "goal_is_terminal": goal in terminal_nodes if isinstance(goal, str) else False,
+        "goal_reachable_from_root": goal in reachable if isinstance(goal, str) else False,
+        "disconnected_nonroot_nodes": disconnected_nonroot_nodes,
     }
 
 
@@ -196,6 +248,7 @@ def emit_from_target(target_dir: Path, batch_checkpoint: dict, target: str) -> l
                 "expected_goals": target_check.get("expected_goals", []),
             } if target_check else None,
             "normalization_bridge": _normalization_bridge_summary(iter_dir),
+            "graph_shape": _graph_shape(problem),
         }
         if treatment_failure:
             rec["treatment_failure"] = treatment_failure

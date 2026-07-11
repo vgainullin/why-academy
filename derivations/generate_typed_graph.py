@@ -203,7 +203,11 @@ def generate_candidate(
     except Exception as exc:
         raise GenerationError(f"model generation failed: {type(exc).__name__}: {exc}") from exc
     if result.returncode != 0:
-        raise GenerationError(f"model generation failed: {engine} exited {result.returncode}")
+        stderr_tail = (result.stderr or "").strip()[-1000:]
+        detail = f"; stderr={stderr_tail}" if stderr_tail else ""
+        raise GenerationError(
+            f"model generation failed: {engine} exited {result.returncode}{detail}"
+        )
 
     try:
         graph = problem_from_response(result.stdout, problem_id=task["id"])

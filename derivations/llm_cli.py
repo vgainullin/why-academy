@@ -123,7 +123,7 @@ def tail(text: str, limit: int) -> str:
 
 
 def _codex_base_cmd(cwd_path: Path, sandbox: str) -> list[str]:
-    return [
+    cmd = [
         CODEX_BIN,
         "exec",
         "-C",
@@ -131,6 +131,9 @@ def _codex_base_cmd(cwd_path: Path, sandbox: str) -> list[str]:
         "--sandbox",
         sandbox,
     ]
+    if not (cwd_path / ".git").exists():
+        cmd.append("--skip-git-repo-check")
+    return cmd
 
 
 def _append_codex_common_args(cmd: list[str], model: str | None, *, step: str | None = None) -> list[str]:

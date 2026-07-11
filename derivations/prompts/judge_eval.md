@@ -22,7 +22,7 @@ Graph (each node is rendered to LaTeX; edges show the rule applied to get from o
 
 Evaluate each criterion independently. A FAIL on one does not cascade.
 
-1. **one_rule_per_edge** — Each edge must perform exactly ONE named transformation. An edge that labels itself "substitute_expression" but ALSO simplifies or collapses terms in the same step is two rules fused into one. The same applies to edges that combine distribute + add, factor + cancel, etc. PASS iff every edge applies a single atomic rule that maps cleanly to its rule name. FAIL with a specific edge id (e.g. "n2 -> n3") cited.
+1. **one_rule_per_edge** — Each edge must perform exactly ONE named transformation. An edge that labels itself "substitute_expression" but ALSO simplifies or collapses terms in the same step is two rules fused into one. Judge atomicity by the named rule's semantics: `expand_expression` includes complete local algebraic expansion and the numeric constant evaluation inherently produced by that expansion (for example, `3(x - 12) - 5 -> 3x - 41`). It does not include moving a term across the equality. Likewise, `factor_expression` may perform complete local factorization but not cancellation. PASS iff every edge applies a single atomic rule that maps cleanly to its rule name. FAIL with a specific edge id (e.g. "n2 -> n3") cited.
 
 2. **given_facts_visible** — If the target prompt explicitly enumerates multiple given facts (e.g. "(1) X = Y; (2) A = B"), every named fact must appear as a visible node in the graph. Using a derived consequence of a fact as an inline substitution, without ever writing the fact as a node, fails this. PASS iff every named given equation appears as a node. SKIP iff the target named only one starting equation (criterion doesn't apply).
 

@@ -26,7 +26,7 @@ Primary judge verdicts (already PASS overall — you are checking whether that w
 
 ## Rubric — the only valid grounds for refutation
 
-1. **one_rule_per_edge** — Each edge must perform exactly ONE named transformation. An edge whose endpoints differ by more than its named rule (e.g. a "substitute" edge that also divides or cancels, an "expand" edge that also moves a term) is two rules fused into one.
+1. **one_rule_per_edge** — Each edge must perform exactly ONE named transformation. Judge atomicity by the named rule's semantics. `expand_expression` includes complete local algebraic expansion and the numeric constant evaluation inherently produced by it (for example, `3(x - 12) - 5 -> 3x - 41`), but not moving a term across the equality. An edge whose endpoints differ by more than its named rule (e.g. a "substitute" edge that also divides or cancels, an "expand" edge that also moves a term) is two rules fused into one.
 
 2. **given_facts_visible** — If the target prompt explicitly enumerates multiple given facts, every named fact must appear as a visible node in the graph. Using a derived consequence of a fact inline, without the fact ever appearing as a node, violates this. Not applicable when the target names only one starting equation.
 

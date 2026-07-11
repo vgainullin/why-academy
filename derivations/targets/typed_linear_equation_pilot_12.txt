@@ -1,0 +1,14 @@
+# Frozen typed-contract pilot: 12 one-solution Grade 8 linear equations.
+# The trusted supervisor resolves these IDs from the operator-pinned bundle.
+alg8-lin-001
+alg8-lin-002
+alg8-lin-003
+alg8-lin-006
+alg8-lin-007
+alg8-lin-013
+alg8-lin-014
+alg8-lin-015
+alg8-lin-018
+alg8-lin-019
+alg8-lin-025
+alg8-lin-026

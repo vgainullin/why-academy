@@ -20,6 +20,10 @@ source "$ROOT/scripts/_derivation_python.sh"
   derivations/rule_contracts.py \
   derivations/graph_contract.py \
   derivations/task_contract.py \
+  derivations/frozen_task_store.py \
+  derivations/typed_linear_equation_oracle.py \
+  derivations/generate_typed_graph.py \
+  derivations/typed_pilot.py \
   derivations/algebra_linear_practice.py \
   derivations/canvas_check.py \
   derivations/target_check.py \

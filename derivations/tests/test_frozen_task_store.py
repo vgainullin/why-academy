@@ -127,7 +127,7 @@ class FrozenTaskStoreTests(unittest.TestCase):
                     store.get_task(task_id)
 
     def test_rejects_duplicate_json_keys_even_with_matching_byte_pin(self) -> None:
-        raw = b'{"schema_version":"grade8_algebra_linear_practice.v3","schema_version":"grade8_algebra_linear_practice.v3"}'
+        raw = b'{"schema_version":"grade8_algebra_linear_practice.v4","schema_version":"grade8_algebra_linear_practice.v4"}'
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "bundle.json"
             path.write_bytes(raw)

@@ -131,7 +131,7 @@ def _codex_base_cmd(cwd_path: Path, sandbox: str) -> list[str]:
         "--sandbox",
         sandbox,
     ]
-    if not (cwd_path / ".git").exists():
+    if _env_flag("CODEX_SKIP_GIT_REPO_CHECK", False):
         cmd.append("--skip-git-repo-check")
     return cmd
 

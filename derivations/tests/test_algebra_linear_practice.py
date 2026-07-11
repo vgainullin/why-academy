@@ -22,8 +22,8 @@ class AlgebraLinearPracticeTests(unittest.TestCase):
         self.assertEqual(240, corpus["total_tasks"])
         self.assertEqual(24, corpus["daily_set_count"])
         self.assertEqual(10, corpus["set_size"])
-        self.assertEqual("grade8_algebra_linear_practice.v3", corpus["schema_version"])
-        self.assertEqual("derivation_task.v1", corpus["task_contract_version"])
+        self.assertEqual("grade8_algebra_linear_practice.v4", corpus["schema_version"])
+        self.assertEqual("derivation_task.v2", corpus["task_contract_version"])
         counts = {}
         for task in corpus["tasks"]:
             strand = task["metadata"]["strand"]

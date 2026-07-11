@@ -15,8 +15,8 @@ from typing import Any
 from graph_contract import validate_graph_shape
 
 
-TASK_CONTRACT_VERSION = "derivation_task.v1"
-CORPUS_SCHEMA_VERSION = "grade8_algebra_linear_practice.v3"
+TASK_CONTRACT_VERSION = "derivation_task.v2"
+CORPUS_SCHEMA_VERSION = "grade8_algebra_linear_practice.v4"
 TASK_TYPES = {
     "linear_equation",
     "slope",
@@ -99,6 +99,7 @@ def _canonical_payload(contract: dict[str, Any]) -> bytes:
         "task_type": contract.get("task_type"),
         "givens": contract.get("givens"),
         "expected": contract.get("expected"),
+        "pedagogy": contract.get("pedagogy"),
     }
     return json.dumps(
         payload,
@@ -145,6 +146,14 @@ def build_task_contract(problem: dict[str, Any]) -> dict[str, Any]:
                 "constant": rational_from_legacy(structured["rhs"]["constant"]),
             },
         }
+        source_form = structured.get("source_form")
+        if source_form is not None:
+            givens["source_form"] = {
+                "kind": "distribution",
+                "outside": rational_from_legacy(source_form["outside"]),
+                "inner_constant": rational_from_legacy(source_form["inner_constant"]),
+                "extra_constant": rational_from_legacy(source_form["extra_constant"]),
+            }
         answer_kind = structured["answer_kind"]
         cardinality = {
             "one_solution": "one",
@@ -214,6 +223,10 @@ def build_task_contract(problem: dict[str, Any]) -> dict[str, Any]:
             },
         }
 
+    requirements = []
+    if task_type == "linear_equation" and structured.get("source_form") is not None:
+        requirements.append({"kind": "required_first_rule", "rule": "expand_expression"})
+
     contract = {
         "schema_version": TASK_CONTRACT_VERSION,
         "id": problem["id"],
@@ -230,7 +243,10 @@ def build_task_contract(problem: dict[str, Any]) -> dict[str, Any]:
         },
         "givens": givens,
         "expected": expected,
-        "pedagogy": {"reference_steps": copy.deepcopy(problem["steps"])},
+        "pedagogy": {
+            "requirements": requirements,
+            "reference_steps": copy.deepcopy(problem["steps"]),
+        },
     }
     return attach_contract_digest(contract)
 
@@ -333,7 +349,9 @@ def _computed_expected(contract: dict[str, Any]) -> dict[str, Any]:
     _require(isinstance(givens, dict), "givens must be an object")
 
     if task_type == "linear_equation":
-        _exact_keys(givens, {"variable", "lhs", "rhs"}, "givens")
+        allowed = {"variable", "lhs", "rhs"}
+        _require(set(givens) in (allowed, allowed | {"source_form"}),
+                 f"givens keys must be {sorted(allowed)} with optional source_form; got {sorted(givens)}")
         _require(givens["variable"] == "x", "givens.variable must be 'x'")
         lhs, rhs = givens["lhs"], givens["rhs"]
         _require(isinstance(lhs, dict) and isinstance(rhs, dict), "givens equation sides must be objects")
@@ -343,6 +361,20 @@ def _computed_expected(contract: dict[str, Any]) -> dict[str, Any]:
         b = _fraction(lhs["constant"], "givens.lhs.constant")
         c = _fraction(rhs["coefficient"], "givens.rhs.coefficient")
         d = _fraction(rhs["constant"], "givens.rhs.constant")
+        if "source_form" in givens:
+            source = givens["source_form"]
+            _require(isinstance(source, dict), "givens.source_form must be an object")
+            _exact_keys(
+                source,
+                {"kind", "outside", "inner_constant", "extra_constant"},
+                "givens.source_form",
+            )
+            _require(source["kind"] == "distribution", "givens.source_form.kind must be 'distribution'")
+            outside = _fraction(source["outside"], "givens.source_form.outside")
+            inner = _fraction(source["inner_constant"], "givens.source_form.inner_constant")
+            extra = _fraction(source["extra_constant"], "givens.source_form.extra_constant")
+            _require(a == outside and b == outside * inner + extra,
+                     "givens.source_form does not expand to givens.lhs")
         if a == c and b == d:
             cardinality, values = "infinite", []
         elif a == c:
@@ -449,7 +481,18 @@ def validate_task_contract(contract: Any) -> None:
 
     pedagogy = contract["pedagogy"]
     _require(isinstance(pedagogy, dict), "pedagogy must be an object")
-    _exact_keys(pedagogy, {"reference_steps"}, "pedagogy")
+    _exact_keys(pedagogy, {"requirements", "reference_steps"}, "pedagogy")
+    requirements = pedagogy["requirements"]
+    _require(isinstance(requirements, list), "pedagogy.requirements must be a list")
+    for index, requirement in enumerate(requirements):
+        path = f"pedagogy.requirements[{index}]"
+        _require(isinstance(requirement, dict), f"{path} must be an object")
+        _exact_keys(requirement, {"kind", "rule"}, path)
+        _require(requirement["kind"] == "required_first_rule", f"{path}.kind is invalid")
+        _require(requirement["rule"] == "expand_expression", f"{path}.rule is invalid")
+    if requirements:
+        _require(contract["task_type"] == "linear_equation", "pedagogy requirements only support linear equations")
+        _require("source_form" in contract["givens"], "pedagogy requirements require givens.source_form")
     steps = pedagogy["reference_steps"]
     _require(isinstance(steps, list) and steps, "pedagogy.reference_steps must be non-empty")
     for index, step in enumerate(steps):

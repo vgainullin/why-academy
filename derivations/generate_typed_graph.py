@@ -24,9 +24,9 @@ from json_inner import PROMPT, ProblemJsonError, problem_from_response, render_j
 from llm_cli import run_prompt, step_engine
 
 
-PUBLIC_TASK_SCHEMA_VERSION = "derivation_task_public.v1"
+PUBLIC_TASK_SCHEMA_VERSION = "derivation_task_public.v2"
 GENERATION_METADATA_VERSION = "typed_graph_generation.v1"
-PUBLIC_TASK_KEYS = {"schema_version", "id", "task_type", "display", "givens"}
+PUBLIC_TASK_KEYS = {"schema_version", "id", "task_type", "display", "givens", "requirements"}
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
@@ -90,7 +90,9 @@ def validate_public_task(task: Any) -> dict[str, Any]:
 
     givens = task["givens"]
     _require(isinstance(givens, dict), "givens must be an object")
-    _exact_keys(givens, {"variable", "lhs", "rhs"}, "givens")
+    allowed_givens = {"variable", "lhs", "rhs"}
+    _require(set(givens) in (allowed_givens, allowed_givens | {"source_form"}),
+             f"givens keys must be {sorted(allowed_givens)} with optional source_form; got {sorted(givens)}")
     _require(givens["variable"] == "x", "givens.variable must be 'x'")
 
     sides: dict[str, tuple[Fraction, Fraction]] = {}
@@ -107,6 +109,27 @@ def validate_public_task(task: Any) -> dict[str, Any]:
         sides["lhs"][0] != sides["rhs"][0],
         "linear_equation must have exactly one solution",
     )
+    requirements = task["requirements"]
+    _require(isinstance(requirements, list), "requirements must be a list")
+    for index, requirement in enumerate(requirements):
+        path = f"requirements[{index}]"
+        _require(isinstance(requirement, dict), f"{path} must be an object")
+        _exact_keys(requirement, {"kind", "rule"}, path)
+        _require(requirement == {"kind": "required_first_rule", "rule": "expand_expression"},
+                 f"{path} is unsupported")
+    if "source_form" in givens:
+        source = givens["source_form"]
+        _require(isinstance(source, dict), "givens.source_form must be an object")
+        _exact_keys(source, {"kind", "outside", "inner_constant", "extra_constant"}, "givens.source_form")
+        _require(source["kind"] == "distribution", "givens.source_form.kind must be 'distribution'")
+        outside = _rational(source["outside"], "givens.source_form.outside")
+        inner = _rational(source["inner_constant"], "givens.source_form.inner_constant")
+        extra = _rational(source["extra_constant"], "givens.source_form.extra_constant")
+        _require(sides["lhs"] == (outside, outside * inner + extra),
+                 "givens.source_form does not expand to givens.lhs")
+        _require(bool(requirements), "givens.source_form requires a pedagogy requirement")
+    else:
+        _require(not requirements, "requirements require givens.source_form")
     return task
 
 
@@ -124,7 +147,11 @@ def public_target_text(task: dict[str, Any]) -> str:
         f"{task['display']['prompt'].strip()}\n\n"
         "Authoritative typed givens (public task data):\n"
         f"{typed_givens}\n"
-        "Use these givens exactly when constructing the derivation graph."
+        "Use these givens exactly when constructing the derivation graph. "
+        "When source_form is present, preserve it in the root node and satisfy every "
+        "required_first_rule before continuing. SymPy normally auto-expands numeric "
+        "distribution, so the root sympy_srepr must put evaluate=False on its nested "
+        "Add and Mul constructors to preserve source_form."
     )
 
 

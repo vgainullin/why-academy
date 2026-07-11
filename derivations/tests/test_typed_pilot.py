@@ -28,13 +28,16 @@ class TypedPilotTests(unittest.TestCase):
     def test_public_envelope_excludes_private_correctness_fields(self) -> None:
         public = typed_pilot.public_task_envelope(self.contract)
 
-        self.assertEqual("derivation_task_public.v1", public["schema_version"])
-        self.assertEqual({"schema_version", "id", "task_type", "display", "givens"}, set(public))
+        self.assertEqual("derivation_task_public.v2", public["schema_version"])
+        self.assertEqual(
+            {"schema_version", "id", "task_type", "display", "givens", "requirements"},
+            set(public),
+        )
         self.assertNotIn("expected", public)
         self.assertNotIn("answer", json.dumps(public))
         self.assertNotIn("contract_digest", public)
 
-    def test_missing_candidate_generator_is_error_and_never_accepts(self) -> None:
+    def test_generation_failure_is_error_and_never_accepts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             record = {
@@ -48,7 +51,7 @@ class TypedPilotTests(unittest.TestCase):
                 task_index=0,
                 out_dir=out,
                 candidate_root=out / "candidate-without-generator",
-                candidate_python=sys.executable,
+                candidate_python="/missing/python",
                 trusted_python=sys.executable,
                 engine="fixture",
                 model="fixture",
@@ -89,8 +92,18 @@ class TypedPilotTests(unittest.TestCase):
                 "evaluator_version": "test",
             }
             real_run_logged = typed_pilot._run_logged
+            generation_seen = False
 
             def run_logged(cmd, **kwargs):
+                nonlocal generation_seen
+                if any(str(part).endswith("generate_typed_graph.py") for part in cmd):
+                    generation_seen = True
+                    self.assertEqual(DERIVATIONS / "generate_typed_graph.py", Path(cmd[1]))
+                    self.assertEqual("read-only", kwargs["env"]["CODEX_SANDBOX"])
+                    self.assertEqual("1", kwargs["env"]["CODEX_SKIP_GIT_REPO_CHECK"])
+                    self.assertNotIn("DEEPSEEK_API_KEY", kwargs["env"])
+                    fixture_generator = fixture_root / "derivations" / "generate_typed_graph.py"
+                    return real_run_logged([cmd[0], str(fixture_generator), *cmd[2:]], **kwargs)
                 if any(str(part).endswith("judge.py") for part in cmd):
                     submission = Path(cmd[2])
                     submission.with_name(submission.stem + ".judge.json").write_text(json.dumps({
@@ -119,6 +132,7 @@ class TypedPilotTests(unittest.TestCase):
                 )
 
             self.assertEqual("PASS", acceptance["status"], acceptance)
+            self.assertTrue(generation_seen)
             self.assertEqual("PASS", acceptance["gates"]["typed_oracle"]["status"])
             self.assertEqual("PASS", acceptance["gates"]["canvas"]["status"])
 

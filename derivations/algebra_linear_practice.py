@@ -257,6 +257,11 @@ def make_problem(spec: ProblemSpec) -> dict[str, Any]:
             structured={
                 "lhs": {"x": fmt_frac(outside), "constant": fmt_frac(outside * inner + extra)},
                 "rhs": {"x": "0", "constant": fmt_frac(rhs)},
+                "source_form": {
+                    "outside": fmt_frac(outside),
+                    "inner_constant": fmt_frac(inner),
+                    "extra_constant": fmt_frac(extra),
+                },
                 "answer_kind": "one_solution",
                 "solution_value": fmt_frac(x),
             },

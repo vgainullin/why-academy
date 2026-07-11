@@ -18,8 +18,8 @@ from sympy_eval import parse_srepr, strip_symbol_assumptions
 from task_contract import TaskContractError, result_matches, validate_task_contract
 
 
-EVALUATOR_VERSION = "typed_linear_equation_oracle.v1"
-GATE_NAMES = ("contract", "graph_schema", "topology", "verifier", "root", "goal")
+EVALUATOR_VERSION = "typed_linear_equation_oracle.v2"
+GATE_NAMES = ("contract", "graph_schema", "topology", "verifier", "root", "pedagogy", "goal")
 GRAPH_KEYS = {"id", "root_node", "goal_node", "nodes", "edges"}
 NODE_KEYS = {"id", "sympy_srepr"}
 EDGE_REQUIRED_KEYS = {"from", "to", "rule"}
@@ -287,7 +287,7 @@ def _fraction(value: dict[str, Any]) -> Fraction:
 
 def _parse_equation(node: dict[str, Any], label: str) -> tuple[sp.Equality | None, list[str]]:
     try:
-        expression = strip_symbol_assumptions(parse_srepr(node["sympy_srepr"]))
+        expression = parse_srepr(node["sympy_srepr"])
     except Exception as exc:
         return None, [f"{label} sympy_srepr could not be parsed: {type(exc).__name__}: {exc}"]
     if not isinstance(expression, sp.Equality):
@@ -299,16 +299,57 @@ def _root_reasons(contract: dict[str, Any], root: sp.Equality) -> list[str]:
     givens = contract["givens"]
     lhs, rhs = givens["lhs"], givens["rhs"]
     variable = sp.Symbol(givens["variable"])
+    normalized_root = strip_symbol_assumptions(root)
     expected = (
         sp.Rational(*_fraction(lhs["coefficient"]).as_integer_ratio()) * variable
         + sp.Rational(*_fraction(lhs["constant"]).as_integer_ratio())
         - sp.Rational(*_fraction(rhs["coefficient"]).as_integer_ratio()) * variable
         - sp.Rational(*_fraction(rhs["constant"]).as_integer_ratio())
     )
-    residual = sp.expand(root.lhs - root.rhs)
+    residual = sp.expand(normalized_root.lhs - normalized_root.rhs)
     expected = sp.expand(expected)
     if sp.expand(residual - expected) != 0 and sp.expand(residual + expected) != 0:
         return ["root equation residual does not exactly match frozen givens up to sign"]
+    source = givens.get("source_form")
+    if source is not None:
+        source_variable = next(
+            (symbol for symbol in root.free_symbols if symbol.name == givens["variable"]),
+            variable,
+        )
+        outside = sp.Rational(*_fraction(source["outside"]).as_integer_ratio())
+        inner = sp.Rational(*_fraction(source["inner_constant"]).as_integer_ratio())
+        extra = sp.Rational(*_fraction(source["extra_constant"]).as_integer_ratio())
+        source_lhs = sp.Add(
+            sp.Mul(
+                outside,
+                sp.Add(source_variable, inner, evaluate=False),
+                evaluate=False,
+            ),
+            extra,
+            evaluate=False,
+        )
+        expected_rhs = (
+            sp.Rational(*_fraction(rhs["coefficient"]).as_integer_ratio()) * source_variable
+            + sp.Rational(*_fraction(rhs["constant"]).as_integer_ratio())
+        )
+        if not (
+            (root.lhs == source_lhs and root.rhs == expected_rhs)
+            or (root.rhs == source_lhs and root.lhs == expected_rhs)
+        ):
+            return ["root equation does not preserve the frozen distribution source form"]
+    return []
+
+
+def _pedagogy_reasons(contract: dict[str, Any], graph: dict[str, Any]) -> list[str]:
+    requirements = contract["pedagogy"]["requirements"]
+    if not requirements:
+        return []
+    outgoing = [edge for edge in graph["edges"] if edge["from"] == graph["root_node"]]
+    if len(outgoing) != 1:
+        return ["a required first rule needs exactly one edge leaving root_node"]
+    required_rule = requirements[0]["rule"]
+    if outgoing[0]["rule"] != required_rule:
+        return [f"first edge must use required pedagogy rule {required_rule!r}"]
     return []
 
 
@@ -363,6 +404,11 @@ def evaluate_typed_linear_equation(
     if reasons:
         return _finish(contract, graph, gates, "root", "FAIL", reasons)
     _pass_gate(gates, "root")
+
+    reasons = _pedagogy_reasons(contract, graph)
+    if reasons:
+        return _finish(contract, graph, gates, "pedagogy", "FAIL", reasons)
+    _pass_gate(gates, "pedagogy")
 
     goal, reasons = _parse_equation(node_by_id[graph["goal_node"]], "goal_node")
     if reasons or goal is None:

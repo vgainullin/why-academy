@@ -23,7 +23,7 @@ from typing import Any
 
 DERIVATIONS = Path(__file__).resolve().parent
 ORACLE_ROOT = DERIVATIONS.parent
-PUBLIC_TASK_VERSION = "derivation_task_public.v1"
+PUBLIC_TASK_VERSION = "derivation_task_public.v2"
 RUN_VERSION = "typed_derivation_pilot.v1"
 ACCEPTANCE_VERSION = "typed_derivation_acceptance.v1"
 
@@ -95,6 +95,7 @@ def public_task_envelope(contract: dict[str, Any]) -> dict[str, Any]:
         "task_type": contract["task_type"],
         "display": {"prompt": contract["display"]["prompt"]},
         "givens": copy.deepcopy(contract["givens"]),
+        "requirements": copy.deepcopy(contract["pedagogy"]["requirements"]),
     }
 
 
@@ -147,6 +148,24 @@ def _trusted_env() -> dict[str, str]:
     return env
 
 
+def _candidate_env() -> dict[str, str]:
+    """Minimal environment for the trusted generation wrapper and Codex CLI."""
+    allowed = {
+        "HOME", "PATH", "SHELL", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL",
+        "CODEX_HOME", "CODEX_BIN", "SSL_CERT_FILE", "SSL_CERT_DIR",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    }
+    env = {key: value for key, value in os.environ.items() if key in allowed}
+    env.update({
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "CODEX_MINIMAL": "1",
+        "CODEX_REUSE_SESSION": "0",
+        "CODEX_SANDBOX": "read-only",
+        "CODEX_SKIP_GIT_REPO_CHECK": "1",
+    })
+    return env
+
+
 def _run_logged(
     cmd: list[str],
     *,
@@ -171,6 +190,12 @@ def _run_logged(
             f"{exc.stdout or ''}{exc.stderr or ''}"
         )
         return None, f"timed out after {timeout}s"
+    except OSError as exc:
+        log_path.write_text(
+            f"# started: {started}\n# launch_error: {type(exc).__name__}: {exc}\n"
+            f"# command: {json.dumps(cmd)}\n"
+        )
+        return None, f"could not launch command: {type(exc).__name__}: {exc}"
     log_path.write_text(
         f"# started: {started}\n# returncode: {proc.returncode}\n"
         f"# command: {json.dumps(cmd)}\n\nSTDOUT\n{proc.stdout}\nSTDERR\n{proc.stderr}"
@@ -289,7 +314,7 @@ def run_task(
     if resume and submission_path.exists():
         generation_gate = {"status": "PASS", "mode": "resume_re_evaluate"}
     else:
-        generator = candidate_root / "derivations" / "generate_typed_graph.py"
+        generator = DERIVATIONS / "generate_typed_graph.py"
         if not generator.exists():
             generation_gate = {
                 "status": "ERROR",
@@ -314,8 +339,8 @@ def run_task(
             ]
             rc, error = _run_logged(
                 cmd,
-                cwd=candidate_root,
-                env=_trusted_env(),
+                cwd=workspace,
+                env=_candidate_env(),
                 log_path=generator_log,
                 timeout=generation_timeout,
             )

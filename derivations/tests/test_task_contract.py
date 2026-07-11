@@ -205,6 +205,18 @@ class TaskContractTests(unittest.TestCase):
         self.assertEqual(contract_digest(task), contract_digest(changed_prompt))
         validate_task_contract(changed_prompt)
 
+    def test_pedagogy_requirements_are_digest_bound(self) -> None:
+        task = next(
+            task for task in self.corpus["tasks"]
+            if task["metadata"]["strand"] == "distribution_multi_step"
+        )
+        changed = copy.deepcopy(task)
+        changed["pedagogy"]["requirements"] = []
+
+        self.assertNotEqual(contract_digest(task), contract_digest(changed))
+        with self.assertRaisesRegex(TaskContractError, "contract_digest"):
+            validate_task_contract(changed)
+
     def test_semantic_tamper_and_rehash_fails_against_frozen_manifest(self) -> None:
         original = self.by_type["linear_equation"]
         trusted_digest = original["contract_digest"]

@@ -24,7 +24,7 @@ def rational(numerator: int, denominator: int = 1) -> dict[str, int]:
 
 def public_task() -> dict:
     return {
-        "schema_version": "derivation_task_public.v1",
+        "schema_version": "derivation_task_public.v2",
         "id": "alg8-lin-public-001",
         "task_type": "linear_equation",
         "display": {"prompt": "Solve 2x - 3 = 7."},
@@ -33,6 +33,7 @@ def public_task() -> dict:
             "lhs": {"coefficient": rational(2), "constant": rational(-3)},
             "rhs": {"coefficient": rational(0), "constant": rational(7)},
         },
+        "requirements": [],
     }
 
 

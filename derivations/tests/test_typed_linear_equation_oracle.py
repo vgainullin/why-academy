@@ -45,6 +45,11 @@ class TypedLinearEquationOracleTests(unittest.TestCase):
             if task["task_type"] == "linear_equation"
             and task["expected"]["cardinality"] != "one"
         )
+        cls.distribution_contract = next(
+            task
+            for task in corpus["tasks"]
+            if task["metadata"]["strand"] == "distribution_multi_step"
+        )
 
     def graph(self, *, swapped_root: bool = False, swapped_goal: bool = False) -> dict:
         givens = self.contract["givens"]
@@ -232,6 +237,66 @@ class TypedLinearEquationOracleTests(unittest.TestCase):
         payload = self.evaluate(graph)
         self.assertEqual("FAIL", payload["status"])
         self.assert_reason(payload, "does not match the trusted contract")
+
+    def test_distribution_source_form_and_first_expand_rule_are_mandatory(self) -> None:
+        contract = self.distribution_contract
+        givens = contract["givens"]
+        source = givens["source_form"]
+        x = sp.Symbol("x")
+        outside = _rational(_fraction(source["outside"]))
+        inner = _rational(_fraction(source["inner_constant"]))
+        extra = _rational(_fraction(source["extra_constant"]))
+        rhs = givens["rhs"]
+        rhs_expr = (
+            _rational(_fraction(rhs["coefficient"])) * x
+            + _rational(_fraction(rhs["constant"]))
+        )
+        source_lhs = sp.Add(
+            sp.Mul(outside, sp.Add(x, inner, evaluate=False), evaluate=False),
+            extra,
+            evaluate=False,
+        )
+        root = sp.Eq(source_lhs, rhs_expr, evaluate=False)
+        expanded = sp.Eq(sp.expand(root.lhs), sp.expand(root.rhs), evaluate=False)
+        solution = _rational(_fraction(contract["expected"]["values"][0]))
+        goal = sp.Eq(x, solution, evaluate=False)
+        source_root_srepr = (
+            f"Eq(Add(Mul({sp.srepr(outside)}, Add(Symbol('x'), {sp.srepr(inner)}, evaluate=False), "
+            f"evaluate=False), {sp.srepr(extra)}, evaluate=False), {sp.srepr(rhs_expr)}, evaluate=False)"
+        )
+        graph = {
+            "id": "distribution_graph",
+            "root_node": "n0",
+            "goal_node": "n2",
+            "nodes": [
+                {
+                    "id": "n0",
+                    "sympy_srepr": source_root_srepr,
+                },
+                {"id": "n1", "sympy_srepr": sp.srepr(expanded)},
+                {"id": "n2", "sympy_srepr": sp.srepr(goal)},
+            ],
+            "edges": [
+                {"from": "n0", "to": "n1", "rule": "expand_expression", "rule_args": {}},
+                {"from": "n1", "to": "n2", "rule": "solve_linear_equation", "rule_args": {}},
+            ],
+        }
+        verifier = self.verifier(graph)
+
+        valid_payload = self.evaluate(graph, verifier, contract)
+        self.assertEqual("PASS", valid_payload["status"], valid_payload)
+
+        expanded_root = copy.deepcopy(graph)
+        expanded_root["nodes"][0]["sympy_srepr"] = sp.srepr(expanded)
+        payload = self.evaluate(expanded_root, self.verifier(expanded_root), contract)
+        self.assertEqual("FAIL", payload["status"])
+        self.assert_reason(payload, "does not preserve")
+
+        wrong_rule = copy.deepcopy(graph)
+        wrong_rule["edges"][0]["rule"] = "simplify_expression"
+        payload = self.evaluate(wrong_rule, self.verifier(wrong_rule), contract)
+        self.assertEqual("FAIL", payload["status"])
+        self.assert_reason(payload, "first edge")
 
 
 if __name__ == "__main__":

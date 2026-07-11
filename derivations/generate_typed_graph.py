@@ -148,7 +148,10 @@ def public_target_text(task: dict[str, Any]) -> str:
         "required_first_rule before continuing. SymPy normally auto-expands numeric "
         "distribution, so the root sympy_srepr must put evaluate=False on its nested "
         "Add and Mul constructors to preserve source_form. Always put evaluate=False "
-        "on Eq constructors so identities and contradictions remain equations."
+        "on Eq constructors so identities and contradictions remain equations. The "
+        "connected terminal goal must be canonical: Eq(x, q) for one solution, a "
+        "rational contradiction Eq(a, b) for no solution, or a rational identity "
+        "Eq(a, a) for infinitely many solutions. Never invent a number_of_solutions symbol."
     )
 
 

@@ -102,6 +102,7 @@ class PublicTaskValidationTests(unittest.TestCase):
         self.assertIn("Authoritative typed givens", prompt)
         self.assertIn('"coefficient":{"denominator":1,"numerator":2}', prompt)
         self.assertIn("alg8-lin-public-001", prompt)
+        self.assertIn("Never invent a number_of_solutions symbol", prompt)
         self.assertNotIn("contract_digest", prompt)
         self.assertNotIn('"expected"', prompt)
         self.assertNotIn('"answer"', prompt)

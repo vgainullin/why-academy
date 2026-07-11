@@ -86,9 +86,6 @@ def public_task_envelope(contract: dict[str, Any]) -> dict[str, Any]:
     """Return the only task data exposed to the candidate/model."""
     if contract.get("task_type") != "linear_equation":
         raise TypedPilotError("typed pilot currently supports linear_equation only")
-    expected = contract.get("expected")
-    if not isinstance(expected, dict) or expected.get("cardinality") != "one":
-        raise TypedPilotError("typed pilot currently supports one-solution equations only")
     return {
         "schema_version": PUBLIC_TASK_VERSION,
         "id": contract["id"],

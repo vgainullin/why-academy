@@ -105,10 +105,6 @@ def validate_public_task(task: Any) -> dict[str, Any]:
             _rational(side["constant"], f"givens.{side_name}.constant"),
         )
 
-    _require(
-        sides["lhs"][0] != sides["rhs"][0],
-        "linear_equation must have exactly one solution",
-    )
     requirements = task["requirements"]
     _require(isinstance(requirements, list), "requirements must be a list")
     for index, requirement in enumerate(requirements):
@@ -151,7 +147,8 @@ def public_target_text(task: dict[str, Any]) -> str:
         "When source_form is present, preserve it in the root node and satisfy every "
         "required_first_rule before continuing. SymPy normally auto-expands numeric "
         "distribution, so the root sympy_srepr must put evaluate=False on its nested "
-        "Add and Mul constructors to preserve source_form."
+        "Add and Mul constructors to preserve source_form. Always put evaluate=False "
+        "on Eq constructors so identities and contradictions remain equations."
     )
 
 

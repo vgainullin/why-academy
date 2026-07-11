@@ -24,6 +24,7 @@ class TypedPilotTests(unittest.TestCase):
         cls.bundle_sha256 = hashlib.sha256(cls.bundle.read_bytes()).hexdigest()
         cls.store = FrozenTaskStore.load(cls.bundle, cls.bundle_sha256)
         cls.contract = cls.store.get_task("alg8-lin-001")
+        cls.no_solution_contract = cls.store.get_task("alg8-lin-004")
 
     def test_public_envelope_excludes_private_correctness_fields(self) -> None:
         public = typed_pilot.public_task_envelope(self.contract)
@@ -36,6 +37,12 @@ class TypedPilotTests(unittest.TestCase):
         self.assertNotIn("expected", public)
         self.assertNotIn("answer", json.dumps(public))
         self.assertNotIn("contract_digest", public)
+
+    def test_public_envelope_supports_non_unique_linear_equations(self) -> None:
+        public = typed_pilot.public_task_envelope(self.no_solution_contract)
+
+        self.assertEqual("linear_equation", public["task_type"])
+        self.assertNotIn("expected", public)
 
     def test_generation_failure_is_error_and_never_accepts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

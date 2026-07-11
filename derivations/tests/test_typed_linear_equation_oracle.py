@@ -39,11 +39,18 @@ class TypedLinearEquationOracleTests(unittest.TestCase):
             if task["task_type"] == "linear_equation"
             and task["expected"]["cardinality"] == "one"
         )
-        cls.non_one_contract = next(
+        cls.no_solution_contract = next(
             task
             for task in corpus["tasks"]
-            if task["task_type"] == "linear_equation"
-            and task["expected"]["cardinality"] != "one"
+            if task["task_type"] == "linear_equation" and task["expected"]["cardinality"] == "none"
+        )
+        cls.infinite_contract = next(
+            task
+            for task in corpus["tasks"]
+            if task["task_type"] == "linear_equation" and task["expected"]["cardinality"] == "infinite"
+        )
+        cls.slope_contract = next(
+            task for task in corpus["tasks"] if task["task_type"] == "slope"
         )
         cls.distribution_contract = next(
             task
@@ -139,13 +146,42 @@ class TypedLinearEquationOracleTests(unittest.TestCase):
 
         self.assertEqual("PASS", self.evaluate(graph)["status"])
 
-    def test_contract_must_be_valid_one_solution_linear_equation(self) -> None:
+    def test_contract_must_be_a_linear_equation(self) -> None:
         graph = self.graph()
-        payload = self.evaluate(graph, contract=self.non_one_contract)
+        payload = self.evaluate(graph, contract=self.slope_contract)
 
         self.assertEqual("ERROR", payload["status"])
         self.assertEqual("ERROR", payload["gates"]["contract"]["status"])
-        self.assert_reason(payload, "exactly one solution")
+        self.assert_reason(payload, "task_type")
+
+    def test_rational_contradiction_and_identity_encode_special_solution_sets(self) -> None:
+        for contract, goal_srepr in (
+            (self.no_solution_contract, "Eq(Integer(0), Integer(1), evaluate=False)"),
+            (self.infinite_contract, "Eq(Integer(0), Integer(0), evaluate=False)"),
+        ):
+            with self.subTest(cardinality=contract["expected"]["cardinality"]):
+                givens = contract["givens"]
+                x = sp.Symbol("x")
+                lhs = givens["lhs"]
+                rhs = givens["rhs"]
+                lhs_expr = _rational(_fraction(lhs["coefficient"])) * x + _rational(_fraction(lhs["constant"]))
+                rhs_expr = _rational(_fraction(rhs["coefficient"])) * x + _rational(_fraction(rhs["constant"]))
+                root_srepr = f"Eq({sp.srepr(lhs_expr)}, {sp.srepr(rhs_expr)}, evaluate=False)"
+                graph = {
+                    "id": f"special_{contract['id']}",
+                    "root_node": "n0",
+                    "goal_node": "n1",
+                    "nodes": [
+                        {"id": "n0", "sympy_srepr": root_srepr},
+                        {"id": "n1", "sympy_srepr": goal_srepr},
+                    ],
+                    "edges": [
+                        {"from": "n0", "to": "n1", "rule": "simplify_expression", "rule_args": {}}
+                    ],
+                }
+                payload = self.evaluate(graph, self.verifier(graph), contract)
+                self.assertEqual("PASS", payload["status"], payload)
+                self.assertEqual(contract["expected"], payload["derived_result"])
 
     def test_model_authored_result_is_rejected_by_exact_schema(self) -> None:
         graph = self.graph()

@@ -85,11 +85,10 @@ class PublicTaskValidationTests(unittest.TestCase):
                 with self.assertRaises(generator.PublicTaskError):
                     generator.validate_public_task(task)
 
-    def test_rejects_non_unique_equation_and_noncanonical_rational(self) -> None:
+    def test_accepts_non_unique_equations_and_rejects_noncanonical_rational(self) -> None:
         no_unique_solution = public_task()
         no_unique_solution["givens"]["rhs"]["coefficient"] = rational(2)
-        with self.assertRaisesRegex(generator.PublicTaskError, "exactly one solution"):
-            generator.validate_public_task(no_unique_solution)
+        self.assertIs(generator.validate_public_task(no_unique_solution), no_unique_solution)
 
         noncanonical = public_task()
         noncanonical["givens"]["lhs"]["coefficient"] = rational(2, 2)

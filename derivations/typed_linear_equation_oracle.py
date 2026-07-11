@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed oracle for typed one-solution linear-equation derivations.
+"""Fail-closed oracle for typed linear-equation derivations.
 
 The graph is model-authored; the contract and verifier sidecar are trusted
 inputs.  Acceptance is derived only from the frozen typed givens, the graph's
@@ -74,8 +74,8 @@ def _validate_contract(contract: Any) -> list[str]:
     if contract["task_type"] != "linear_equation":
         return ["task_type must be 'linear_equation'"]
     expected = contract["expected"]
-    if expected.get("kind") != "solution_set" or expected.get("cardinality") != "one":
-        return ["linear_equation contract must declare exactly one solution"]
+    if expected.get("kind") != "solution_set":
+        return ["linear_equation contract must declare a solution set"]
     return []
 
 
@@ -299,14 +299,15 @@ def _root_reasons(contract: dict[str, Any], root: sp.Equality) -> list[str]:
     givens = contract["givens"]
     lhs, rhs = givens["lhs"], givens["rhs"]
     variable = sp.Symbol(givens["variable"])
-    normalized_root = strip_symbol_assumptions(root)
+    normalized_lhs = strip_symbol_assumptions(root.lhs)
+    normalized_rhs = strip_symbol_assumptions(root.rhs)
     expected = (
         sp.Rational(*_fraction(lhs["coefficient"]).as_integer_ratio()) * variable
         + sp.Rational(*_fraction(lhs["constant"]).as_integer_ratio())
         - sp.Rational(*_fraction(rhs["coefficient"]).as_integer_ratio()) * variable
         - sp.Rational(*_fraction(rhs["constant"]).as_integer_ratio())
     )
-    residual = sp.expand(normalized_root.lhs - normalized_root.rhs)
+    residual = sp.expand(normalized_lhs - normalized_rhs)
     expected = sp.expand(expected)
     if sp.expand(residual - expected) != 0 and sp.expand(residual + expected) != 0:
         return ["root equation residual does not exactly match frozen givens up to sign"]
@@ -360,13 +361,25 @@ def _goal_result(goal: sp.Equality) -> tuple[dict[str, Any] | None, list[str]]:
     elif isinstance(right, sp.Symbol) and right.name == "x" and isinstance(left, sp.Rational):
         value = left
     else:
-        return None, ["goal must be exactly Eq(x, q) or Eq(q, x) for rational q"]
-    return {
-        "kind": "solution_set",
-        "variable": "x",
-        "cardinality": "one",
-        "values": [{"numerator": int(value.p), "denominator": int(value.q)}],
-    }, []
+        value = None
+    if value is not None:
+        return {
+            "kind": "solution_set",
+            "variable": "x",
+            "cardinality": "one",
+            "values": [{"numerator": int(value.p), "denominator": int(value.q)}],
+        }, []
+    if isinstance(left, sp.Rational) and isinstance(right, sp.Rational):
+        cardinality = "infinite" if left == right else "none"
+        return {
+            "kind": "solution_set",
+            "variable": "x",
+            "cardinality": cardinality,
+            "values": [],
+        }, []
+    return None, [
+        "goal must be Eq(x, q), Eq(q, x), a rational contradiction, or a rational identity"
+    ]
 
 
 def evaluate_typed_linear_equation(

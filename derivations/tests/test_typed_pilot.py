@@ -74,6 +74,12 @@ class TypedPilotTests(unittest.TestCase):
             self.assertEqual("ERROR", json.loads(
                 (out / "tasks" / "task_000_alg8-lin-001" / "acceptance.json").read_text()
             )["status"])
+            evidence = json.loads(
+                (out / "tasks" / "task_000_alg8-lin-001" / "evidence.json").read_text()
+            )
+            self.assertEqual("evolution_attempt_evidence.v1", evidence["schema_version"])
+            self.assertEqual("grade8_math", evidence["plugin_id"])
+            self.assertEqual("ERROR", evidence["status"])
 
     def test_resume_provenance_mismatch_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

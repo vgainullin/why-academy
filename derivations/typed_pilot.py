@@ -20,12 +20,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from domains.grade8_math import Grade8MathPlugin
+from evolution.adapters import evidence_from_gate_records
+from evolution.protocols import RunSpec, canonical_digest
+
 
 DERIVATIONS = Path(__file__).resolve().parent
 ORACLE_ROOT = DERIVATIONS.parent
-PUBLIC_TASK_VERSION = "derivation_task_public.v2"
 RUN_VERSION = "typed_derivation_pilot.v1"
 ACCEPTANCE_VERSION = "typed_derivation_acceptance.v1"
+GRADE8_PLUGIN = Grade8MathPlugin()
 
 
 class TypedPilotError(ValueError):
@@ -84,16 +88,10 @@ def read_task_ids(path: Path) -> list[str]:
 
 def public_task_envelope(contract: dict[str, Any]) -> dict[str, Any]:
     """Return the only task data exposed to the candidate/model."""
-    if contract.get("task_type") != "linear_equation":
-        raise TypedPilotError("typed pilot currently supports linear_equation only")
-    return {
-        "schema_version": PUBLIC_TASK_VERSION,
-        "id": contract["id"],
-        "task_type": contract["task_type"],
-        "display": {"prompt": contract["display"]["prompt"]},
-        "givens": copy.deepcopy(contract["givens"]),
-        "requirements": copy.deepcopy(contract["pedagogy"]["requirements"]),
-    }
+    try:
+        return dict(GRADE8_PLUGIN.public_task(contract))
+    except Exception as exc:
+        raise TypedPilotError(str(exc)) from exc
 
 
 def _git_output(root: Path, *args: str) -> str:
@@ -271,9 +269,53 @@ def _selected_digest(store: Any, task_ids: list[str]) -> str:
 
 
 def _evaluate_equation(contract: dict[str, Any], graph: dict[str, Any], verifier: dict[str, Any]) -> dict[str, Any]:
-    from typed_linear_equation_oracle import evaluate_typed_linear_equation
+    candidate = {"graph": graph, "verifier": verifier}
+    evaluation = GRADE8_PLUGIN.evaluate(
+        contract,
+        candidate,
+        canonical_digest(candidate),
+    )
+    return dict(evaluation.outputs["legacy_payload"])
 
-    return evaluate_typed_linear_equation(contract, graph, verifier)
+
+def _write_neutral_evidence(
+    *,
+    task_dir: Path,
+    contract: dict[str, Any],
+    run_record: dict[str, Any],
+    graph_sha256: str | None,
+    gates: dict[str, dict[str, Any]],
+) -> None:
+    generation = run_record.get("generation")
+    arm = (
+        generation.get("arm")
+        if isinstance(generation, dict) and isinstance(generation.get("arm"), str)
+        else str(run_record.get("evaluator_version") or "typed-pilot")
+    )
+    spec = RunSpec(
+        run_id=str(run_record.get("run_id") or "typed-pilot"),
+        cohort_id=str(run_record.get("selected_task_list_sha256") or "typed-pilot"),
+        arm=arm,
+        provenance={
+            key: copy.deepcopy(value)
+            for key, value in run_record.items()
+            if key in {"bundle_sha256", "oracle", "evaluator_version", "generation", "judge"}
+        },
+    )
+    evidence = evidence_from_gate_records(
+        spec=spec,
+        plugin_id=GRADE8_PLUGIN.plugin_id,
+        task_id=contract["id"],
+        task_digest=contract["contract_digest"],
+        attempt_index=0,
+        candidate_digest=graph_sha256,
+        gates=gates,
+        artifact_refs={
+            **{"acceptance": "acceptance.json"},
+            **({"submission": "submission.json"} if graph_sha256 else {}),
+        },
+    )
+    _atomic_json(task_dir / "evidence.json", evidence.to_dict())
 
 
 def run_task(
@@ -494,6 +536,13 @@ def run_task(
         "reasons": list(dict.fromkeys(reason for reason in reasons if reason)),
     }
     _atomic_json(acceptance_path, acceptance)
+    _write_neutral_evidence(
+        task_dir=task_dir,
+        contract=contract,
+        run_record=run_record,
+        graph_sha256=graph_sha256,
+        gates=gates,
+    )
     return acceptance
 
 
@@ -512,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trusted-python", default=sys.executable)
     parser.add_argument("--engine", default="codex")
     parser.add_argument("--model", required=True, help="explicit generation model for reproducibility")
+    parser.add_argument("--arm", default="candidate", help="experiment arm recorded in neutral evidence")
     parser.add_argument("--judge-engine", default="deepseek")
     parser.add_argument("--judge-model", default="deepseek-v4-flash")
     parser.add_argument("--generation-timeout", type=int, default=900)
@@ -537,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     normalized_bundle_sha256 = "sha256:" + store.bundle_sha256
     run_record = {
         "schema_version": RUN_VERSION,
+        "run_id": "typed-" + hashlib.sha256(str(out_dir).encode()).hexdigest()[:16],
         "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "oracle": oracle,
         "evaluator_version": EVALUATOR_VERSION,
@@ -548,6 +599,7 @@ def main(argv: list[str] | None = None) -> int:
         "candidate": candidate_provenance(candidate_root),
         "generation": {
             "mode": "one_shot_no_repair",
+            "arm": args.arm,
             "engine": args.engine,
             "model": args.model,
             "candidate_python": args.candidate_python,

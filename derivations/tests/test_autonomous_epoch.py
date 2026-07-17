@@ -660,6 +660,50 @@ class ExperimentTargetSelectionTests(unittest.TestCase):
             self.assertTrue(t.strip())
 
 
+def neutral_comparison(paired: dict) -> dict:
+    counts = {
+        key: int(paired.get(key, 0))
+        for key in (
+            "both_accepted",
+            "treatment_only_accepted",
+            "control_only_accepted",
+            "both_failed",
+        )
+    }
+    outcomes = [
+        outcome
+        for outcome, count in counts.items()
+        for _ in range(count)
+    ]
+    pairs = []
+    for index, outcome in enumerate(outcomes):
+        control_passed = outcome in {"both_accepted", "control_only_accepted"}
+        treatment_passed = outcome in {"both_accepted", "treatment_only_accepted"}
+        pairs.append({
+            "plugin_id": "fixture",
+            "task_id": f"task-{index}",
+            "task_digest": f"digest-{index}",
+            "outcome": outcome,
+            "control": {"status": "PASS" if control_passed else "FAIL", "n_attempts": 1},
+            "treatment": {"status": "PASS" if treatment_passed else "FAIL", "n_attempts": 1},
+        })
+    n_tasks = len(pairs)
+    control_rate = sum(pair["control"]["status"] == "PASS" for pair in pairs) / n_tasks
+    treatment_rate = sum(pair["treatment"]["status"] == "PASS" for pair in pairs) / n_tasks
+    return {
+        "schema_version": "evolution_paired_comparison.v1",
+        "cohort_id": "fixture-cohort",
+        "control_arm": "control",
+        "treatment_arm": "treatment",
+        "acceptance_delta": treatment_rate - control_rate,
+        "control_acceptance_rate": control_rate,
+        "treatment_acceptance_rate": treatment_rate,
+        "n_tasks": n_tasks,
+        "outcome_counts": {key: value for key, value in counts.items() if value},
+        "pairs": pairs,
+    }
+
+
 class ExperimentVerdictTests(unittest.TestCase):
     """Test the verdict logic by mocking batch runs and ab_compare."""
 
@@ -678,8 +722,22 @@ class ExperimentVerdictTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _run_with_mock_batches(self, cfg: dict, *, comparison_data: dict | None) -> dict:
+    def _run_with_mock_batches(
+        self,
+        cfg: dict,
+        *,
+        comparison_data: dict | None,
+        neutralize: bool = True,
+    ) -> dict:
         state = {"phase": "EXPERIMENT"}
+
+        if comparison_data is not None and neutralize and "evidence_comparison" not in comparison_data:
+            paired = comparison_data.get("paired", {})
+            comparison_data = {
+                **comparison_data,
+                "schema_version": "derivation_ab_comparison.v2",
+                "evidence_comparison": neutral_comparison(paired),
+            }
 
         def fake_save_state(c, s):
             self.state_path.write_text(json.dumps(s))
@@ -733,9 +791,9 @@ class ExperimentVerdictTests(unittest.TestCase):
             "control_acceptance_rate": 0.25,
             "treatment_acceptance_rate": 0.75,
             "first_try_pass_delta": 0.5,
-            "n_pairs": 3,
+            "n_pairs": 4,
             "both_accepted": 1,
-            "treatment_only_accepted": 1,
+            "treatment_only_accepted": 2,
             "control_only_accepted": 0,
             "both_failed": 1,
         }}
@@ -769,6 +827,37 @@ class ExperimentVerdictTests(unittest.TestCase):
         state = self._run_with_mock_batches(cfg, comparison_data=comparison)
         self.assertIn("promoted_experiment", state)
         self.assertEqual(state["promoted_experiment"]["inner_mode"], "rule_executor")
+
+    def test_neutral_evidence_controls_promotion_decision(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": True,
+        }}}
+        comparison = {
+            "schema_version": "derivation_ab_comparison.v2",
+            "paired": {
+                "acceptance_delta": 0.9,
+                "control_acceptance_rate": 0.0,
+                "treatment_acceptance_rate": 0.9,
+                "first_try_pass_delta": 0.9,
+                "n_pairs": 3,
+            },
+            "evidence_comparison": neutral_comparison({
+                "both_accepted": 1,
+                "control_only_accepted": 1,
+                "both_failed": 2,
+            }),
+        }
+
+        state = self._run_with_mock_batches(cfg, comparison_data=comparison)
+
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual("control_won", verdict["status"])
+        self.assertEqual("neutral_evidence", verdict["decision_contract"])
+        self.assertEqual(-0.25, verdict["acceptance_delta"])
+        self.assertEqual(4, verdict["n_pairs"])
+        self.assertNotIn("promoted_experiment", state)
 
     def test_control_won_verdict(self) -> None:
         cfg = {"runner": {"experiment": {
@@ -822,6 +911,29 @@ class ExperimentVerdictTests(unittest.TestCase):
         state = self._run_with_mock_batches(cfg, comparison_data=None)
         verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
         self.assertEqual(verdict["status"], "comparison_failed")
+
+    def test_comparison_without_neutral_evidence_cannot_promote(self) -> None:
+        cfg = {"runner": {"experiment": {
+            "enabled": True, "max_targets": 3,
+            "min_acceptance_delta": 0.0,
+            "promote_on_win": True,
+        }}}
+        comparison = {"paired": {
+            "acceptance_delta": 1.0,
+            "control_acceptance_rate": 0.0,
+            "treatment_acceptance_rate": 1.0,
+            "n_pairs": 3,
+        }}
+
+        state = self._run_with_mock_batches(
+            cfg,
+            comparison_data=comparison,
+            neutralize=False,
+        )
+
+        verdict = json.loads((self.epoch_dir / "experiment_verdict.json").read_text())
+        self.assertEqual("comparison_failed", verdict["status"])
+        self.assertNotIn("promoted_experiment", state)
 
     def test_quota_pause_during_control(self) -> None:
         cfg = {"runner": {"experiment": {

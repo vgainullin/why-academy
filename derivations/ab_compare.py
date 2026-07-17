@@ -33,6 +33,15 @@ if __name__ == "__main__":
     reexec_with_derivation_python()
 
 from substitution_structural_check import check_problem
+from domains.derivation_graph import (
+    build_target_evidence,
+    load_target_evidence,
+    run_spec_from_checkpoint,
+    target_identity,
+    validate_target_evidence,
+)
+from evolution.experiments import compare_arms
+from evolution.protocols import AttemptEvidence, ProtocolError, canonical_digest
 
 
 TREATMENT_FAILURE_STATUSES = {
@@ -305,6 +314,7 @@ def target_record(target_dir: Path) -> dict[str, Any]:
         "failure_reason": metrics.get("failure_reason"),
         "iter_statuses": iter_statuses,
         "accepted_substitution": accepted_substitution,
+        "_target_dir": str(target_dir),
     }
 
 
@@ -342,6 +352,82 @@ def count_by(values: list[str | None]) -> dict[str, int]:
         key = value or "unknown"
         out[key] = out.get(key, 0) + 1
     return dict(sorted(out.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _comparison_evidence(
+    batch: dict[str, Any],
+    *,
+    side: str,
+    cohort_id: str,
+) -> tuple[list[AttemptEvidence], dict[str, int]]:
+    checkpoint = batch["checkpoint"]
+    batch_id = str(checkpoint.get("batch_id") or Path(batch["batch_dir"]).name)
+    arm = str(checkpoint.get("treatment_id") or side)
+    spec = run_spec_from_checkpoint(
+        checkpoint,
+        batch_id=batch_id,
+        cohort_id=cohort_id,
+        arm=arm,
+    )
+    records: list[AttemptEvidence] = []
+    sources = {"native": 0, "adapted": 0}
+    issues = []
+    for target_index, target in sorted(batch["targets"].items()):
+        target_dir = Path(target["_target_dir"])
+        try:
+            native = load_target_evidence(target_dir)
+            if native:
+                target_records = native
+                rebuilt = build_target_evidence(
+                    target_dir,
+                    target=target["target"],
+                    target_index=target_index,
+                    spec=spec,
+                )
+                if target_records != rebuilt:
+                    raise ProtocolError(
+                        "stored evidence does not match current iteration artifacts"
+                    )
+                sources["native"] += 1
+            else:
+                target_records = build_target_evidence(
+                    target_dir,
+                    target=target["target"],
+                    target_index=target_index,
+                    spec=spec,
+                )
+                sources["adapted"] += 1
+            validate_target_evidence(
+                target_records,
+                target=target["target"],
+                target_index=target_index,
+                n_iterations=target["n_iterations"],
+                accepted=target["accepted"],
+                spec=spec,
+            )
+        except Exception as exc:
+            issues.append({
+                "side": side,
+                **target_artifact_issue(
+                    target_dir,
+                    "evidence",
+                    "invalid_evidence",
+                    target_index=target_index,
+                    detail=f"{type(exc).__name__}: {exc}",
+                ),
+            })
+            continue
+        records.extend(target_records)
+    if issues:
+        raise ComparisonRefused({
+            "invalid_targets": issues,
+            "missing_in_control": [],
+            "missing_in_treatment": [],
+            "missing_target_text": [],
+            "target_mismatches": [],
+            "empty_pair_set": False,
+        })
+    return records, sources
 
 
 def batch_summary(batch: dict[str, Any]) -> dict[str, Any]:
@@ -457,25 +543,48 @@ def compare_batches(control_dir: Path, treatment_dir: Path, *, experiment_id: st
     if any(pairing_issues.values()):
         raise ComparisonRefused(pairing_issues)
 
-    pairs = []
-    outcome_counts = {
-        "both_accepted": 0,
-        "both_failed": 0,
-        "treatment_only_accepted": 0,
-        "control_only_accepted": 0,
+    resolved_experiment_id = (
+        experiment_id
+        or treatment["checkpoint"].get("experiment_id")
+        or control["checkpoint"].get("experiment_id")
+    )
+    cohort_id = str(resolved_experiment_id or canonical_digest([
+        {"target_index": index, "target": control_targets[index]["target"]}
+        for index in common
+    ]))
+    control_evidence, control_sources = _comparison_evidence(
+        control,
+        side="control",
+        cohort_id=cohort_id,
+    )
+    treatment_evidence, treatment_sources = _comparison_evidence(
+        treatment,
+        side="treatment",
+        cohort_id=cohort_id,
+    )
+    try:
+        evidence_comparison = compare_arms(control_evidence, treatment_evidence)
+    except ProtocolError as exc:
+        raise ComparisonRefused({
+            "invalid_targets": [],
+            "missing_in_control": [],
+            "missing_in_treatment": [],
+            "missing_target_text": [],
+            "target_mismatches": [],
+            "empty_pair_set": False,
+            "evidence_contract": str(exc),
+        }) from exc
+    evidence_pairs = {
+        (pair["plugin_id"], pair["task_id"]): pair
+        for pair in evidence_comparison["pairs"]
     }
+
+    pairs = []
     for idx in common:
         c = control_targets[idx]
         t = treatment_targets[idx]
-        if c["accepted"] and t["accepted"]:
-            outcome = "both_accepted"
-        elif not c["accepted"] and not t["accepted"]:
-            outcome = "both_failed"
-        elif t["accepted"]:
-            outcome = "treatment_only_accepted"
-        else:
-            outcome = "control_only_accepted"
-        outcome_counts[outcome] += 1
+        task_id, _task_digest = target_identity(c["target"], idx)
+        outcome = evidence_pairs[("derivation_graph", task_id)]["outcome"]
         pairs.append({
             "target_index": idx,
             "target": t["target"] or c["target"],
@@ -497,17 +606,38 @@ def compare_batches(control_dir: Path, treatment_dir: Path, *, experiment_id: st
 
     c_summary = batch_summary(control)
     t_summary = batch_summary(treatment)
-    n_pairs = len(pairs)
-    control_accepted = sum(1 for p in pairs if p["control"]["accepted"])
-    treatment_accepted = sum(1 for p in pairs if p["treatment"]["accepted"])
+    n_pairs = evidence_comparison["n_tasks"]
+    control_accepted = sum(
+        pair["control"]["status"] == "PASS"
+        for pair in evidence_comparison["pairs"]
+    )
+    treatment_accepted = sum(
+        pair["treatment"]["status"] == "PASS"
+        for pair in evidence_comparison["pairs"]
+    )
     control_first_try = sum(1 for p in pairs if p["control"]["first_try_pass"])
     treatment_first_try = sum(1 for p in pairs if p["treatment"]["first_try_pass"])
-    control_acceptance_rate = control_accepted / n_pairs
-    treatment_acceptance_rate = treatment_accepted / n_pairs
+    control_acceptance_rate = evidence_comparison["control_acceptance_rate"]
+    treatment_acceptance_rate = evidence_comparison["treatment_acceptance_rate"]
     control_first_try_rate = control_first_try / n_pairs
     treatment_first_try_rate = treatment_first_try / n_pairs
+    outcome_counts = {
+        name: evidence_comparison["outcome_counts"].get(name, 0)
+        for name in (
+            "both_accepted",
+            "both_failed",
+            "treatment_only_accepted",
+            "control_only_accepted",
+        )
+    }
     return {
-        "experiment_id": experiment_id or t_summary.get("experiment_id") or c_summary.get("experiment_id"),
+        "schema_version": "derivation_ab_comparison.v2",
+        "experiment_id": resolved_experiment_id,
+        "evidence_comparison": evidence_comparison,
+        "evidence_sources": {
+            "control": control_sources,
+            "treatment": treatment_sources,
+        },
         "control_batch": c_summary,
         "treatment_batch": t_summary,
         "paired": {
@@ -521,7 +651,7 @@ def compare_batches(control_dir: Path, treatment_dir: Path, *, experiment_id: st
             "treatment_accepted": treatment_accepted,
             "control_acceptance_rate": control_acceptance_rate,
             "treatment_acceptance_rate": treatment_acceptance_rate,
-            "acceptance_delta": treatment_acceptance_rate - control_acceptance_rate,
+            "acceptance_delta": evidence_comparison["acceptance_delta"],
             "control_first_try_pass": control_first_try,
             "treatment_first_try_pass": treatment_first_try,
             "control_first_try_pass_rate": control_first_try_rate,

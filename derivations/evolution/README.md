@@ -17,3 +17,8 @@ The boundary is `DomainPlugin`:
 
 Everything after those gates is shared. Adding a domain must require a new
 plugin and plugin tests, not edits to `evolution/`.
+
+`domains/derivation_graph/` is the compatibility adapter for the pre-kernel
+batch loop. It translates each existing iteration into `AttemptEvidence`, so
+legacy orchestration can migrate without teaching the kernel about derivation
+graphs or legacy status names.

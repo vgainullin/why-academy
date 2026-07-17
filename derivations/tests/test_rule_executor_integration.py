@@ -99,6 +99,12 @@ class RuleExecutorIntegrationTests(unittest.TestCase):
             checkpoint = json.loads((batch_dir / "checkpoint.json").read_text())
             self.assertEqual(checkpoint["inner_mode"], "rule_executor")
             self.assertEqual(checkpoint["treatment_id"], "rule_executor")
+            evidence = json.loads(
+                (batch_dir / "targets" / "target_000" / "evidence" / "attempt_000.evidence.json").read_text()
+            )
+            self.assertEqual("evolution_attempt_evidence.v1", evidence["schema_version"])
+            self.assertEqual("derivation_graph", evidence["plugin_id"])
+            self.assertEqual("FAIL", evidence["status"])
         finally:
             shutil.rmtree(batch_dir, ignore_errors=True)
 

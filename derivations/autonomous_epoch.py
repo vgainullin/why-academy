@@ -33,6 +33,8 @@ ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 sys.path.insert(0, str(ROOT))
 from config import load_config  # noqa: E402
+from evolution.experiments import validate_comparison  # noqa: E402
+from evolution.protocols import ProtocolError  # noqa: E402
 
 
 PHASES = ["GENERATE", "ANALYZE", "BUG_INVESTIGATE", "EXPERIMENT", "IMPLEMENT", "CLOSE", "DONE"]
@@ -835,34 +837,55 @@ def phase_experiment(cfg: dict, state: dict, queue_path: Path) -> None:
     else:
         comparison = json.loads(comparison_path.read_text())
         paired = comparison.get("paired", {})
-        delta = paired.get("acceptance_delta", 0.0)
-        min_delta = float(exp_cfg.get("min_acceptance_delta", 0.0))
-        won = delta > min_delta
-
-        verdict = {
-            "experiment_id": exp_id,
-            "status": "treatment_won" if won else "control_won" if delta < 0 else "neutral",
-            "acceptance_delta": delta,
-            "control_acceptance_rate": paired.get("control_acceptance_rate"),
-            "treatment_acceptance_rate": paired.get("treatment_acceptance_rate"),
-            "first_try_pass_delta": paired.get("first_try_pass_delta"),
-            "n_pairs": paired.get("n_pairs"),
-            "both_accepted": paired.get("both_accepted"),
-            "treatment_only_accepted": paired.get("treatment_only_accepted"),
-            "control_only_accepted": paired.get("control_only_accepted"),
-            "both_failed": paired.get("both_failed"),
-            "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
-            "comparison_path": str(comparison_path),
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-
-        if won and exp_cfg.get("promote_on_win", False):
-            print(f"[runner] EXPERIMENT: treatment won (delta={delta:.2%}); promoting config", file=sys.stderr)
-            # Promote treatment settings as the new default for next epoch's GENERATE
-            state["promoted_experiment"] = {
-                "inner_mode": treatment_mode,
-                "normalization_mode": norm_mode,
+        evidence_comparison = comparison.get("evidence_comparison")
+        comparison_error = None
+        if not isinstance(evidence_comparison, dict):
+            comparison_error = "comparison lacks neutral evidence contract"
+        else:
+            try:
+                validate_comparison(evidence_comparison)
+            except ProtocolError as exc:
+                comparison_error = f"invalid neutral evidence comparison: {exc}"
+        if comparison_error:
+            verdict = {
+                "experiment_id": exp_id,
+                "status": "comparison_failed",
+                "reason": comparison_error,
+                "comparison_path": str(comparison_path),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
+        else:
+            outcome_counts = evidence_comparison.get("outcome_counts", {})
+            delta = evidence_comparison.get("acceptance_delta", 0.0)
+            min_delta = float(exp_cfg.get("min_acceptance_delta", 0.0))
+            won = delta > min_delta
+
+            verdict = {
+                "experiment_id": exp_id,
+                "status": "treatment_won" if won else "control_won" if delta < 0 else "neutral",
+                "decision_contract": "neutral_evidence",
+                "comparison_schema_version": comparison.get("schema_version"),
+                "acceptance_delta": delta,
+                "control_acceptance_rate": evidence_comparison.get("control_acceptance_rate"),
+                "treatment_acceptance_rate": evidence_comparison.get("treatment_acceptance_rate"),
+                "first_try_pass_delta": paired.get("first_try_pass_delta"),
+                "n_pairs": evidence_comparison.get("n_tasks"),
+                "both_accepted": outcome_counts.get("both_accepted", 0),
+                "treatment_only_accepted": outcome_counts.get("treatment_only_accepted", 0),
+                "control_only_accepted": outcome_counts.get("control_only_accepted", 0),
+                "both_failed": outcome_counts.get("both_failed", 0),
+                "promote_on_win": bool(exp_cfg.get("promote_on_win", False)),
+                "comparison_path": str(comparison_path),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+
+            if won and exp_cfg.get("promote_on_win", False):
+                print(f"[runner] EXPERIMENT: treatment won (delta={delta:.2%}); promoting config", file=sys.stderr)
+                # Promote treatment settings as the new default for next epoch's GENERATE
+                state["promoted_experiment"] = {
+                    "inner_mode": treatment_mode,
+                    "normalization_mode": norm_mode,
+                }
 
     epoch_dir.mkdir(parents=True, exist_ok=True)
     verdict_path.write_text(json.dumps(verdict, indent=2))

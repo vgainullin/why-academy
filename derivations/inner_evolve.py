@@ -61,6 +61,7 @@ from rule_executor import (  # noqa: E402
 )
 from substitution_structural_check import check_problem  # noqa: E402
 from transition_score import write_transition  # noqa: E402
+from domains.derivation_graph import write_target_evidence  # noqa: E402
 
 
 def _safe_batch_id(s: str) -> str:
@@ -91,6 +92,16 @@ def _write_target_metrics(target_dir: Path, target_index: int) -> dict:
         "failure_reason": failure_reason,
     }
     (target_dir / "target_metrics.json").write_text(json.dumps(metrics, indent=2))
+    target_record = json.loads((target_dir / "target.json").read_text())
+    checkpoint = json.loads((target_dir.parent.parent / "checkpoint.json").read_text())
+    write_target_evidence(
+        target_dir,
+        target=target_record["target"],
+        target_index=target_index,
+        n_iterations=metrics["n_iterations"],
+        accepted=metrics["accepted"],
+        checkpoint=checkpoint,
+    )
     return metrics
 
 
@@ -498,7 +509,18 @@ def process_target(target: str, target_index: int, batch_id: str, pool,
     accepted = target_dir / "ACCEPTED.txt"
     failed = target_dir / "FAILED.txt"
     if existing_metrics.exists() and (accepted.exists() or failed.exists()):
-        return json.loads(existing_metrics.read_text())
+        metrics = json.loads(existing_metrics.read_text())
+        target_record = json.loads((target_dir / "target.json").read_text())
+        checkpoint = json.loads((evo_base / "checkpoint.json").read_text())
+        write_target_evidence(
+            target_dir,
+            target=target_record["target"],
+            target_index=target_index,
+            n_iterations=metrics["n_iterations"],
+            accepted=metrics["accepted"],
+            checkpoint=checkpoint,
+        )
+        return metrics
 
     # Control path keeps the historical checkpoint timing. Bridge mode must
     # publish checkpoint metadata before target state exists so parallel fresh

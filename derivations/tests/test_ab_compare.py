@@ -13,6 +13,7 @@ DERIVATIONS = ROOT / "derivations"
 sys.path.insert(0, str(DERIVATIONS))
 
 from ab_compare import ComparisonRefused, compare_batches  # noqa: E402
+from domains.derivation_graph import write_target_evidence  # noqa: E402
 
 
 def issue_keys(exc: ComparisonRefused) -> set[tuple[str, str, str, str | None]]:
@@ -44,6 +45,21 @@ def write_target(batch: Path, idx: int, target: str, *, accepted: bool, status: 
         metrics["accepted_at_iter"] = 0
     (target_dir / "target_metrics.json").write_text(json.dumps(metrics))
     (iter_dir / "status.txt").write_text(status)
+
+
+def write_native_evidence(batch: Path, idx: int) -> None:
+    target_dir = batch / "targets" / f"target_{idx:03d}"
+    target = json.loads((target_dir / "target.json").read_text())["target"]
+    metrics = json.loads((target_dir / "target_metrics.json").read_text())
+    checkpoint = json.loads((batch / "checkpoint.json").read_text())
+    write_target_evidence(
+        target_dir,
+        target=target,
+        target_index=idx,
+        n_iterations=metrics["n_iterations"],
+        accepted=metrics["accepted"],
+        checkpoint=checkpoint,
+    )
 
 
 def fused_substitution_problem() -> dict:
@@ -99,6 +115,9 @@ class AbCompareTests(unittest.TestCase):
             write_target(control, 1, "derive y", accepted=False, status="FAIL",
                          failure_reason="judge_fail_iter_0")
             write_target(treatment, 1, "derive y", accepted=True, status="PASS")
+            for batch in (control, treatment):
+                for idx in (0, 1):
+                    write_native_evidence(batch, idx)
 
             summary = compare_batches(control, treatment, experiment_id="ab_test")
 
@@ -108,9 +127,85 @@ class AbCompareTests(unittest.TestCase):
             self.assertEqual(summary["paired"]["acceptance_delta"], 0.0)
             self.assertEqual(summary["paired"]["control_only_accepted"], 1)
             self.assertEqual(summary["paired"]["treatment_only_accepted"], 1)
+            self.assertEqual("derivation_ab_comparison.v2", summary["schema_version"])
+            self.assertEqual(
+                "evolution_paired_comparison.v1",
+                summary["evidence_comparison"]["schema_version"],
+            )
+            self.assertEqual({"native": 2, "adapted": 0}, summary["evidence_sources"]["control"])
+            self.assertEqual({"native": 2, "adapted": 0}, summary["evidence_sources"]["treatment"])
             self.assertEqual(
                 summary["treatment_batch"]["treatment_failure_counts"]["rule_executor_coverage_gap"],
                 1,
+            )
+
+    def test_refuses_metrics_that_disagree_with_native_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            control = root / "control"
+            treatment = root / "treatment"
+            control.mkdir()
+            treatment.mkdir()
+            for batch, batch_id, treatment_id in (
+                (control, "control", None),
+                (treatment, "treatment", "candidate"),
+            ):
+                checkpoint = {
+                    "batch_id": batch_id,
+                    "inner_mode": "json",
+                    "experiment_id": "ab_test",
+                }
+                if treatment_id:
+                    checkpoint["treatment_id"] = treatment_id
+                (batch / "checkpoint.json").write_text(json.dumps(checkpoint))
+                write_target(batch, 0, "solve x", accepted=True, status="PASS")
+                write_native_evidence(batch, 0)
+
+            metrics_path = treatment / "targets" / "target_000" / "target_metrics.json"
+            metrics = json.loads(metrics_path.read_text())
+            metrics["accepted"] = False
+            metrics.pop("accepted_at_iter")
+            metrics_path.write_text(json.dumps(metrics))
+
+            with self.assertRaises(ComparisonRefused) as cm:
+                compare_batches(control, treatment, experiment_id="ab_test")
+
+            self.assertIn(
+                ("treatment", "evidence", "invalid_evidence", None),
+                issue_keys(cm.exception),
+            )
+
+    def test_refuses_native_evidence_that_disagrees_with_iteration_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            control = root / "control"
+            treatment = root / "treatment"
+            control.mkdir()
+            treatment.mkdir()
+            for batch, batch_id, treatment_id in (
+                (control, "control", None),
+                (treatment, "treatment", "candidate"),
+            ):
+                checkpoint = {
+                    "batch_id": batch_id,
+                    "inner_mode": "json",
+                    "experiment_id": "ab_test",
+                }
+                if treatment_id:
+                    checkpoint["treatment_id"] = treatment_id
+                (batch / "checkpoint.json").write_text(json.dumps(checkpoint))
+                write_target(batch, 0, "solve x", accepted=True, status="PASS")
+                write_native_evidence(batch, 0)
+
+            status_path = treatment / "targets" / "target_000" / "iter_00" / "status.txt"
+            status_path.write_text("verify_fail")
+
+            with self.assertRaises(ComparisonRefused) as cm:
+                compare_batches(control, treatment, experiment_id="ab_test")
+
+            self.assertIn(
+                ("treatment", "evidence", "invalid_evidence", None),
+                issue_keys(cm.exception),
             )
 
     def test_counts_normalization_bridge_failures_and_metrics(self) -> None:

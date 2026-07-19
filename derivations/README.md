@@ -1,5 +1,11 @@
 # Derivation Research Pipeline
 
+> **Research status (2026-07-19): failed approaches.** Neither the autonomous
+> epoch pipeline nor the typed/modular refactor demonstrated trustworthy
+> autoderivation, system learning, or improved learning-example synthesis.
+> Historical acceptance and lift metrics must not be treated as evidence of
+> progress. See [FAILURE_ANALYSIS.md](FAILURE_ANALYSIS.md).
+
 ## Problem
 
 Why Academy needs a large library of correct, teachable derivations.
@@ -55,7 +61,7 @@ target
 
 ## Current State
 
-Implemented:
+Implemented mechanisms include:
 
 - JSON graph generation
 - safe SymPy parsing
@@ -66,35 +72,29 @@ Implemented:
 - batch distillation reports
 - small e2e probes for repair and memory
 
-The system can generate, reject, repair, and sometimes accept derivations.
+These mechanisms have not produced a trustworthy end-to-end result. The active
+archive branch fails six of ten acceptance-gate contract tests. Its recorded
+experiments contain zero treatment wins and zero promotions. The later
+typed/modular branches pass their unit suites but have not demonstrated
+autonomous learning or improved example synthesis.
 
 ## Where We Are Stuck
 
-The main blocker is proof-graph quality.
+The blocker is not proof-graph quality. The research loop itself has not
+provided valid evidence:
 
-Generated graphs are often mathematically close but structurally bad:
-duplicate equivalent nodes, fused multi-step edges, invented rule names, or
-goals that are near the requested target but not exact.
-
-Current weak points:
-
-- canonicalization is not strong enough before canvas and judge
-- one-rule-per-edge is enforced too late
-- calculus and physics need better primitive rule contracts
-- cross-run learning is proven only in small probes
-- distributed contribution jobs are not yet a complete trust protocol
+- the original target gate fails open on unsupported targets;
+- validator lift compares different stochastic candidates;
+- the original A/B does not compare candidate code with baseline code;
+- run artifacts are ignored and core model identities are unpinned;
+- the typed/modular refactor proves interfaces but not real synthesis;
+- no located real experiment shows a treatment win.
 
 ## Next Work
 
-Build a canonical proof-graph layer:
-
-- canonicalize every node before all gates
-- merge duplicate/equivalent nodes
-- rewrite edges to canonical ids
-- drop self-edges and redundant edges
-- enforce one-step edges before judge
-
-Then run fixed benchmark cohorts so we can separate real learning from churn.
+Do not extend either architecture until a tracked, frozen evaluation contract
+exists. The minimum restart criteria are documented in
+[FAILURE_ANALYSIS.md](FAILURE_ANALYSIS.md#minimum-evidence-required-before-another-attempt).
 
 ## Experiment Gates
 
@@ -229,6 +229,7 @@ proposal paths, and contamination guards.
 
 ## Related
 
+- `derivations/FAILURE_ANALYSIS.md`: audited outcome of both attempted architectures
 - `derivations/DISTILLATION.md`: distillation and worker contract
 - `derivations/prompts/outer_loop_epoch.md`: validator proposal loop
 - `scripts/e2e_learning_probe.py`: e2e repair/memory proof harness

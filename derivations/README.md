@@ -4,7 +4,7 @@
 > epoch pipeline nor the typed/modular refactor demonstrated trustworthy
 > autoderivation, system learning, or improved learning-example synthesis.
 > Historical acceptance and lift metrics must not be treated as evidence of
-> progress. See [FAILURE_ANALYSIS.md](FAILURE_ANALYSIS.md).
+> progress. See the full [case study](FAILURE_ANALYSIS.md).
 
 ## Problem
 
@@ -229,7 +229,7 @@ proposal paths, and contamination guards.
 
 ## Related
 
-- `derivations/FAILURE_ANALYSIS.md`: audited outcome of both attempted architectures
+- `derivations/FAILURE_ANALYSIS.md`: full case study of both attempted architectures
 - `derivations/DISTILLATION.md`: distillation and worker contract
 - `derivations/prompts/outer_loop_epoch.md`: validator proposal loop
 - `scripts/e2e_learning_probe.py`: e2e repair/memory proof harness

@@ -1,6 +1,7 @@
 import {
   checkClassification,
   checkRootAnswer,
+  evaluateRootPair,
   formatFactorization,
   formatQuadratic,
   generatePuzzle,
@@ -9,6 +10,7 @@ import {
 
 const STORAGE_KEY = 'why-academy.rootlock.progress.v1';
 const DEMO_KEY = 'why-academy.rootlock.demo-seen.v1';
+const REVEAL_KEY = 'why-academy.rootlock.pair-reveal-seen.v1';
 
 const elements = {
   machine: document.getElementById('machine'),
@@ -25,6 +27,7 @@ const elements = {
   keyboardHint: document.getElementById('keyboard-hint'),
   sound: document.getElementById('sound-toggle'),
   restart: document.getElementById('restart-button'),
+  pace: document.getElementById('pace-toggle'),
 };
 
 const state = {
@@ -37,7 +40,9 @@ const state = {
   puzzle: null,
   locked: false,
   muted: false,
+  fast: false,
   demoTimers: [],
+  transitionTimers: [],
 };
 
 function readProgress() {
@@ -69,7 +74,9 @@ function updateStats(elapsed = null) {
   const phaseIndex = ['pair-positive', 'quadratic-positive', 'signed-roots', 'repeated-roots', 'flow'].indexOf(phase.id);
   elements.progress.style.width = `${Math.max(4, (phaseIndex / 4) * 100)}%`;
   document.querySelectorAll('.track-labels span').forEach((label) => {
-    label.classList.toggle('is-active', label.dataset.phase === phase.id);
+    const labelIndex = ['pair-positive', 'quadratic-positive', 'signed-roots', 'repeated-roots', 'flow'].indexOf(label.dataset.phase);
+    label.classList.toggle('is-active', labelIndex === phaseIndex);
+    label.classList.toggle('is-complete', labelIndex < phaseIndex);
   });
 }
 
@@ -89,7 +96,11 @@ function renderPuzzle(puzzle) {
 
   const [mode, prompt] = modeCopy(puzzle);
   elements.mode.textContent = mode;
-  elements.family.textContent = puzzle.family.toUpperCase();
+  const hidePairType = puzzle.kind !== 'discriminant' && phaseForRound(puzzle.round).id === 'flow';
+  elements.family.hidden = hidePairType;
+  elements.family.textContent = puzzle.kind === 'discriminant'
+    ? 'SCAN TYPE · ROOT COUNT'
+    : `PAIR TYPE · ${puzzle.family.toUpperCase()}`;
   elements.keyboardHint.innerHTML = puzzle.kind === 'discriminant'
     ? '<kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> choose a channel'
     : '<kbd>ENTER</kbd> moves and checks';
@@ -107,6 +118,7 @@ function renderRootPuzzle(puzzle) {
   const constraints = fragment.querySelector('.pair-constraints');
   const form = fragment.querySelector('.root-entry');
   const inputs = [...fragment.querySelectorAll('.root-input')];
+  const labels = [...fragment.querySelectorAll('.socket-label')];
 
   if (puzzle.kind === 'pair') {
     prompt.textContent = 'Two numbers. One sum. One product.';
@@ -117,15 +129,24 @@ function renderRootPuzzle(puzzle) {
   } else {
     prompt.textContent = 'Which two roots open this equation?';
     equation.textContent = formatQuadratic(puzzle.coefficients);
+    labels[0].textContent = 'ROOT 1';
+    labels[1].textContent = 'ROOT 2';
+    inputs[0].setAttribute('aria-label', 'First root');
+    inputs[1].setAttribute('aria-label', 'Second root');
+  }
+
+  if (puzzle.kind === 'pair') {
+    inputs[0].setAttribute('aria-label', 'First hidden number');
+    inputs[1].setAttribute('aria-label', 'Second hidden number');
   }
 
   inputs.forEach((input, index) => {
     input.addEventListener('input', () => updateLiveReadout(inputs, puzzle));
     input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && index === 0 && input.value.trim() !== '') {
-        event.preventDefault();
-        inputs[1].focus();
-      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      if (index === 0 && input.value.trim() !== '') inputs[1].focus();
+      else if (index === 1) form.requestSubmit();
     });
   });
   form.addEventListener('submit', (event) => {
@@ -134,23 +155,27 @@ function renderRootPuzzle(puzzle) {
   });
 
   elements.stage.appendChild(fragment);
+  updateLiveReadout(inputs, puzzle);
   requestAnimationFrame(() => inputs[0].focus());
 }
 
 function updateLiveReadout(inputs, puzzle) {
   const values = inputs.map((input) => input.value.trim());
-  const parsed = values.map(Number);
-  const complete = values.every((value) => value !== '') && parsed.every(Number.isFinite);
-  const sum = complete ? parsed[0] + parsed[1] : null;
-  const product = complete ? parsed[0] * parsed[1] : null;
-  updateReadout('sum', sum, puzzle.sum, complete);
-  updateReadout('product', product, puzzle.product, complete);
+  const assessment = evaluateRootPair(puzzle, values);
+  const operands = values.map((value, index) => value || `n${index === 0 ? '₁' : '₂'}`);
+  updateReadout('sum', `${operands[0]} + ${operands[1]}`, assessment.sum, puzzle.sum, assessment.complete, assessment.sumMatches);
+  updateReadout('product', `${operands[0]} · ${operands[1]}`, assessment.product, puzzle.product, assessment.complete, assessment.productMatches);
 }
 
-function updateReadout(name, value, target, complete) {
+function updateReadout(name, expression, value, target, complete, matches) {
   const readout = elements.stage.querySelector(`[data-readout="${name}"]`);
-  readout.querySelector('strong').textContent = complete ? value : '—';
-  readout.classList.toggle('is-match', complete && value === target);
+  readout.querySelector('.relationship-expression').textContent = expression;
+  readout.querySelector('.relationship-result').textContent = complete ? `= ${value}` : '= —';
+  readout.querySelector('.relationship-comparison').textContent = complete
+    ? (matches ? '✓' : `≠ ${target}`)
+    : `target ${target}`;
+  readout.classList.toggle('is-match', complete && matches);
+  readout.classList.toggle('is-mismatch', complete && !matches);
 }
 
 function submitRoots(inputs) {
@@ -161,11 +186,11 @@ function submitRoots(inputs) {
     return;
   }
   if (!checkRootAnswer(state.puzzle, values)) {
-    failAttempt('The sum or product is still locked.', inputs);
+    failAttempt('This pair does not satisfy both relationships yet.', inputs);
     return;
   }
   const factorization = formatFactorization(state.puzzle.roots);
-  completePuzzle(`OPEN · ${factorization}`);
+  completePuzzle(`OPEN · ${factorization}`, { revealPair: state.puzzle.kind === 'pair' });
 }
 
 function renderScannerPuzzle(puzzle) {
@@ -212,7 +237,7 @@ function failAttempt(message, inputs) {
   playTone('error');
 }
 
-function completePuzzle(message) {
+function completePuzzle(message, { revealPair = false } = {}) {
   state.locked = true;
   const elapsed = (performance.now() - state.startedAt) / 1000;
   state.solved += 1;
@@ -221,12 +246,52 @@ function completePuzzle(message) {
   saveProgress();
   updateStats(elapsed);
   elements.machine.classList.add('is-open');
+  elements.stage.querySelector('.root-entry')?.classList.add('is-solved');
   setFeedback(message, 'success');
   playTone('success');
-  setTimeout(() => {
+  if (revealPair) {
+    showPairReveal(state.puzzle);
+    return;
+  }
+  scheduleTransition(() => {
     state.round += 1;
     renderPuzzle(generatePuzzle({ round: state.round }));
-  }, 1050);
+  }, state.fast ? 420 : 760);
+}
+
+function showPairReveal(puzzle) {
+  const firstReveal = !localStorage.getItem(REVEAL_KEY);
+  localStorage.setItem(REVEAL_KEY, 'true');
+  const reveal = document.createElement('div');
+  reveal.className = 'representation-reveal';
+  const pairLine = document.createElement('div');
+  pairLine.className = 'reveal-form reveal-pair';
+  const sumLine = document.createElement('span');
+  sumLine.textContent = `${puzzle.roots[0]} + ${puzzle.roots[1]} = ${puzzle.sum}`;
+  const productLine = document.createElement('span');
+  productLine.textContent = `${puzzle.roots[0]} · ${puzzle.roots[1]} = ${puzzle.product}`;
+  pairLine.append(sumLine, productLine);
+  const factorLine = document.createElement('div');
+  factorLine.className = 'reveal-form reveal-factor';
+  factorLine.textContent = formatFactorization(puzzle.roots);
+  const quadraticLine = document.createElement('div');
+  quadraticLine.className = 'reveal-form reveal-quadratic';
+  quadraticLine.textContent = formatQuadratic(puzzle.coefficients);
+  reveal.append(pairLine, factorLine, quadraticLine);
+  elements.stage.appendChild(reveal);
+  elements.machine.classList.add('is-revealing');
+  setFeedback(firstReveal ? 'ONE PAIR · THREE FORMS' : 'PAIR COMPRESSED', 'success');
+
+  const factorDelay = firstReveal ? 500 : 120;
+  const quadraticDelay = firstReveal ? 1050 : 260;
+  const nextDelay = firstReveal ? (state.fast ? 1300 : 1900) : (state.fast ? 430 : 720);
+  scheduleTransition(() => reveal.classList.add('is-visible'), firstReveal ? 260 : 60);
+  scheduleTransition(() => factorLine.classList.add('is-visible'), factorDelay);
+  scheduleTransition(() => quadraticLine.classList.add('is-visible'), quadraticDelay);
+  scheduleTransition(() => {
+    state.round += 1;
+    renderPuzzle(generatePuzzle({ round: state.round }));
+  }, nextDelay);
 }
 
 function playTone(kind) {
@@ -258,6 +323,16 @@ function clearDemoTimers() {
   state.demoTimers = [];
 }
 
+function clearTransitionTimers() {
+  state.transitionTimers.forEach(clearTimeout);
+  state.transitionTimers = [];
+}
+
+function scheduleTransition(callback, delay) {
+  const timer = setTimeout(callback, delay);
+  state.transitionTimers.push(timer);
+}
+
 function scheduleDemo(callback, delay) {
   const timer = setTimeout(callback, delay);
   state.demoTimers.push(timer);
@@ -278,7 +353,8 @@ function runSilentDemo() {
   scheduleDemo(() => { inputs[1].value = '3'; updateLiveReadout(inputs, demoPuzzle); }, 900);
   scheduleDemo(() => {
     elements.machine.classList.add('is-open');
-    setFeedback('OPEN · (x − 2)(x − 3) = 0', 'success');
+    elements.stage.querySelector('.root-entry')?.classList.add('is-solved');
+    setFeedback('OPEN · 2 + 3 = 5 · 2 · 3 = 6', 'success');
   }, 1350);
   scheduleDemo(() => {
     localStorage.setItem(DEMO_KEY, 'true');
@@ -290,6 +366,7 @@ function runSilentDemo() {
 
 function restartRun() {
   clearDemoTimers();
+  clearTransitionTimers();
   state.round = 0;
   state.solved = 0;
   state.streak = 0;
@@ -304,6 +381,11 @@ elements.sound.addEventListener('click', () => {
   elements.sound.setAttribute('aria-pressed', String(state.muted));
 });
 elements.restart.addEventListener('click', restartRun);
+elements.pace.addEventListener('click', () => {
+  state.fast = !state.fast;
+  elements.pace.textContent = state.fast ? 'PACE · FAST' : 'PACE · NORMAL';
+  elements.pace.setAttribute('aria-pressed', String(state.fast));
+});
 document.addEventListener('keydown', handleGlobalKey);
 
 readProgress();

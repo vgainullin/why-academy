@@ -6,6 +6,7 @@ import {
   checkRootAnswer,
   classifyDiscriminant,
   createSeededRng,
+  evaluateRootPair,
   formatFactorization,
   formatQuadratic,
   generatePuzzle,
@@ -40,6 +41,24 @@ describe('ROOTLOCK puzzle engine', () => {
     assert.equal(repeated.roots[0], repeated.roots[1]);
     assert.equal(checkRootAnswer(repeated, repeated.roots), true);
     assert.equal(checkRootAnswer(repeated, [repeated.roots[0], repeated.roots[0] + 1]), false);
+  });
+
+  test('evaluates both live relationships without blaming either number', () => {
+    const puzzle = generatePuzzle({ round: 0 });
+    assert.deepEqual(evaluateRootPair(puzzle, ['3', '5']), {
+      complete: true,
+      sum: 8,
+      product: 15,
+      sumMatches: false,
+      productMatches: false,
+    });
+    assert.deepEqual(evaluateRootPair(puzzle, ['3', '']), {
+      complete: false,
+      sum: null,
+      product: null,
+      sumMatches: false,
+      productMatches: false,
+    });
   });
 
   test('introduces mixed signs, negative roots, and zero separately', () => {

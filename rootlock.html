@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#090b12">
   <title>ROOTLOCK · Why Academy</title>
+  <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -56,16 +57,17 @@
       <div class="puzzle-stage" id="puzzle-stage"></div>
       <p class="feedback" id="feedback" role="status">Find the two hidden numbers.</p>
       <div class="keyboard-hint" id="keyboard-hint"><kbd>ENTER</kbd> moves and checks</div>
+      <button class="pace-toggle" id="pace-toggle" type="button" aria-pressed="false">PACE · NORMAL</button>
     </section>
 
     <section class="mechanic-track" aria-label="Mechanic progression">
       <div class="track-line"><span id="track-progress"></span></div>
       <div class="track-labels">
-        <span data-phase="pair-positive">PAIR</span>
-        <span data-phase="quadratic-positive">QUADRATIC</span>
-        <span data-phase="signed-roots">SIGNS</span>
-        <span data-phase="repeated-roots">REPEATS</span>
-        <span data-phase="flow">FLOW</span>
+        <span data-phase="pair-positive"><i></i>PAIR</span>
+        <span data-phase="quadratic-positive"><i></i>QUADRATIC</span>
+        <span data-phase="signed-roots"><i></i>SIGNS</span>
+        <span data-phase="repeated-roots"><i></i>DOUBLE ROOTS</span>
+        <span data-phase="flow"><i></i>FLOW</span>
       </div>
     </section>
   </main>
@@ -81,20 +83,31 @@
     </div>
     <form class="root-entry" novalidate>
       <label class="root-socket">
-        <span>ROOT 1</span>
+        <span class="socket-label">NUMBER 1</span>
         <input class="root-input" inputmode="numeric" autocomplete="off" aria-label="First root">
       </label>
-      <span class="socket-link" aria-hidden="true">×</span>
       <label class="root-socket">
-        <span>ROOT 2</span>
+        <span class="socket-label">NUMBER 2</span>
         <input class="root-input" inputmode="numeric" autocomplete="off" aria-label="Second root">
       </label>
+      <div class="relationship-display" aria-label="Live pair relationships">
+        <div class="relationship-row" data-readout="sum">
+          <span class="relationship-name">SUM</span>
+          <span class="relationship-expression">n₁ + n₂</span>
+          <strong class="relationship-result">= —</strong>
+          <em class="relationship-comparison"></em>
+          <i aria-hidden="true"></i>
+        </div>
+        <div class="relationship-row" data-readout="product">
+          <span class="relationship-name">PRODUCT</span>
+          <span class="relationship-expression">n₁ · n₂</span>
+          <strong class="relationship-result">= —</strong>
+          <em class="relationship-comparison"></em>
+          <i aria-hidden="true"></i>
+        </div>
+      </div>
       <button class="open-button" type="submit">OPEN LOCK <span>↵</span></button>
     </form>
-    <div class="live-readout">
-      <div data-readout="sum"><span>YOUR SUM</span><strong>—</strong><i></i></div>
-      <div data-readout="product"><span>YOUR PRODUCT</span><strong>—</strong><i></i></div>
-    </div>
   </template>
 
   <template id="scanner-template">

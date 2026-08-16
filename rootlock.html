@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#090b12">
+  <title>ROOTLOCK · Why Academy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="rootlock.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="game-header">
+    <a class="back-link" href="index.html" aria-label="Back to Why Academy">
+      <span aria-hidden="true">←</span> WHY ACADEMY
+    </a>
+    <div class="brand-lockup" aria-label="ROOTLOCK">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>ROOTLOCK</span>
+    </div>
+    <div class="header-actions">
+      <button class="icon-button" id="sound-toggle" type="button" aria-label="Mute sound" aria-pressed="false">SOUND ON</button>
+      <button class="icon-button" id="restart-button" type="button">RESTART</button>
+    </div>
+  </header>
+
+  <main class="game-shell">
+    <section class="run-strip" aria-label="Run status">
+      <div class="run-ident">
+        <span class="eyebrow" id="run-label">RUN 01</span>
+        <strong id="phase-label">Pair locks</strong>
+      </div>
+      <div class="run-stats">
+        <div><span>CLEAN STREAK</span><strong id="streak-value">0</strong></div>
+        <div><span>LOCKS OPENED</span><strong id="solved-value">0</strong></div>
+        <div><span>LAST OPEN</span><strong id="time-value">—</strong></div>
+      </div>
+    </section>
+
+    <section class="machine" id="machine" aria-live="polite">
+      <div class="machine-topline">
+        <span class="mode-chip" id="mode-chip">PAIR LOCK</span>
+        <span class="family-label" id="family-label">POSITIVE ROOTS</span>
+      </div>
+
+      <div class="lock-visual" id="lock-visual" aria-hidden="true">
+        <span class="lock-rail rail-left"></span>
+        <span class="lock-core"><i></i></span>
+        <span class="lock-rail rail-right"></span>
+      </div>
+
+      <div class="puzzle-stage" id="puzzle-stage"></div>
+      <p class="feedback" id="feedback" role="status">Find the two hidden numbers.</p>
+      <div class="keyboard-hint" id="keyboard-hint"><kbd>ENTER</kbd> moves and checks</div>
+    </section>
+
+    <section class="mechanic-track" aria-label="Mechanic progression">
+      <div class="track-line"><span id="track-progress"></span></div>
+      <div class="track-labels">
+        <span data-phase="pair-positive">PAIR</span>
+        <span data-phase="quadratic-positive">QUADRATIC</span>
+        <span data-phase="signed-roots">SIGNS</span>
+        <span data-phase="repeated-roots">REPEATS</span>
+        <span data-phase="flow">FLOW</span>
+      </div>
+    </section>
+  </main>
+
+  <template id="root-puzzle-template">
+    <div class="equation-zone">
+      <p class="puzzle-prompt"></p>
+      <div class="equation-display"></div>
+      <div class="pair-constraints" hidden>
+        <div><span>SUM</span><strong class="target-sum"></strong></div>
+        <div><span>PRODUCT</span><strong class="target-product"></strong></div>
+      </div>
+    </div>
+    <form class="root-entry" novalidate>
+      <label class="root-socket">
+        <span>ROOT 1</span>
+        <input class="root-input" inputmode="numeric" autocomplete="off" aria-label="First root">
+      </label>
+      <span class="socket-link" aria-hidden="true">×</span>
+      <label class="root-socket">
+        <span>ROOT 2</span>
+        <input class="root-input" inputmode="numeric" autocomplete="off" aria-label="Second root">
+      </label>
+      <button class="open-button" type="submit">OPEN LOCK <span>↵</span></button>
+    </form>
+    <div class="live-readout">
+      <div data-readout="sum"><span>YOUR SUM</span><strong>—</strong><i></i></div>
+      <div data-readout="product"><span>YOUR PRODUCT</span><strong>—</strong><i></i></div>
+    </div>
+  </template>
+
+  <template id="scanner-template">
+    <div class="equation-zone scanner-zone">
+      <p class="puzzle-prompt">Predict the number of real roots.</p>
+      <div class="equation-display"></div>
+      <div class="scanner-formula">
+        <span>D</span>
+        <span>=</span>
+        <span class="coefficient-tile" data-coefficient="b"></span><sup>2</sup>
+        <span>− 4·</span>
+        <span class="coefficient-tile" data-coefficient="a"></span>
+        <span>·</span>
+        <span class="coefficient-tile" data-coefficient="c"></span>
+      </div>
+    </div>
+    <div class="classification-grid" role="group" aria-label="Root classification">
+      <button type="button" data-classification="two"><kbd>1</kbd><strong>TWO</strong><span>real roots</span></button>
+      <button type="button" data-classification="one"><kbd>2</kbd><strong>ONE</strong><span>repeated root</span></button>
+      <button type="button" data-classification="none"><kbd>3</kbd><strong>NO</strong><span>real roots</span></button>
+    </div>
+  </template>
+
+  <script type="module" src="rootlock.js"></script>
+</body>
+</html>

@@ -29,6 +29,10 @@ The platform features four fully implemented interactive lessons spanning physic
 *   *Path:* `playground.html`
 *   *Concept:* A standalone equation sandbox allowing students to practice deriving mathematical and physical identities on a freeform canvas. Includes a library of **15+ classic equations** across algebra, calculus, physics, and statistics, complete with progressive hints.
 
+### 3. ROOTLOCK
+*   *Path:* `rootlock.html`
+*   *Concept:* A keyboard-first, endless quadratic puzzle game. Players discover roots through sum-and-product locks, encoded monic quadratics, signed and repeated roots, and discriminant classification.
+
 ---
 
 ## Technical Stack

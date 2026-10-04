@@ -33,9 +33,10 @@ why-academy-brief.md
 .secrets/
 secrets/
 
-# Wrangler local state
+# Wrangler local state and built site
 .wrangler/
 .dev.vars
+dist/
 
 # Evolution agent local state
 meta/.evolve.lock

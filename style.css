@@ -86,7 +86,7 @@ header h1 .header-home-link:hover {
   gap: 8px;
 }
 
-#user-email {
+#user-name {
   opacity: 0.9;
   max-width: 180px;
   overflow: hidden;
@@ -112,7 +112,7 @@ header h1 .header-home-link:hover {
 }
 
 @media (max-width: 480px) {
-  #user-email {
+  #user-name {
     max-width: 120px;
     font-size: 0.75rem;
   }

@@ -4,7 +4,7 @@ A free, open-source interactive learning platform that teaches STEM through a **
 
 Verification is 100% deterministic using SymPy inside the browser. No AI grading, no paywall, near-zero server cost.
 
-🚀 **Live Test Deployment:** [https://vgainullin.github.io/why-academy/](https://vgainullin.github.io/why-academy/)
+🚀 **Live Test Deployment:** [https://why-academy.gainullin.workers.dev/](https://why-academy.gainullin.workers.dev/)
 
 ---
 
@@ -42,7 +42,7 @@ The platform features four fully implemented interactive lessons spanning physic
 *   **Code Editor:** CodeMirror for editing Python numerical scripts directly in the browser.
 *   **Real-time Handwriting Transcription (VLM):** Supports vision-language model integration (LM Studio for local models like `qwen2-vl-7b-instruct`, or CloudRouter API keys for cloud models) to transcribe handwritten mathematics on the canvas into LaTeX in real-time.
 *   **Symbolic Mathematics Engine:** **SymPy** running inside **Pyodide (WebAssembly Python)** completely client-side. Evaluates algebraic and calculus equivalence of derivations at a line-by-line level.
-*   **Performance Optimization:** Lazy-loads Pyodide and defers Google Identity Services (GIS) auth script loading to remain entirely **bfcache-friendly** (avoiding costly Python/SymPy reload overhead during back/forward navigation).
+*   **Performance Optimization:** Lazy-loads Pyodide and uses passkey accounts with no third-party auth script, remaining entirely **bfcache-friendly** (avoiding costly Python/SymPy reload overhead during back/forward navigation).
 
 ---
 
@@ -54,7 +54,17 @@ Since this is a static vanilla JS site, you can host it using any simple local H
 python3 -m http.server 8765
 ```
 
-Then open [http://localhost:8765](http://localhost:8765) in your web browser.
+Then open [http://localhost:8765](http://localhost:8765) in your web browser. Accounts are hidden on a plain static server.
+
+To run with accounts and settings sync (Cloudflare Worker + local D1):
+
+```bash
+npm install
+npm run db:migrate:local
+npm run dev            # http://localhost:8787
+```
+
+See [worker/README.md](worker/README.md) for the account model and deployment.
 
 ### Adding Lessons
 Lessons are authored as structured JSON files inside `lessons/`. You can load a custom lesson by passing it as a query parameter:

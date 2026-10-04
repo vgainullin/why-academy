@@ -7,7 +7,11 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "dev": "wrangler dev -c worker/wrangler.toml",
+    "db:migrate:local": "wrangler d1 migrations apply why-academy --local -c worker/wrangler.toml",
+    "db:migrate:remote": "wrangler d1 migrations apply why-academy --remote -c worker/wrangler.toml",
+    "deploy": "wrangler deploy -c worker/wrangler.toml"
   },
   "repository": {
     "type": "git",
@@ -22,7 +26,11 @@
   },
   "homepage": "https://github.com/vgainullin/why-academy#readme",
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.3",
     "pyodide": "^0.29.3",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
   }
 }

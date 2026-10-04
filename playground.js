@@ -461,7 +461,17 @@
 
   function saveProgress() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    if (window.WhySync) WhySync.schedule();
   }
+
+  // Progress from another device arrived via settings sync.
+  document.addEventListener('whysync:applied', (e) => {
+    if (!e.detail.keys.includes(STORAGE_KEY)) return;
+    progress = loadProgress();
+    updateStats();
+    const activeFilter = document.querySelector('#category-filters .filter-btn.active');
+    renderEquationSelector(activeFilter ? activeFilter.dataset.category : 'all');
+  });
 
   function markCompleted(equationId) {
     if (!progress[equationId]) {

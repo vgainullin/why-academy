@@ -56,6 +56,7 @@ function readProgress() {
 
 function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ bestStreak: state.bestStreak }));
+  if (window.WhySync) window.WhySync.schedule();
 }
 
 function setFeedback(message, tone = '') {
@@ -389,5 +390,9 @@ elements.pace.addEventListener('click', () => {
 document.addEventListener('keydown', handleGlobalKey);
 
 readProgress();
+// A better streak from another device arrived via settings sync.
+document.addEventListener('whysync:applied', (e) => {
+  if (e.detail.keys.includes(STORAGE_KEY)) readProgress();
+});
 if (localStorage.getItem(DEMO_KEY)) restartRun();
 else runSilentDemo();

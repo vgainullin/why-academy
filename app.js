@@ -3639,11 +3639,11 @@ plt.close('all')
     }
 
     try {
-      const resp = await fetch('https://why-academy-feedback.gainullin.workers.dev/feedback', {
+      const resp = await fetch('/api/feedback', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          idToken: auth.getIdToken(),
           feedback: unsent.map(({ sent, ...e }) => e),
         }),
       });
@@ -3707,7 +3707,7 @@ plt.close('all')
       actions.classList.add('hidden');
     } else if (!auth.isAllowlisted()) {
       gate.classList.remove('hidden');
-      gate.textContent = 'Signed in as ' + auth.getUser().email + ' — your account is not on the trusted-tester list.';
+      gate.textContent = 'Signed in as ' + auth.getUser().displayName + ' — your account is not on the trusted-tester list.';
       actions.classList.add('hidden');
     } else {
       gate.classList.add('hidden');

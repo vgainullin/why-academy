@@ -1,0 +1,223 @@
+{
+  "lesson_id": "DL1.2",
+  "title": "Local Derivatives: The Atoms of Backprop",
+  "description": "Backprop is the same move repeated: local derivative times upstream gradient. Learn the local derivatives of the common nodes, see which ones block gradients, and run a full backward pass with a numerical check.",
+  "prerequisites": [
+    "DL1.1 (Module 1 Day 1: chain rule on a computational graph)"
+  ],
+  "blocks": [
+    {
+      "id": "DL12-R1",
+      "type": "read",
+      "title": "One rule, many nodes",
+      "content_html": "<p>Every node in a computational graph takes inputs, produces an output, and during the backward pass receives the <strong>upstream gradient</strong> &part;L/&part;(output). It passes down</p><p>$$\\frac{\\partial L}{\\partial \\text{input}} = \\frac{\\partial L}{\\partial \\text{output}} \\cdot \\frac{\\partial\\, \\text{output}}{\\partial\\, \\text{input}}$$</p><p>So to backprop through any network you only need each node's <strong>local derivative</strong>, written in terms of values you already computed in the forward pass. Today: the local derivatives of add, multiply, ReLU and sigmoid, and what they do to gradients flowing through them.</p>"
+    },
+    {
+      "id": "DL12-E1",
+      "type": "explain",
+      "title": "Add and multiply gates",
+      "prompt": "A node computes c = a · b and receives upstream gradient g = ∂L/∂c. What does it send to a?",
+      "options": [
+        {
+          "id": "a",
+          "text": "g · b: the upstream gradient scaled by the other input.",
+          "correct": true
+        },
+        {
+          "id": "b",
+          "text": "g · a: the upstream gradient scaled by the input itself.",
+          "correct": false,
+          "misconception": "∂(ab)/∂a = b, not a. A multiply gate 'swaps' its inputs in the backward pass, which is why weight gradients are input × upstream."
+        },
+        {
+          "id": "c",
+          "text": "g unchanged, like an add gate.",
+          "correct": false,
+          "misconception": "That is the add gate: ∂(a+b)/∂a = 1, so it copies the gradient to both inputs. A multiply gate scales by the other input."
+        },
+        {
+          "id": "d",
+          "text": "g / b, undoing the multiplication.",
+          "correct": false,
+          "misconception": "Backprop multiplies by local derivatives; it never inverts the forward operation."
+        }
+      ]
+    },
+    {
+      "id": "DL12-H1",
+      "type": "handwrite",
+      "title": "Derive the sigmoid's local derivative",
+      "prompt": "Let h = σ(z) = 1/(1 + e^{-z}). Derive dh/dz and rewrite it purely in terms of h. On paper or on the canvas.",
+      "starting_equation": "h = \\frac{1}{1 + e^{-z}}",
+      "target_equation": "\\frac{dh}{dz} = h(1 - h)",
+      "steps": [
+        {
+          "id": "s1",
+          "instruction": "Differentiate with the chain rule",
+          "result_equation": "\\frac{dh}{dz} = \\frac{e^{-z}}{(1 + e^{-z})^2}",
+          "explanation": "d/dz of (1+e^{-z})^{-1} is -(1+e^{-z})^{-2} · (-e^{-z})."
+        },
+        {
+          "id": "s2",
+          "instruction": "Split into two factors",
+          "result_equation": "\\frac{dh}{dz} = \\frac{1}{1 + e^{-z}} \\cdot \\frac{e^{-z}}{1 + e^{-z}}",
+          "explanation": "The first factor is h."
+        },
+        {
+          "id": "s3",
+          "instruction": "Recognise the second factor",
+          "result_equation": "\\frac{e^{-z}}{1 + e^{-z}} = 1 - h",
+          "explanation": "1 - h = (1 + e^{-z} - 1)/(1 + e^{-z})."
+        },
+        {
+          "id": "s4",
+          "instruction": "Combine",
+          "result_equation": "\\frac{dh}{dz} = h(1 - h)",
+          "explanation": "The backward pass only needs h, which the forward pass already stored."
+        }
+      ],
+      "hints": [
+        "Write h as (1 + e^{-z})^{-1} and use the chain rule.",
+        "Split e^{-z}/(1+e^{-z})^2 into a product of two fractions.",
+        "What is 1 - h, written over a common denominator?"
+      ]
+    },
+    {
+      "id": "DL12-C1",
+      "type": "calculate",
+      "title": "How much gradient can a sigmoid pass?",
+      "prompt": "Using h(1 - h), what is the largest possible value of the sigmoid's local derivative? (No calculator needed.)",
+      "formula": "0.5 * (1 - 0.5)",
+      "variables": {},
+      "expected_value": 0.25,
+      "solution_steps": [
+        "$$h(1-h)$$ is maximised at $$h = 1/2$$ (i.e. z = 0)",
+        "$$\\tfrac12 \\cdot \\tfrac12 = 0.25$$"
+      ]
+    },
+    {
+      "id": "DL12-P1",
+      "type": "predict",
+      "title": "Ten sigmoids deep",
+      "prompt": "A gradient flows backward through 10 sigmoid units in a chain, and every connecting weight is 1. Even in the best case for each unit, roughly how large is the gradient at the bottom compared with the top?",
+      "components": {
+        "magnitude": {
+          "required": true,
+          "format": "scientific_notation",
+          "placeholder_mantissa": "1.0",
+          "placeholder_exponent": "-3",
+          "units": "ratio"
+        },
+        "confidence": {
+          "required": true,
+          "options": [
+            "just_guessing",
+            "rough_idea",
+            "pretty_sure"
+          ]
+        }
+      },
+      "error_patterns": [
+        {
+          "magnitude_range": [
+            5e-07,
+            2e-06
+          ],
+          "diagnosis": "Correct: 0.25^10 ≈ 9.5e-7",
+          "misconception": null,
+          "feedback": "Right. Each sigmoid multiplies the gradient by at most 1/4, so ten of them shrink it by about a million. This is the vanishing-gradient problem, and why ReLU (local derivative exactly 1 when active) took over.",
+          "severity": "none"
+        },
+        {
+          "magnitude_range": [
+            0.02,
+            0.03
+          ],
+          "diagnosis": "Multiplied 0.25 by 10 layers additively",
+          "misconception": "additive_gradients",
+          "feedback": "Local derivatives multiply along a path, they do not add. 0.25 × 0.25 × ... ten times is 0.25^10.",
+          "severity": "moderate"
+        },
+        {
+          "magnitude_range": [
+            0.5,
+            1.5
+          ],
+          "diagnosis": "Assumed the gradient passes through unchanged",
+          "misconception": "no_attenuation",
+          "feedback": "Each sigmoid multiplies the gradient by h(1-h) ≤ 0.25. Ten in a row compound.",
+          "severity": "significant"
+        }
+      ]
+    },
+    {
+      "id": "DL12-E2",
+      "type": "explain",
+      "title": "ReLU versus sigmoid",
+      "prompt": "Why do deep networks train more easily with ReLU than with sigmoid hidden units?",
+      "options": [
+        {
+          "id": "a",
+          "text": "An active ReLU has local derivative exactly 1, so gradients pass through without shrinking; a sigmoid multiplies them by at most 0.25.",
+          "correct": true
+        },
+        {
+          "id": "b",
+          "text": "ReLU is non-linear and sigmoid is linear.",
+          "correct": false,
+          "misconception": "Both are non-linear. The difference that matters for training depth is the size of the local derivative."
+        },
+        {
+          "id": "c",
+          "text": "ReLU never has zero gradient.",
+          "correct": false,
+          "misconception": "ReLU has zero gradient whenever z < 0, which is exactly how units die (Day 1, E5). It trades vanishing gradients for possibly dead units."
+        },
+        {
+          "id": "d",
+          "text": "ReLU outputs are bounded, so activations cannot explode.",
+          "correct": false,
+          "misconception": "ReLU is unbounded above; sigmoid is the bounded one."
+        }
+      ]
+    },
+    {
+      "id": "DL12-CODE",
+      "type": "code",
+      "title": "A full backward pass, checked numerically",
+      "prompt": "Fill in the backward pass for a sigmoid network. The last lines compare your dL/dw1 with a finite-difference estimate. They should agree to about 1e-9.",
+      "starter_code": "import numpy as np\n\ndef sigmoid(z):\n    return 1.0 / (1.0 + np.exp(-z))\n\n# Two-layer scalar network: z1 = w1*x + b1, h = sigmoid(z1), f = w2*h + b2, L = (f - y)^2\nx, y = 2.0, 0.0\nw1, b1, w2, b2 = 0.5, -1.0, 1.5, 0.2\n\ndef loss(w1, b1, w2, b2):\n    h = sigmoid(w1 * x + b1)\n    f = w2 * h + b2\n    return (f - y) ** 2\n\n# Forward pass, keeping intermediates\nz1 = w1 * x + b1\nh = sigmoid(z1)\nf = w2 * h + b2\nL = (f - y) ** 2\n\n# Backward pass: local derivative times upstream gradient\n# YOUR CODE: fill in each gradient\ndL_df = None\ndL_dw2 = None\ndL_db2 = None\ndL_dh = None\ndL_dz1 = None   # hint: what is the local derivative of the sigmoid, written using h?\ndL_dw1 = None\ndL_db1 = None\n\n# Finite-difference check on w1\neps = 1e-6\nnum_dw1 = (loss(w1 + eps, b1, w2, b2) - loss(w1 - eps, b1, w2, b2)) / (2 * eps)\ngrad_error = abs(dL_dw1 - num_dw1)\nprint(f\"dL/dw1 = {dL_dw1:.6f}, numerical = {num_dw1:.6f}\")\n",
+      "solution_code": "import numpy as np\n\ndef sigmoid(z):\n    return 1.0 / (1.0 + np.exp(-z))\n\n# Two-layer scalar network: z1 = w1*x + b1, h = sigmoid(z1), f = w2*h + b2, L = (f - y)^2\nx, y = 2.0, 0.0\nw1, b1, w2, b2 = 0.5, -1.0, 1.5, 0.2\n\ndef loss(w1, b1, w2, b2):\n    h = sigmoid(w1 * x + b1)\n    f = w2 * h + b2\n    return (f - y) ** 2\n\n# Forward pass, keeping intermediates\nz1 = w1 * x + b1\nh = sigmoid(z1)\nf = w2 * h + b2\nL = (f - y) ** 2\n\n# Backward pass: local derivative times upstream gradient\ndL_df = 2 * (f - y)\ndL_dw2 = dL_df * h\ndL_db2 = dL_df\ndL_dh = dL_df * w2\ndL_dz1 = dL_dh * h * (1 - h)\ndL_dw1 = dL_dz1 * x\ndL_db1 = dL_dz1\n\n# Finite-difference check on w1\neps = 1e-6\nnum_dw1 = (loss(w1 + eps, b1, w2, b2) - loss(w1 - eps, b1, w2, b2)) / (2 * eps)\ngrad_error = abs(dL_dw1 - num_dw1)\nprint(f\"dL/dw1 = {dL_dw1:.6f}, numerical = {num_dw1:.6f}\")\n",
+      "checks": [
+        {
+          "variable": "dL_dw1",
+          "expected_expr": "num_dw1",
+          "tolerance": 1e-06
+        },
+        {
+          "variable": "dL_dw2",
+          "expected_expr": "2 * (f - y) * h",
+          "tolerance": 1e-09
+        },
+        {
+          "variable": "grad_error",
+          "max_value": 1e-06
+        }
+      ]
+    },
+    {
+      "id": "DL12-REC",
+      "type": "reconcile",
+      "title": "Say it in your own words",
+      "prompt": "In three or four sentences: why does backprop only ever need local derivatives, and why do the local derivatives of the activation function decide whether a deep network can be trained at all?",
+      "required": true,
+      "min_length": 100
+    },
+    {
+      "id": "DL12-CON",
+      "type": "connect",
+      "title": "Where this goes",
+      "content_html": "<p>Next you will do the same with vectors and matrices, where a multiply gate becomes a matrix product and its backward pass becomes ∂L/∂W = δ x<sup>T</sup>. The vanishing-gradient arithmetic you just did is also the starting point for initialization and normalization (Module 3) and for why residual connections work.</p>"
+    }
+  ]
+}

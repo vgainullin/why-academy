@@ -1095,6 +1095,7 @@ async function paperDialog(docId) {
   dlg.innerHTML = `<form method="dialog" class="dialog-form">
       <h3>Paper</h3>
       <label>Title <input type="text" name="title" maxlength="500"></label>
+      <label>Authors <input type="text" name="authors" maxlength="2000" placeholder="As they should appear in the Brief"></label>
       <p class="muted paper-meta"></p>
       <button type="button" class="btn btn-secondary" data-export>Export with annotations</button>
       <div class="dialog-actions">
@@ -1106,6 +1107,8 @@ async function paperDialog(docId) {
     </form>`;
   const title = dlg.querySelector('[name=title]');
   title.value = doc.data.title;
+  const authors = dlg.querySelector('[name=authors]');
+  authors.value = doc.data.authors || '';
   const marks = store.forDoc(docId, 'anno').length;
   dlg.querySelector('[value="remove"]').textContent = 'Move to Recently deleted';
   dlg.querySelector('[data-export]').addEventListener('click', () => {
@@ -1117,6 +1120,9 @@ async function paperDialog(docId) {
   dlg.showModal();
   await done;
   try {
+    if (dlg.returnValue === 'ok' && authors.value.trim() !== (doc.data.authors || '')) {
+      await trackedUpdate(docId, { authors: authors.value.trim() || undefined });
+    }
     if (dlg.returnValue === 'ok' && title.value.trim() && title.value.trim() !== doc.data.title) {
       const newTitle = title.value.trim();
       const n = await undoHistory.batch('Rename', async () => {
@@ -2703,11 +2709,31 @@ function plainLinks(md) {
   });
 }
 
+// Brief sections you switched off (by heading, e.g. "Comments"); they are
+// left out of the page, the print and the copied Markdown.
+function briefHidden() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('reader.briefHidden') || '[]'));
+  } catch (e) {
+    console.warn('Ignoring unreadable Brief settings', e);
+    return new Set();
+  }
+}
+
+// Splits Brief Markdown at its "## " headings: [{ name, text }], the first
+// entry (title, authors) has name null.
+function briefSections(md) {
+  const parts = md.split(/\n(?=## )/);
+  return parts.map((text, i) => ({ name: i === 0 ? null : text.match(/^## (.+?)(?: \(\d+\))?\n/)?.[1] || text.slice(3, 40), text }));
+}
+
 function renderBrief(docId) {
   const doc = store.get(docId);
   $('#view-title').textContent = 'Brief: ' + doc.data.title;
   const root = $('#view-brief');
-  const md = briefMarkdown(docId);
+  const hidden = briefHidden();
+  const sections = briefSections(briefMarkdown(docId));
+  const md = sections.filter(s => !s.name || !hidden.has(s.name)).map(s => s.text).join('\n');
   root.innerHTML = `<div class="brief">
       <div class="brief-actions">
         <a class="btn btn-secondary" href="#doc=${docId}">Back to paper</a>
@@ -2715,8 +2741,27 @@ function renderBrief(docId) {
         <button class="btn btn-secondary" id="brief-export">Annotated PDF</button>
         <button class="btn btn-primary" id="brief-print">Print</button>
       </div>
+      <div class="brief-sections" role="group" aria-label="Sections to include"></div>
       <article class="brief-body md-view"></article>
     </div>`;
+  const chips = root.querySelector('.brief-sections');
+  for (const s of sections.filter(s => s.name)) {
+    const b = document.createElement('button');
+    b.className = 'brief-chip' + (hidden.has(s.name) ? '' : ' on');
+    b.setAttribute('aria-pressed', String(!hidden.has(s.name)));
+    b.textContent = s.name;
+    b.addEventListener('click', () => {
+      if (hidden.has(s.name)) hidden.delete(s.name);
+      else hidden.add(s.name);
+      try {
+        localStorage.setItem('reader.briefHidden', JSON.stringify([...hidden]));
+      } catch (e) {
+        console.warn('Could not remember the Brief sections', e);
+      }
+      renderBrief(docId);
+    });
+    chips.appendChild(b);
+  }
   root.querySelector('.brief-body').innerHTML = renderMarkdown(md, resolveLink);
   root.querySelector('.brief-body').addEventListener('click', e => {
     const link = e.target.closest('a.wl');

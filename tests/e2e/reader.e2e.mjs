@@ -1039,6 +1039,22 @@ try {
   await page.waitForSelector('.brief-body h2');
   check('the Brief lists card questions', (await page.locator('.brief-body h2').allTextContents()).some(h => h.startsWith('Card questions')));
 
+  // Brief sections can be switched off; authors can be edited
+  await page.locator('.brief-chip', { hasText: 'Card questions' }).click();
+  await wait(300);
+  const headsNow = await page.locator('.brief-body h2').allTextContents();
+  check('a Brief section can be switched off', !headsNow.some(h => h.startsWith('Card questions')), headsNow.join(' | '));
+  await page.locator('.brief-chip', { hasText: 'Card questions' }).click();
+  await library();
+  await page.locator(`#doc-list .side-row:has(a[href="#doc=${docId}"]) .side-more`).click();
+  await page.fill('dialog [name=authors]', 'A. Tester and B. Reader');
+  await page.click('dialog button[value="ok"]');
+  await page.goto(B + '/reader#brief=' + docId);
+  await page.waitForSelector('.brief-body h2');
+  await wait(1500);
+  const authorsNow = await page.evaluate(async id => (await __wa.serverItems('doc')).find(d => d.id === id)?.data.authors, docId);
+  check('edited authors show in the Brief', (await page.textContent('.brief-body')).includes('A. Tester and B. Reader'), `server authors "${authorsNow}", brief starts "${(await page.textContent('.brief-body')).slice(0, 120)}"`);
+
   // Deleting a note moves it to Recently deleted
   await newNote();
   await page.fill('#note-root .note-title', 'Note to bin');

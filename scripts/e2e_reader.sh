@@ -13,5 +13,6 @@ trap 'stop_isolated_server; rm -rf "$RUN"' EXIT
 
 start_isolated_server "$RUN"
 node "$ROOT/scripts/feature_test/make_fixture.mjs" "$RUN/attention-note.pdf"
-E2E_ORIGIN="$ORIGIN" E2E_TOKEN="$TOKEN" E2E_FIXTURE="$RUN/attention-note.pdf" E2E_OUT="$OUT" \
+node "$ROOT/scripts/feature_test/make_fixture.mjs" "$RUN/plain-note.pdf" --no-outline
+E2E_ORIGIN="$ORIGIN" E2E_TOKEN="$TOKEN" E2E_FIXTURE="$RUN/attention-note.pdf" E2E_FIXTURE_PLAIN="$RUN/plain-note.pdf" E2E_OUT="$OUT" \
   node "$ROOT/tests/e2e/reader.e2e.mjs"

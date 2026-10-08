@@ -1,7 +1,7 @@
 // Writes a small multi-page "paper" PDF for feature tests: a title, an
 // abstract, sections, numbered equations and a reference list, so every
 // reader action (select, region, equation card, explain) has real targets.
-// Usage: node make_fixture.mjs <out.pdf>
+// Usage: node make_fixture.mjs <out.pdf> [--no-outline]
 
 import { writeFileSync } from 'node:fs';
 
@@ -58,12 +58,16 @@ const STYLE = {
 
 const esc = s => s.replace(/[\\()]/g, c => '\\' + c);
 
+// Section headings and their positions, for the PDF outline (bookmarks).
+const headings = [];
+
 function pageStream(blocks, num) {
   let y = 740;
   const ops = [];
   for (const [kind, text, label] of blocks) {
     const st = STYLE[kind];
     if (kind === 'h' || kind === 'eq') y -= 6;
+    if (kind === 'h' && text !== 'Abstract') headings.push({ title: text, page: num, top: y + st.size + 4 });
     const x = kind === 'eq' ? 110 : kind === 'title' || kind === 'author' ? 72 : 72;
     ops.push(`BT /${st.font} ${st.size} Tf ${x} ${y} Td (${esc(text)}) Tj ET`);
     if (label) ops.push(`BT /F1 ${st.size} Tf 520 ${y} Td (${label}) Tj ET`);
@@ -88,6 +92,20 @@ PAGES.forEach((blocks, i) => {
     `/Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R /F3 ${f3} 0 R >> >> >>`));
 });
 objs[pagesIdx - 1] = `<< /Type /Pages /Kids [${kids.map(k => k + ' 0 R').join(' ')}] /Count ${kids.length} >>`;
+
+// Outline: one flat entry per section heading, pointing at its position.
+// --no-outline leaves it out (readers then have to detect headings).
+const withOutline = !process.argv.includes('--no-outline');
+const outlinesIdx = add('OUTLINES');
+const first = objs.length + 1;
+headings.forEach((h, i) => {
+  const me = first + i;
+  add(`<< /Title (${esc(h.title)}) /Parent ${outlinesIdx} 0 R` +
+    (i > 0 ? ` /Prev ${me - 1} 0 R` : '') + (i < headings.length - 1 ? ` /Next ${me + 1} 0 R` : '') +
+    ` /Dest [${kids[h.page - 1]} 0 R /XYZ 0 ${h.top} 0] >>`);
+});
+objs[outlinesIdx - 1] = `<< /Type /Outlines /First ${first} 0 R /Last ${first + headings.length - 1} 0 R /Count ${headings.length} >>`;
+if (withOutline) objs[catalog - 1] = `<< /Type /Catalog /Pages ${pagesIdx} 0 R /Outlines ${outlinesIdx} 0 R /PageMode /UseOutlines >>`;
 const info = add('<< /Title (Scaled Dot-Product Attention: A Short Derivation) /Author (A. Tester) >>');
 
 let out = '%PDF-1.4\n';

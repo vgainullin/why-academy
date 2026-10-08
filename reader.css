@@ -744,3 +744,44 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 .study-archive summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
 .study-archive .study-list { margin-top: 10px; }
 .explain-card.archived { opacity: 0.85; }
+
+/* Contents panel */
+.toc { list-style: none; display: flex; flex-direction: column; gap: 1px; }
+.toc-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--fg);
+}
+.toc-item:hover { background: var(--bg); }
+.toc-page { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+.toc-depth-0 .toc-item { font-weight: 600; }
+.toc-depth-1 .toc-item { padding-left: 20px; }
+.toc-depth-2 .toc-item { padding-left: 32px; font-size: 0.84rem; }
+.toc-depth-3 .toc-item { padding-left: 44px; font-size: 0.82rem; }
+.toc li.current .toc-item { background: var(--accent-light); color: var(--accent); }
+
+/* Portrait iPads: everything in the reading toolbar fits without scrolling. */
+@media (max-width: 1000px) {
+  .doc-toolbar { gap: 4px; padding: 6px 6px; }
+  .doc-toolbar .tool-group { gap: 2px; }
+  .doc-toolbar .tool { padding: 0 7px; font-size: 0.82rem; }
+  .doc-toolbar .btn-small { padding: 0 8px; font-size: 0.82rem; }
+  .doc-toolbar .icon-btn { min-width: 30px; padding: 0 4px; }
+  .page-indicator input { width: 44px; }
+}
+@media (max-width: 800px) {
+  /* iPad mini portrait: Fit is the default; zoom buttons stay. */
+  #zoom-fit { display: none; }
+  .doc-toolbar .tool { padding: 0 5px; }
+}

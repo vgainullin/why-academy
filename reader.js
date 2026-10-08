@@ -55,6 +55,7 @@ const state = {
   target: null, // current action target: { kind: 'selection'|'region'|'anno', ... }
   review: null, // { queue: [ids], index, revealed, done }
   panelFilter: 'all', // marks panel: 'all' | 'unclear'
+  panelMode: localStorage.getItem('reader.panelMode') === 'contents' ? 'contents' : 'marks', // doc panel
 };
 
 // Notes made with "New note" stay here until their first edit, so an
@@ -499,6 +500,7 @@ async function openDoc(docId, page, annoId) {
     if (doc.data.pages !== n) store.update(docId, { pages: n });
     view.addEventListener('page', e => {
       $('#page-input').value = e.detail;
+      markCurrentSection();
       // Locally at once (survives an immediate reload), synced after a pause.
       try {
         localStorage.setItem('reader.page.' + docId, String(e.detail));
@@ -511,6 +513,14 @@ async function openDoc(docId, page, annoId) {
         if (d && d.data.lastPage !== e.detail) store.update(docId, { lastPage: e.detail });
       }, 4000);
     });
+    let sectionFrame = 0;
+    $('#pdf-scroll').addEventListener('scroll', () => {
+      if (sectionFrame || state.pdf !== view || !state.panelOpen || state.panelMode !== 'contents') return;
+      sectionFrame = requestAnimationFrame(() => {
+        sectionFrame = 0;
+        markCurrentSection();
+      });
+    }, { passive: true, signal: view.signal });
     refreshDocOverlays();
     // Open the notebook first: it changes the PDF pane's size, and the
     // scroll position must be set for the final size.
@@ -1076,24 +1086,34 @@ async function cardDialog(p, fromEquation) {
 
 // ── Context panel ──
 
-function setPanel(open) {
+function setPanel(open, mode) {
   state.panelOpen = open;
+  if (mode) state.panelMode = mode;
   try {
     localStorage.setItem('reader.panel', open ? '1' : '0');
+    localStorage.setItem('reader.panelMode', state.panelMode);
   } catch (e) {
     console.warn('Could not remember the panel state', e);
   }
   renderPanel();
 }
 
+// The Marks and Contents buttons share the doc panel: each opens its own view,
+// and pressing it again closes the panel.
+function togglePanel(mode) {
+  setPanel(!(state.panelOpen && state.panelMode === mode), mode);
+}
+
 function renderPanel() {
   const panel = $('#panel');
   const show = state.panelOpen && (state.view === 'doc' || state.view === 'note');
   panel.classList.toggle('hidden', !show);
-  $('#toggle-panel').classList.toggle('active', state.panelOpen);
+  $('#toggle-panel').classList.toggle('active', state.panelOpen && state.panelMode === 'marks');
+  $('#toggle-contents').classList.toggle('active', state.panelOpen && state.panelMode === 'contents');
   $('#toggle-note-panel').classList.toggle('active', state.panelOpen);
   if (!show) return;
-  if (state.view === 'doc') renderDocPanel(panel);
+  if (state.view === 'doc' && state.panelMode === 'contents') renderContentsPanel(panel);
+  else if (state.view === 'doc') renderDocPanel(panel);
   else renderNotePanel(panel);
   // Always closable from inside: on narrow screens the panel covers the toolbar.
   const close = document.createElement('button');
@@ -1103,6 +1123,58 @@ function renderPanel() {
   close.innerHTML = '&times;';
   close.addEventListener('click', () => setPanel(false));
   panel.prepend(close);
+}
+
+function renderContentsPanel(panel) {
+  panel.innerHTML = '<section><h3>Contents</h3><p class="muted toc-note">Reading the table of contents...</p><ol class="toc"></ol></section>';
+  const view = state.pdf;
+  if (!view || !view.pdf) return;
+  view.contents().then(({ items, source }) => {
+    if (state.pdf !== view || !state.panelOpen || state.panelMode !== 'contents') return;
+    const note = panel.querySelector('.toc-note');
+    note.textContent = !items.length
+      ? 'This PDF has no outline, and no headings could be detected (it may be scanned).'
+      : source === 'detected' ? 'This PDF has no outline; these headings were detected from font sizes.' : '';
+    note.classList.toggle('hidden', !note.textContent);
+    const list = panel.querySelector('.toc');
+    items.forEach((it, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = '<button class="toc-item"><span class="toc-title"></span><span class="toc-page"></span></button>';
+      li.className = 'toc-depth-' + Math.min(it.depth, 3);
+      li.dataset.i = String(i);
+      li.querySelector('.toc-title').textContent = it.title;
+      li.querySelector('.toc-page').textContent = String(it.page);
+      li.querySelector('button').addEventListener('click', () => {
+        if (NARROW.matches) setPanel(false);
+        view.goTo(it.page, it.yFrac, 'smooth', 16);
+      });
+      list.appendChild(li);
+    });
+    markCurrentSection();
+  }).catch(e => reportError('Reading the contents failed', e));
+}
+
+// Highlights the section being read: the last entry that starts at or
+// before the top of the current page view.
+function markCurrentSection() {
+  const list = document.querySelector('#panel .toc');
+  const view = state.pdf;
+  if (!list || !view || !view._contents) return;
+  const pos = view.position();
+  if (!pos) return;
+  const at = pos.page + pos.frac;
+  let current = -1;
+  view._contents.items.forEach((it, i) => {
+    if (it.page + it.yFrac <= at + 0.05) current = i;
+  });
+  for (const li of list.children) {
+    const on = +li.dataset.i === current;
+    li.classList.toggle('current', on);
+    if (on && !li.dataset.seen) {
+      li.dataset.seen = '1';
+      li.scrollIntoView({ block: 'nearest' });
+    }
+  }
 }
 
 function renderDocPanel(panel) {
@@ -1616,7 +1688,7 @@ store.addEventListener('change', e => {
     renderSidebar();
     if (state.view === 'doc') {
       refreshDocOverlays();
-      renderPanel();
+      if (state.panelMode !== 'contents') renderPanel();
       if (!$('#doc-notebook').contains(document.activeElement)) sideEditor.refreshFromStore();
     } else if (state.view === 'note') {
       mainEditor.refreshFromStore();
@@ -1670,7 +1742,8 @@ function wire() {
   $('#zoom-out').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom / 1.2, state.pdf.fitWidth));
   $('#zoom-fit').addEventListener('click', () => state.pdf && state.pdf.setZoom(1, true));
   $('#page-input').addEventListener('change', e => state.pdf && state.pdf.goTo(+e.target.value));
-  $('#toggle-panel').addEventListener('click', () => setPanel(!state.panelOpen));
+  $('#toggle-panel').addEventListener('click', () => togglePanel('marks'));
+  $('#toggle-contents').addEventListener('click', () => togglePanel('contents'));
   $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
   $('#open-brief').addEventListener('click', () => state.docId && navigate('#brief=' + state.docId));
   // Close the color menus on any outside tap.

@@ -12,6 +12,7 @@ const ROOT = new URL('../..', import.meta.url).pathname;
 const B = process.env.E2E_ORIGIN;
 const token = process.env.E2E_TOKEN;
 const FIXTURE = process.env.E2E_FIXTURE;
+const FIXTURE_PLAIN = process.env.E2E_FIXTURE_PLAIN;
 const OUT = process.env.E2E_OUT || '.';
 if (!B || !token || !FIXTURE) throw new Error('Run through scripts/e2e_reader.sh');
 const kit = `const __WA_CONFIG = ${JSON.stringify({ token, origin: B, openrouterKey: 'sk-or-test' })};\n` + readFileSync(ROOT + 'scripts/feature_test/testkit.js', 'utf8');
@@ -72,6 +73,22 @@ try {
     return Math.round(t.getBoundingClientRect().height);
   });
   check('toolbar is one row', toolbarRows < 60, toolbarRows + 'px');
+
+  // Contents from the PDF outline: lists sections, jumps, tracks the current one
+  await page.click('#toggle-contents');
+  await page.waitForSelector('#panel .toc li');
+  const toc = await page.locator('#panel .toc-title').allTextContents();
+  check('contents lists the outline', toc.length === 6 && toc[2].includes('Why saturation hurts'), toc.join(' | '));
+  await page.locator('#panel .toc-item', { hasText: 'Why saturation hurts' }).click();
+  await wait(1200);
+  check('contents entry jumps to its section', (await page.inputValue('#page-input')) === '2', 'page ' + await page.inputValue('#page-input'));
+  await page.click('#toggle-contents');
+  await page.waitForSelector('#panel .toc li.current');
+  check('current section highlighted', (await page.textContent('#panel .toc li.current .toc-title')).includes('Why saturation hurts'), await page.textContent('#panel .toc li.current .toc-title'));
+  await page.click('#panel .panel-close');
+  await page.fill('#page-input', '1');
+  await page.dispatchEvent('#page-input', 'change');
+  await wait(500);
 
   // panel closable
   await page.click('#toggle-panel');
@@ -359,6 +376,18 @@ try {
   }
   await page.waitForSelector('.review-next');
   check('done screen says when cards come back', /back in|came due/.test(await page.textContent('.review-next')), await page.textContent('.review-next'));
+
+  // Contents for a PDF without an outline: detected headings
+  await page.goto(B + '/reader');
+  await page.setInputFiles('#file-input', FIXTURE_PLAIN);
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  await page.click('#toggle-contents');
+  await page.waitForSelector('#panel .toc li');
+  const detected = await page.locator('#panel .toc-title').allTextContents();
+  check('contents detects headings without an outline',
+    (await page.textContent('#panel .toc-note')).includes('detected') && detected.some(t => t.includes('Variance of a dot product')) && detected.some(t => t.includes('References')),
+    detected.join(' | '));
+  await page.click('#panel .panel-close');
 
   // labels
   await page.goto(B + '/reader#doc=' + docId);

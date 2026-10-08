@@ -785,3 +785,21 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
   #zoom-fit { display: none; }
   .doc-toolbar .tool { padding: 0 5px; }
 }
+
+/* Undo/redo, pen sizes, clear page */
+[data-history]:disabled { opacity: 0.35; cursor: default; }
+.size-row { display: flex; gap: 6px; align-items: center; margin-left: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
+.size-dot { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--block-bg); display: grid; place-items: center; cursor: pointer; }
+.size-dot::after { content: ''; border-radius: 50%; background: var(--fg); }
+.size-fine::after { width: 4px; height: 4px; }
+.size-medium::after { width: 8px; height: 8px; }
+.size-thick::after { width: 13px; height: 13px; }
+.size-dot.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#clear-page.hidden { display: none; }
+
+.side-row { display: flex; align-items: center; gap: 2px; }
+.side-row .side-item { flex: 1; min-width: 0; }
+.side-more { min-height: 30px; min-width: 30px; border-color: transparent; background: transparent; color: var(--muted); opacity: 0.6; }
+.side-row:hover .side-more, .side-more:focus { opacity: 1; }
+@media (hover: none) { .side-more { opacity: 1; } }
+.btn.danger { color: var(--error); }

@@ -389,8 +389,131 @@ try {
     detected.join(' | '));
   await page.click('#panel .panel-close');
 
-  // labels
+  // Undo/redo, eraser on highlights, clear page, pen sizes, pinch zoom
   await page.goto(B + '/reader#doc=' + docId);
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  await page.fill('#page-input', '1');
+  await page.dispatchEvent('#page-input', 'change');
+  await wait(600);
+  // Strokes on page 1 on the server; waits until it equals `expect` if given.
+  const inkOnPage1 = async expect => {
+    let n = -1;
+    for (let i = 0; i < 25; i++) {
+      n = await page.evaluate(async () => {
+        const it = (await __wa.serverItems('ink')).find(x => x.data.page === 1 && !x.deleted);
+        return it ? it.data.strokes.length : 0;
+      });
+      if (expect === undefined || n === expect) return n;
+      await wait(400);
+    }
+    return n;
+  };
+  await page.click('.tool[data-tool="pen"]');
+  await wait(2500);
+  const base = await inkOnPage1();
+  await page.evaluate(() => __wa.penOnPage(1, 0.2, 0.6, 0.62));
+  const afterDraw = await inkOnPage1(base + 1);
+  await page.click('[data-history="undo"] >> nth=0');
+  const afterUndo = await inkOnPage1(base);
+  await page.keyboard.press('Meta+Shift+z');
+  const afterRedo = await inkOnPage1(base + 1);
+  check('undo and redo a pen stroke (button and keyboard)', afterDraw === base + 1 && afterUndo === base && afterRedo === base + 1, `${base} -> ${afterDraw} -> ${afterUndo} -> ${afterRedo}`);
+
+  // Pen size
+  await page.click('#color-group .swatch.active');
+  await page.click('#color-group .size-thick');
+  await page.evaluate(() => __wa.penOnPage(1, 0.2, 0.6, 0.68));
+  await page.click('#color-group .swatch.active');
+  await page.click('#color-group .size-fine');
+  await page.evaluate(() => __wa.penOnPage(1, 0.2, 0.6, 0.72));
+  await inkOnPage1(base + 3);
+  const widths = await page.evaluate(async () => {
+    const it = (await __wa.serverItems('ink')).find(x => x.data.page === 1);
+    return it.data.strokes.slice(-2).map(s => s.width);
+  });
+  check('pen size changes stroke width', widths.length === 2 && widths[0] > widths[1] * 2, widths.join(' vs '));
+  await page.click('#color-group .swatch.active');
+  await page.click('#color-group .size-medium');
+
+  // Clear page, then undo it
+  await page.click('.tool[data-tool="eraser"]');
+  check('clear page shows with the eraser', await page.isVisible('#clear-page'));
+  await page.click('#clear-page');
+  const cleared = await inkOnPage1(0);
+  await page.click('[data-history="undo"] >> nth=0');
+  const restored = await inkOnPage1(base + 3);
+  check('clear page, then undo restores the ink', cleared === 0 && restored === base + 3, `${cleared} -> ${restored}`);
+
+  // A plain highlight: undo removes it, redo brings it back, the eraser erases it
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(1, 'An attention layer maps'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  const marksNow = async () => { await wait(300); return page.locator('.pdf-page[data-page="1"] .anno-highlight').count(); };
+  const m0 = await marksNow();
+  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  const m1 = await marksNow();
+  await page.click('[data-history="undo"] >> nth=0');
+  const m2 = await marksNow();
+  await page.click('[data-history="redo"] >> nth=0');
+  const m3 = await marksNow();
+  check('undo and redo a highlight', m1 === m0 + 1 && m2 === m0 && m3 === m0 + 1, `${m0} -> ${m1} -> ${m2} -> ${m3}`);
+  await page.click('.tool[data-tool="eraser"]');
+  const hl = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.pdf-page[data-page="1"] .anno-highlight')].pop();
+    const r = el.getBoundingClientRect();
+    const p = el.closest('.pdf-page').getBoundingClientRect();
+    return { x0: (r.left - p.left + 4) / p.width, x1: (r.right - p.left - 4) / p.width, y: (r.top + r.height / 2 - p.top) / p.height };
+  });
+  await page.evaluate(h => __wa.penOnPage(1, h.x0, h.x1, h.y), hl);
+  const m4 = await marksNow();
+  check('eraser erases a plain highlight', m4 === m0, `${m3} -> ${m4}`);
+  await page.click('.tool[data-tool="select"]');
+
+  // Pinch zoom (trackpad pinch arrives as ctrl+wheel) zooms the page only
+  const w0z = await page.evaluate(() => document.querySelector('.pdf-page').getBoundingClientRect().width);
+  const box = await page.locator('#pdf-scroll').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 300);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -40);
+  await page.keyboard.up('Control');
+  await wait(900);
+  const w1z = await page.evaluate(() => document.querySelector('.pdf-page').getBoundingClientRect().width);
+  const tbw = await page.evaluate(() => document.querySelector('.doc-toolbar').getBoundingClientRect().width);
+  check('pinch zoom enlarges the page, not the interface', w1z > w0z * 1.3 && Math.abs(tbw - 834) < 2, `${Math.round(w0z)} -> ${Math.round(w1z)}, toolbar ${Math.round(tbw)}`);
+  await page.click('#zoom-fit').catch(() => {});
+
+  // Rename and remove a paper (the outline-less copy, not the main one)
+  await page.goto(B + '/reader');
+  const plainId = (await page.evaluate(() => __wa.serverItems('doc'))).map(d => d.id).find(id => id !== docId);
+  const row = () => page.locator(`#doc-list .side-row:has(a[href="#doc=${plainId}"])`);
+  await page.waitForFunction(() => document.querySelector('#sync-status').dataset.state === 'synced');
+  const library = async () => {
+    if (await page.evaluate(() => document.body.classList.contains('sidebar-closed'))) await page.click('#sidebar-toggle');
+  };
+  await library();
+  await row().locator('.side-more').click();
+  await page.fill('dialog [name=title]', 'Renamed paper');
+  await page.click('dialog button[value="ok"]');
+  await wait(500);
+  check('rename a paper', (await row().locator('.side-item-title').textContent()) === 'Renamed paper');
+  await library();
+  await row().locator('.side-more').click();
+  await page.click('dialog button[value="remove"]');
+  await wait(1500);
+  let gone = false;
+  for (let i = 0; i < 16 && !gone; i++) {
+    await wait(500);
+    gone = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plainId && d.deleted);
+  }
+  check('remove a paper', (await row().count()) === 0 && gone);
+
+  // Tapping the open paper in the library puts the library away
+  await library();
+  await page.click(`#doc-list a[href="#doc=${docId}"]`);
+  await wait(300);
+  check('tapping the open paper closes the library', await page.evaluate(() => document.body.classList.contains('sidebar-closed')));
+
+  // labels
   await page.waitForSelector('.pdf-page .textLayer span');
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(1, 'An attention layer'));

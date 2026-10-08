@@ -80,6 +80,10 @@
 
       <section id="view-doc" class="view hidden">
         <div class="doc-toolbar" role="toolbar" aria-label="Reading tools">
+          <div class="tool-group">
+            <button class="icon-btn" data-history="undo" title="Undo (Cmd+Z, two-finger tap)" aria-label="Undo" disabled>&#8630;</button>
+            <button class="icon-btn" data-history="redo" title="Redo (Shift+Cmd+Z, three-finger tap)" aria-label="Redo" disabled>&#8631;</button>
+          </div>
           <div class="tool-group" id="tool-group">
             <button class="tool" data-tool="select" title="Select text (S)">Select</button>
             <button class="tool" data-tool="pen" title="Pen (P)">Pen</button>
@@ -88,6 +92,7 @@
             <button class="tool" data-tool="region" title="Region: drag around an equation or figure (R)">Region</button>
           </div>
           <div class="tool-group" id="color-group"></div>
+          <button class="btn-small hidden" id="clear-page" title="Remove all ink on this page">Clear page</button>
           <div class="tool-group page-indicator">
             <input id="page-input" type="number" min="1" value="1" aria-label="Page"> <span id="page-count"></span>
           </div>
@@ -111,6 +116,10 @@
 
       <section id="view-note" class="view view-note hidden">
         <div class="note-toolbar" role="toolbar" aria-label="Notebook tools">
+          <div class="tool-group">
+            <button class="icon-btn" data-history="undo" title="Undo (Cmd+Z, two-finger tap)" aria-label="Undo" disabled>&#8630;</button>
+            <button class="icon-btn" data-history="redo" title="Redo (Shift+Cmd+Z, three-finger tap)" aria-label="Redo" disabled>&#8631;</button>
+          </div>
           <div class="tool-group" id="note-tool-group">
             <button class="tool" data-tool="pen" title="Pen">Pen</button>
             <button class="tool" data-tool="highlighter" title="Highlighter">Highlight</button>

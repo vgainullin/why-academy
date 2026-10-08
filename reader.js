@@ -28,11 +28,18 @@ import { renderMarkdown, escapeHtml } from './lib/vault/markdown.js';
 import { INK_COLORS, HIGHLIGHT_COLORS } from './lib/vault/ink.js';
 import { explainPassage, equationToLatex, draftCard } from './lib/vault/ai.js';
 import { newSrs, previewReview, GRADES } from './lib/vault/srs.js';
+import { History } from './lib/vault/history.js';
 
 const $ = sel => document.querySelector(sel);
 const C = window.WhyCommon;
 
-const PEN_WIDTHS = { pen: 0.0028, highlighter: 0.016 };
+// Stroke widths relative to the page width, per size.
+const PEN_WIDTHS = {
+  fine: { pen: 0.0018, highlighter: 0.011 },
+  medium: { pen: 0.0028, highlighter: 0.016 },
+  thick: { pen: 0.0046, highlighter: 0.024 },
+};
+const PEN_SIZES = ['fine', 'medium', 'thick'];
 const TASK_LABELS = { todo: 'Follow-up', explain: 'Explain', derive: 'Derive', question: 'Question' };
 const COLOR_NAMES = {
   '#1f2937': 'Black', '#2563eb': 'Blue', '#dc2626': 'Red', '#059669': 'Green',
@@ -47,7 +54,12 @@ const state = {
   docId: null,
   noteId: null,
   pdf: null,
-  tool: { tool: matchMedia('(pointer: coarse)').matches ? 'pen' : 'select', color: INK_COLORS[0], hlColor: HIGHLIGHT_COLORS[0] },
+  tool: {
+    tool: matchMedia('(pointer: coarse)').matches ? 'pen' : 'select',
+    color: INK_COLORS[0],
+    hlColor: HIGHLIGHT_COLORS[0],
+    size: PEN_SIZES.includes(localStorage.getItem('reader.penSize')) ? localStorage.getItem('reader.penSize') : 'medium',
+  },
   links: null,
   // On narrow screens the panel covers the page, so it never reopens by itself.
   panelOpen: localStorage.getItem('reader.panel') === '1' && !NARROW.matches,
@@ -100,15 +112,132 @@ function reportError(context, e) {
 function getTool() {
   const t = state.tool;
   const isHl = t.tool === 'highlighter';
-  return { tool: t.tool, color: isHl ? t.hlColor : t.color, width: PEN_WIDTHS[isHl ? 'highlighter' : 'pen'] };
+  return { tool: t.tool, color: isHl ? t.hlColor : t.color, width: PEN_WIDTHS[t.size][isHl ? 'highlighter' : 'pen'] };
 }
 
 // Notebook ink pads always take the Pencil: Select and Region are reading
 // tools and mean nothing on a pad.
 function getInkTool() {
   const t = getTool();
-  if (t.tool === 'select' || t.tool === 'region') return { tool: 'pen', color: state.tool.color, width: PEN_WIDTHS.pen };
+  if (t.tool === 'select' || t.tool === 'region') return { tool: 'pen', color: state.tool.color, width: PEN_WIDTHS[state.tool.size].pen };
   return t;
+}
+
+// ── Undo ──
+
+const undoHistory = new History();
+
+function removeStrokes(d, ids) {
+  const gone = new Set(ids);
+  d.strokes = d.strokes.filter(s => !gone.has(s.id));
+  d.erased.push(...ids);
+}
+
+// Ink merges by stroke id and erasing is permanent per id, so redoing a
+// stroke (or undoing an erase) re-adds it under a fresh id.
+function inkAdded(docId, page, stroke) {
+  let current = stroke;
+  saveInk(docId, page, d => d.strokes.push(stroke));
+  undoHistory.push({
+    label: 'Pen stroke',
+    undo: () => saveInk(docId, page, d => removeStrokes(d, [current.id])),
+    redo: () => {
+      current = { ...current, id: newId() };
+      return saveInk(docId, page, d => d.strokes.push(current));
+    },
+  });
+}
+
+function inkErased(docId, page, ids, label = 'Erase') {
+  let removed = [];
+  const done = saveInk(docId, page, d => {
+    const gone = new Set(ids);
+    removed = d.strokes.filter(s => gone.has(s.id));
+    removeStrokes(d, ids);
+  });
+  undoHistory.push({
+    label,
+    undo: () => {
+      removed = removed.map(s => ({ ...s, id: newId() }));
+      return saveInk(docId, page, d => d.strokes.push(...removed));
+    },
+    redo: () => saveInk(docId, page, d => removeStrokes(d, removed.map(s => s.id))),
+  });
+  return done;
+}
+
+// Vault writes that can be undone.
+async function trackedPut(kind, id, data) {
+  const before = store.get(id);
+  const prev = before ? structuredClone(before.data) : null;
+  const snapshot = structuredClone(data);
+  const item = await store.put(kind, id, data);
+  undoHistory.push({
+    label: kind,
+    undo: () => (prev ? store.put(kind, id, prev) : store.remove(id)),
+    redo: () => store.put(kind, id, structuredClone(snapshot)),
+  });
+  return item;
+}
+
+function trackedCreate(kind, data) {
+  return trackedPut(kind, newId(), data);
+}
+
+function trackedUpdate(id, patch) {
+  const it = store.get(id);
+  return trackedPut(it.kind, id, { ...it.data, ...patch });
+}
+
+async function trackedRemove(id) {
+  const it = store.get(id);
+  if (!it) return;
+  const prev = structuredClone(it.data);
+  await store.remove(id);
+  undoHistory.push({ label: 'Delete', undo: () => store.put(it.kind, id, prev), redo: () => store.remove(id) });
+}
+
+async function undo() {
+  try {
+    const e = await undoHistory.undo();
+    if (e) toast('Undid ' + e.label.toLowerCase());
+  } catch (e) {
+    reportError('Undo failed', e);
+  }
+}
+
+async function redo() {
+  try {
+    const e = await undoHistory.redo();
+    if (e) toast('Redid ' + e.label.toLowerCase());
+  } catch (e) {
+    reportError('Redo failed', e);
+  }
+}
+
+function renderUndoButtons() {
+  document.querySelectorAll('[data-history="undo"]').forEach(b => { b.disabled = !undoHistory.canUndo; });
+  document.querySelectorAll('[data-history="redo"]').forEach(b => { b.disabled = !undoHistory.canRedo; });
+}
+undoHistory.addEventListener('change', renderUndoButtons);
+
+// Highlights the eraser passed over. Marks that carry work (cards, tasks,
+// comments, an understanding state) are left alone: deleting those is an
+// explicit action on the mark.
+const erasingMarks = new Set();
+let eraseWarned = false;
+function eraseMark(a) {
+  if (erasingMarks.has(a.id) || !store.get(a.id)) return;
+  const linked = (itemsByAnno().get(a.id) || []).length;
+  if (linked || a.data.comment || a.data.status) {
+    if (!eraseWarned) {
+      eraseWarned = true;
+      toast('Highlights with cards, tasks or comments are kept; delete them from the mark itself');
+    }
+    return;
+  }
+  erasingMarks.add(a.id);
+  trackedRemove(a.id).catch(e => reportError('Erasing the highlight failed', e)).finally(() => erasingMarks.delete(a.id));
 }
 
 function setTool(tool) {
@@ -118,6 +247,7 @@ function setTool(tool) {
     b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
   });
   document.body.dataset.tool = tool;
+  $('#clear-page').classList.toggle('hidden', tool !== 'eraser');
   renderColors();
 }
 
@@ -149,6 +279,27 @@ function renderColors() {
       });
       menu.appendChild(b);
     }
+    const sizes = document.createElement('div');
+    sizes.className = 'size-row';
+    for (const size of PEN_SIZES) {
+      const b = document.createElement('button');
+      b.className = 'size-dot size-' + size + (size === state.tool.size ? ' active' : '');
+      b.title = size[0].toUpperCase() + size.slice(1) + ' line';
+      b.setAttribute('aria-label', b.title);
+      b.setAttribute('aria-pressed', String(size === state.tool.size));
+      b.addEventListener('click', e => {
+        e.stopPropagation();
+        state.tool.size = size;
+        try {
+          localStorage.setItem('reader.penSize', size);
+        } catch (err) {
+          console.warn('Could not remember the pen size', err);
+        }
+        renderColors();
+      });
+      sizes.appendChild(b);
+    }
+    menu.appendChild(sizes);
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const open = menu.classList.toggle('hidden') === false;
@@ -191,6 +342,9 @@ async function route() {
   }
   // In portrait the panel covers the page, so it does not follow you around.
   if (NARROW.matches && state.panelOpen) state.panelOpen = false;
+  // On narrow screens the library covers the content: any navigation out of
+  // it (even to the paper already open) puts it away, before slow loading.
+  if (NARROW.matches && r.view !== 'empty') setSidebar(false);
   if (r.view === 'doc' && store.get(r.id)) {
     await openDoc(r.id, r.page, r.anno);
   } else if (r.view === 'note' && exists(r.id)) {
@@ -250,9 +404,12 @@ function renderSidebar() {
   for (const d of docs) {
     const li = document.createElement('li');
     const marks = markCounts.get(d.id) || 0;
+    li.className = 'side-row';
     li.innerHTML = `<a href="#doc=${d.id}" class="side-item${state.docId === d.id ? ' active' : ''}">
-      <span class="side-item-title"></span><span class="side-item-meta">${d.data.pages} pp${marks ? ' &middot; ' + marks + ' marks' : ''}</span></a>`;
+      <span class="side-item-title"></span><span class="side-item-meta">${d.data.pages} pp${marks ? ' &middot; ' + marks + ' marks' : ''}</span></a>
+      <button class="icon-btn side-more" aria-label="Rename or remove paper" title="Rename or remove">&#8943;</button>`;
     li.querySelector('.side-item-title').textContent = d.data.title;
+    li.querySelector('.side-more').addEventListener('click', () => paperDialog(d.id));
     docList.appendChild(li);
   }
 
@@ -381,7 +538,7 @@ function renderNoteLinks(box, noteId) {
   }
 }
 
-const editorApp = { store, getTool: getInkTool, resolveLink, openLink, titles, toast, renderNoteLinks };
+const editorApp = { store, getTool: getInkTool, resolveLink, openLink, titles, toast, renderNoteLinks, history: undoHistory };
 const mainEditor = new NoteEditor($('#note-root'), editorApp);
 const sideEditor = new NoteEditor($('#doc-notebook'), editorApp);
 
@@ -477,12 +634,9 @@ async function openDoc(docId, page, annoId) {
 
     const view = new PdfView(scroll, {
       getTool,
-      onInkAdd: (p, stroke) => saveInk(docId, p, d => d.strokes.push(stroke)),
-      onInkErase: (p, ids) => saveInk(docId, p, d => {
-        const gone = new Set(ids);
-        d.strokes = d.strokes.filter(s => !gone.has(s.id));
-        d.erased.push(...ids);
-      }),
+      onInkAdd: (p, stroke) => inkAdded(docId, p, stroke),
+      onInkErase: (p, ids) => inkErased(docId, p, ids),
+      onEraseMark: a => eraseMark(a),
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
     });
     state.pdf = view;
@@ -585,6 +739,49 @@ function saveInk(docId, page, mutate) {
   }).catch(e => reportError('Saving ink failed', e));
   inkQueues.set(id, next);
   return next;
+}
+
+// Rename a paper, or remove it with its marks and ink. Cards, tasks and notes
+// are study material and stay.
+async function paperDialog(docId) {
+  const doc = store.get(docId);
+  if (!doc) return;
+  const dlg = $('#dialog');
+  dlg.innerHTML = `<form method="dialog" class="dialog-form">
+      <h3>Paper</h3>
+      <label>Title <input type="text" name="title" maxlength="500"></label>
+      <p class="muted paper-meta"></p>
+      <div class="dialog-actions">
+        <button value="remove" class="btn btn-secondary danger">Remove paper</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn btn-secondary">Cancel</button>
+        <button value="ok" class="btn btn-primary">Save</button>
+      </div>
+    </form>`;
+  const title = dlg.querySelector('[name=title]');
+  title.value = doc.data.title;
+  const marks = store.forDoc(docId, 'anno').length;
+  dlg.querySelector('.paper-meta').textContent = `${doc.data.filename} \u00b7 ${doc.data.pages} pages \u00b7 ${marks} marks`;
+  const done = new Promise(r => { dlg.onclose = r; });
+  dlg.showModal();
+  await done;
+  try {
+    if (dlg.returnValue === 'ok' && title.value.trim() && title.value.trim() !== doc.data.title) {
+      await trackedUpdate(docId, { title: title.value.trim() });
+      if (state.docId === docId) $('#view-title').textContent = title.value.trim();
+    } else if (dlg.returnValue === 'remove') {
+      const ink = store.forDoc(docId, 'ink');
+      if (!confirm(`Remove "${doc.data.title}" with its ${marks} marks and its ink from all your devices? Cards, tasks and notes are kept. This cannot be undone.`)) return;
+      if (state.docId === docId) navigate('#');
+      for (const it of [...store.forDoc(docId, 'anno'), ...ink]) await store.remove(it.id);
+      await store.remove(docId);
+      await store.removeFile(docId);
+      localStorage.removeItem('reader.page.' + docId);
+      toast('Paper removed');
+    }
+  } catch (e) {
+    reportError('Updating the paper failed', e);
+  }
 }
 
 // ── Paper notebook (split view) ──
@@ -773,10 +970,10 @@ function overlap([ax, ay, aw, ah], [bx, by, bw, bh]) {
 // Saves the mark (with any extra fields) and returns the stored item.
 async function commitAnno(p, patch = {}) {
   if (p.saved) {
-    if (Object.keys(patch).length) await store.update(p.anno.id, patch);
+    if (Object.keys(patch).length) await trackedUpdate(p.anno.id, patch);
     return store.get(p.anno.id);
   }
-  p.anno = await store.put('anno', p.anno.id, { ...p.anno.data, ...patch });
+  p.anno = await trackedPut('anno', p.anno.id, { ...p.anno.data, ...patch });
   p.saved = true;
   window.getSelection().removeAllRanges();
   return p.anno;
@@ -787,7 +984,12 @@ function docTitle() {
   return d ? d.data.title : '';
 }
 
-async function runAction(act) {
+// Everything one action writes (mark, task, card) undoes as one step.
+function runAction(act) {
+  return undoHistory.batch(ACTION_LABELS[act] || act, () => runActionNow(act));
+}
+
+async function runActionNow(act) {
   const target = state.target;
   if (!target) return;
   const page = target.page || (target.anno && target.anno.data.page);
@@ -797,8 +999,9 @@ async function runAction(act) {
     const a = target.anno;
     const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
     if (linked.length && !confirm(`Delete this mark? Its ${linked.length} card(s)/task(s) are kept.`)) return;
-    await store.remove(a.id);
+    await trackedRemove(a.id);
     hideActions();
+    toast('Mark deleted: Undo brings it back');
     return;
   }
 
@@ -849,7 +1052,7 @@ async function runAction(act) {
     toast('Reading the equation...');
     const latex = await regionLatex();
     const anno = await commitAnno(p, { latex });
-    await store.create('task', { text: `Re-derive: $${latex}$`, type: 'derive', status: 'open', docId: state.docId, annoId: anno.id });
+    await trackedCreate('task', { text: `Re-derive: $${latex}$`, type: 'derive', status: 'open', docId: state.docId, annoId: anno.id });
     const ed = await notebookTarget();
     ed.draft.blocks.push(
       { id: newId(), type: 'md', text: `**Derive** $${latex}$ [[@${anno.id}|p. ${page}]]\nWrite each step below, then *Check with SymPy*.` },
@@ -867,7 +1070,7 @@ async function runAction(act) {
     });
     if (text) {
       const anno = await commitAnno(p);
-      await store.create('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
+      await trackedCreate('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
     }
   }
 }
@@ -893,8 +1096,8 @@ function showExplanation(t) {
 
 async function createExplainTask(anno, isRegion) {
   const docId = anno.data.docId;
-  if (!anno.data.status) await store.update(anno.id, { status: 'unclear' });
-  const task = await store.create('task', {
+  if (!anno.data.status) await trackedUpdate(anno.id, { status: 'unclear' });
+  const task = await trackedCreate('task', {
     text: 'Explain: ' + (isRegion ? `region on p. ${anno.data.page}` : snippet(anno.data.quote, 100)),
     type: 'explain',
     status: 'open',
@@ -944,7 +1147,7 @@ function friendlyError(e) {
 }
 
 async function generateExplanation(taskId) {
-  if (explaining.has(taskId)) return;
+  if (explaining.has(taskId) || !store.get(taskId)) return;
   explaining.add(taskId);
   const task = store.get(taskId);
   const anno = store.get(task.data.annoId);
@@ -957,6 +1160,8 @@ async function generateExplanation(taskId) {
       image: anno.data.type === 'region' ? await view.regionImage(anno.data.page, anno.data.rects[0]) : null,
     }));
     const explanation = await explainPassage({ docTitle: doc ? doc.data.title : '', quote: anno.data.quote || anno.data.latex, context, image });
+    // The task may have been undone while the model was writing.
+    if (!store.get(taskId)) return;
     await store.update(taskId, { explanation, status: 'ready', pending: undefined, error: undefined });
     toast('Explanation ready in Study');
   } catch (e) {
@@ -1074,7 +1279,7 @@ async function cardDialog(p, fromEquation) {
   await done;
   if (dlg.returnValue !== 'ok') return;
   const saved = await commitAnno(p, latex && latex !== anno.data.latex ? { latex } : {});
-  await store.create('card', {
+  await trackedCreate('card', {
     front: front.value.trim(),
     back: back.value.trim(),
     docId: saved.data.docId,
@@ -1719,6 +1924,11 @@ store.addEventListener('status', e => {
 
 function wire() {
   $('#sidebar-toggle').addEventListener('click', () => setSidebar(document.body.classList.contains('sidebar-closed')));
+  // Tapping the item that is already open changes no URL, so no navigation
+  // runs: close the library on narrow screens on any link tap.
+  $('#sidebar').addEventListener('click', e => {
+    if (NARROW.matches && e.target.closest('a[href^="#"], #open-study')) setSidebar(false);
+  });
   $('#search').addEventListener('input', e => {
     lastQuery = e.target.value;
     search(lastQuery);
@@ -1742,6 +1952,47 @@ function wire() {
   $('#zoom-out').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom / 1.2, state.pdf.fitWidth));
   $('#zoom-fit').addEventListener('click', () => state.pdf && state.pdf.setZoom(1, true));
   $('#page-input').addEventListener('change', e => state.pdf && state.pdf.goTo(+e.target.value));
+  document.querySelectorAll('[data-history]').forEach(b => b.addEventListener('click', () => (b.dataset.history === 'undo' ? undo() : redo())));
+  $('#clear-page').addEventListener('click', async () => {
+    if (!state.pdf) return;
+    const page = state.pdf.currentPage;
+    const ink = store.get(inkId(state.docId, page));
+    if (!ink || !ink.data.strokes.length) {
+      toast(`No ink on page ${page}`);
+      return;
+    }
+    await inkErased(state.docId, page, ink.data.strokes.map(s => s.id), 'Clear page');
+    toast(`Cleared page ${page}: Undo brings it back`);
+  });
+  // Two-finger tap undoes, three-finger tap redoes (as in GoodNotes and
+  // Notability). A tap is short and does not move; pinches and scrolls do.
+  let tap = null;
+  document.addEventListener('touchstart', e => {
+    if (!e.target.closest('#view-doc, #view-note') || e.target.closest('input, textarea, button')) {
+      tap = null;
+      return;
+    }
+    const now = Date.now();
+    if (!tap || now - tap.start > 300) tap = { start: now, max: 0, moved: false, pts: new Map() };
+    for (const t of e.changedTouches) tap.pts.set(t.identifier, [t.clientX, t.clientY]);
+    tap.max = Math.max(tap.max, e.touches.length);
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (!tap) return;
+    for (const t of e.changedTouches) {
+      const p = tap.pts.get(t.identifier);
+      if (p && Math.hypot(t.clientX - p[0], t.clientY - p[1]) > 12) tap.moved = true;
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (!tap || e.touches.length) return;
+    const t = tap;
+    tap = null;
+    if (t.moved || Date.now() - t.start > 350) return;
+    if (t.max === 2) undo();
+    else if (t.max === 3) redo();
+  }, { passive: true });
+
   $('#toggle-panel').addEventListener('click', () => togglePanel('marks'));
   $('#toggle-contents').addEventListener('click', () => togglePanel('contents'));
   $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
@@ -1803,6 +2054,13 @@ function wire() {
 
   addEventListener('keydown', e => {
     if (e.target.closest('input, textarea, [contenteditable], dialog')) return;
+    // Text fields keep their own undo; everywhere else Cmd/Ctrl+Z is ours.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
+      e.preventDefault();
+      if (e.key === 'y' || e.shiftKey) redo();
+      else undo();
+      return;
+    }
     if (state.review && state.view === 'study') {
       if (e.key === ' ' && !state.review.revealed) {
         e.preventDefault();

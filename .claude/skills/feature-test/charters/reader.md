@@ -10,6 +10,10 @@ journal club. You read on an iPad with an Apple Pencil. You want to:
 - have a list of open questions to raise;
 - keep notes that link to this paper and to related ideas.
 
+Your bar is what GoodNotes, Notability and PDF Expert do on an iPad, and what
+Obsidian does for linked notes. Anything they make easy and this app does not
+is a finding.
+
 The fixture paper "Scaled Dot-Product Attention: A Short Derivation" (3 pages,
 equations (1)-(5)) stands in for the real one.
 
@@ -126,6 +130,23 @@ that the flow handles the result sensibly.
   after a reload.
 - Jumping to a passage leaves it visible below the toolbar.
 - The sync state stays visible in the header.
+
+**C19 Table-stakes basics.**
+- Undo and redo:
+  - toolbar buttons, Cmd+Z / Shift+Cmd+Z;
+  - two-finger tap to undo, three-finger tap to redo;
+  - covers pen strokes, erasing, clear page, highlights, and marks with
+    their cards and tasks;
+  - works in notebook ink pads too.
+- The eraser removes ink and plain highlights. "Clear page" appears with the
+  eraser, and can be undone.
+- Pen and highlighter come in three sizes.
+- Pinch zoom (ctrl+wheel in the test browser) zooms the page, not the
+  interface.
+- The Contents panel lists chapters and sections and jumps to them.
+- A paper can be renamed and removed from the library.
+- Report anything else a GoodNotes or PDF Expert user would reach for and
+  not find.
 
 **C15 Sync and errors.**
 - Throughout, the sync status ends at "Synced".

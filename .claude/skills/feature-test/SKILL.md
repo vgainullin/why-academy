@@ -46,10 +46,16 @@ so after `selectText`, wait about half a second, then snapshot.
 2. **Check persistence, not just the screen.** After creating something, check
    it is still there after a reload. Also check that it reached the server
    (`__wa.serverItems`).
-3. **Exploratory pass.** Become the charter's persona and try to get their real
+3. **Baseline pass.** Before exploring, list what the category leaders the
+   charter names do as a matter of course (undo, eraser, zoom, navigation,
+   rename/delete, search...). Check each one here. A missing table-stakes
+   feature is a finding: report it as **major** if a typical user would reach
+   for it in their first session, otherwise **minor**. "Works as built" is not
+   the bar; "works as people expect" is.
+4. **Exploratory pass.** Become the charter's persona and try to get their real
    task done with the time left. Note friction: confusing labels, missing
    feedback, dead ends, extra steps, surprises.
-4. **Watch the console.** Check console errors after each charter item. An
+5. **Watch the console.** Check console errors after each charter item. An
    uncaught error is a bug even when the UI looks fine.
 
 ## Evidence rules

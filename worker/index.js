@@ -16,6 +16,12 @@
 //   GET    /api/settings               - synced settings document
 //   PUT    /api/settings               - replace settings (optimistic concurrency)
 //   POST   /api/feedback               - allowlisted users: feedback -> GitHub issue
+//   POST   /api/vault/push             - write vault items (last-write-wins per item)
+//   GET    /api/vault/pull?since=N     - vault items with seq > N
+//   HEAD   /api/vault/files/:sha256    - does this PDF exist for the account
+//   GET    /api/vault/files/:sha256    - download a PDF
+//   PUT    /api/vault/files/:sha256    - upload a PDF (body must hash to :sha256)
+//   DELETE /api/vault/files/:sha256    - remove a PDF
 
 import { json, readJson, isSameOrigin, clientIp } from './http.js';
 import {
@@ -29,6 +35,23 @@ import {
 import { createSession, getSession, destroySession, deleteExpiredSessions } from './sessions.js';
 import { SettingsSchema, MAX_SETTINGS_BYTES, getSettings, putSettings } from './settings.js';
 import { submitFeedback, isUserAllowed } from './feedback.js';
+import {
+  MAX_PUSH_BYTES,
+  MAX_PUSH_ITEMS,
+  MAX_FILE_BYTES,
+  MAX_ACCOUNT_FILE_BYTES,
+  FILE_ID,
+  validateItem,
+  pushItems,
+  pullItems,
+  fileKey,
+  hasFile,
+  accountFileBytes,
+  sha256Hex,
+  isPdf,
+  recordFile,
+  forgetFile,
+} from './vault.js';
 
 const MAX_AUTH_BYTES = 16 * 1024;
 const MAX_FEEDBACK_BYTES = 64 * 1024;
@@ -43,6 +66,9 @@ export default {
     }
 
     try {
+      const fileMatch = url.pathname.match(/^\/api\/vault\/files\/([^/]+)$/);
+      if (fileMatch) return await withSession(request, env, (req, e, user) => handleFile(req, e, user, fileMatch[1]));
+
       const route = request.method + ' ' + url.pathname;
       switch (route) {
         case 'POST /api/auth/register/options': return await handleRegisterOptions(request, env);
@@ -56,6 +82,8 @@ export default {
         case 'GET /api/settings': return await withSession(request, env, handleGetSettings);
         case 'PUT /api/settings': return await withSession(request, env, handlePutSettings);
         case 'POST /api/feedback': return await withSession(request, env, handleFeedback);
+        case 'POST /api/vault/push': return await withSession(request, env, handleVaultPush);
+        case 'GET /api/vault/pull': return await withSession(request, env, handleVaultPull);
         default: return json({ error: 'Not found' }, 404);
       }
     } catch (e) {
@@ -191,4 +219,88 @@ async function handleFeedback(request, env, user) {
   if (error) return error;
   const result = await submitFeedback(env, user, body);
   return json(result.body, result.status);
+}
+
+// ── Vault ──
+
+async function handleVaultPush(request, env, user) {
+  const { success } = await env.API_LIMITER.limit({ key: user.id });
+  if (!success) return json({ error: 'Too many requests' }, 429);
+
+  const { body, error } = await readJson(request, MAX_PUSH_BYTES);
+  if (error) return error;
+  const raw = body && body.items;
+  if (!Array.isArray(raw) || raw.length > MAX_PUSH_ITEMS) {
+    return json({ error: `items must be an array of at most ${MAX_PUSH_ITEMS}` }, 400);
+  }
+
+  // One bad item rejects the whole push so the client sees the bug instead of
+  // losing data silently.
+  const items = [];
+  const seen = new Set();
+  for (let i = 0; i < raw.length; i++) {
+    const { item, error: issue } = validateItem(raw[i]);
+    if (issue) return json({ error: 'Invalid item', index: i, issue }, 400);
+    if (seen.has(item.id)) return json({ error: 'Duplicate item id', index: i }, 400);
+    seen.add(item.id);
+    items.push(item);
+  }
+  return json(await pushItems(env.DB, user.id, items));
+}
+
+async function handleVaultPull(request, env, user) {
+  const since = Number(new URL(request.url).searchParams.get('since') || '0');
+  if (!Number.isSafeInteger(since) || since < 0) return json({ error: 'since must be a non-negative integer' }, 400);
+  return json(await pullItems(env.DB, user.id, since));
+}
+
+async function handleFile(request, env, user, fileId) {
+  if (!FILE_ID.test(fileId)) return json({ error: 'File id must be a lowercase SHA-256 hex digest' }, 400);
+  const key = fileKey(user.id, fileId);
+
+  switch (request.method) {
+    case 'HEAD': {
+      const size = await hasFile(env.DB, user.id, fileId);
+      return new Response(null, { status: size === null ? 404 : 200, headers: { 'Cache-Control': 'no-store' } });
+    }
+    case 'GET': {
+      const obj = await env.VAULT_FILES.get(key);
+      if (!obj) return json({ error: 'Not found' }, 404);
+      return new Response(obj.body, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Length': String(obj.size),
+          // Content-addressed and private: safe to keep in the browser cache only.
+          'Cache-Control': 'private, max-age=31536000, immutable',
+        },
+      });
+    }
+    case 'PUT': return handleFileUpload(request, env, user, fileId, key);
+    case 'DELETE': {
+      await env.VAULT_FILES.delete(key);
+      await forgetFile(env.DB, user.id, fileId);
+      return json({ ok: true });
+    }
+    default: return json({ error: 'Method not allowed' }, 405);
+  }
+}
+
+async function handleFileUpload(request, env, user, fileId, key) {
+  const { success } = await env.API_LIMITER.limit({ key: user.id });
+  if (!success) return json({ error: 'Too many requests' }, 429);
+  if ((await hasFile(env.DB, user.id, fileId)) !== null) return json({ ok: true, existed: true });
+
+  const declared = parseInt(request.headers.get('Content-Length') || '0', 10);
+  if (declared > MAX_FILE_BYTES) return json({ error: 'File too large' }, 413);
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.length > MAX_FILE_BYTES) return json({ error: 'File too large' }, 413);
+  if (!isPdf(bytes)) return json({ error: 'Not a PDF' }, 415);
+  if ((await sha256Hex(bytes)) !== fileId) return json({ error: 'Body does not match the SHA-256 in the URL' }, 400);
+
+  const used = await accountFileBytes(env.DB, user.id);
+  if (used + bytes.length > MAX_ACCOUNT_FILE_BYTES) return json({ error: 'Storage quota exceeded' }, 413);
+
+  await env.VAULT_FILES.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
+  await recordFile(env.DB, user.id, fileId, bytes.length);
+  return json({ ok: true, existed: false }, 201);
 }

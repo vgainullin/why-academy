@@ -33,6 +33,10 @@ The platform features four fully implemented interactive lessons spanning physic
 *   *Path:* `rootlock.html`
 *   *Concept:* A keyboard-first, endless quadratic puzzle game. Players discover roots through sum-and-product locks, encoded monic quadratics, signed and repeated roots, and discriminant classification.
 
+### 4. Reader
+*   *Path:* `reader.html`
+*   *Concept:* A PDF reader for papers and textbook chapters, built for iPad and Apple Pencil (the pen writes, fingers scroll and select). Select text or drag a region to highlight, comment, make a flashcard (equations are read into LaTeX by the vision model), queue an "explain this" follow-up, add a todo, or collect a question for journal club. Notes are Markdown plus Pencil ink blocks, linked across papers with `[[Title]]` and to exact passages with `[[@mark]]`; ink converts to LaTeX on demand and SymPy checks each derivation step. The Study view reviews due cards (FSRS) and the explanations waiting to be read. Everything syncs to your passkey account and works offline.
+
 ---
 
 ## Technical Stack

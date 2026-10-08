@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="lib/pages-redirect.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Why Academy — Reader</title>
+  <meta name="description" content="Read papers with Apple Pencil, link notes across them, and turn what you mark into flashcards, follow-ups and explanations.">
+
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="reader.css">
+</head>
+<body class="reader-body">
+  <header class="reader-header">
+    <button id="sidebar-toggle" class="icon-btn" title="Library" aria-label="Toggle library" aria-expanded="true">&#9776;</button>
+    <a href="index.html" class="reader-home">Why Academy</a>
+    <span id="view-title" class="view-title"></span>
+    <span id="sync-status" class="sync-status" role="status"></span>
+    <div id="auth-area">
+      <button id="settings-btn" class="btn-settings" title="Settings">Settings</button>
+      <button id="signin-btn" class="btn-signin hidden">Sign in</button>
+      <button id="signup-btn" class="btn-signin hidden">Create account</button>
+      <div id="user-info" class="hidden">
+        <span id="user-name"></span>
+        <button id="add-passkey-btn" class="btn-signout" title="Register a passkey from another device">Add passkey</button>
+        <button id="signout-btn" class="btn-signout">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="guest-banner" class="guest-banner hidden">
+    <span id="guest-banner-text"></span>
+    <button id="guest-adopt" class="btn-small">Move to my account</button>
+  </div>
+
+  <div class="reader-shell">
+    <aside id="sidebar" class="sidebar">
+      <input id="search" class="search" type="search" placeholder="Search papers, notes, highlights" aria-label="Search">
+      <div id="search-results" class="search-results hidden"></div>
+
+      <button id="open-study" class="study-link">
+        <span class="study-link-title">Study</span>
+        <span id="study-counts" class="study-counts"></span>
+      </button>
+
+      <section class="side-section">
+        <div class="side-head">
+          <h3>Papers</h3>
+          <label class="btn-small">Add PDF<input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden></label>
+        </div>
+        <ul id="doc-list" class="side-list"></ul>
+      </section>
+
+      <section class="side-section">
+        <div class="side-head">
+          <h3>Notes</h3>
+          <button id="new-note" class="btn-small">New note</button>
+        </div>
+        <ul id="note-list" class="side-list"></ul>
+      </section>
+    </aside>
+
+    <main id="main" class="reader-main">
+      <section id="view-empty" class="view view-empty">
+        <div class="drop-zone">
+          <h2>Drop a paper here</h2>
+          <p>Or use <strong>Add PDF</strong>. Mark passages with Apple Pencil, select text for actions, and drag a region around an equation to turn it into a card.</p>
+          <ul class="howto">
+            <li><strong>Pencil</strong> writes, highlights, erases or selects a region, depending on the tool.</li>
+            <li><strong>Fingers</strong> scroll, zoom and select text.</li>
+            <li><strong>Select text</strong> to highlight, comment, make a card, ask for an explanation, or add a follow-up.</li>
+            <li><strong>[[links]]</strong> in notes connect ideas across papers.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="view-doc" class="view hidden">
+        <div class="doc-toolbar" role="toolbar" aria-label="Reading tools">
+          <div class="tool-group" id="tool-group">
+            <button class="tool" data-tool="select" title="Select text (S)">Select</button>
+            <button class="tool" data-tool="pen" title="Pen (P)">Pen</button>
+            <button class="tool" data-tool="highlighter" title="Highlighter (H)">Highlight</button>
+            <button class="tool" data-tool="eraser" title="Eraser (E)">Erase</button>
+            <button class="tool" data-tool="region" title="Region: drag around an equation or figure (R)">Region</button>
+          </div>
+          <div class="tool-group" id="color-group"></div>
+          <div class="tool-group page-indicator">
+            <input id="page-input" type="number" min="1" value="1" aria-label="Page"> <span id="page-count"></span>
+          </div>
+          <div class="tool-group">
+            <button class="icon-btn" id="zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <button class="btn-small" id="zoom-fit" title="Fit width">Fit</button>
+            <button class="icon-btn" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
+          <div class="tool-group tool-group-end">
+            <button class="btn-small" id="open-brief" title="Questions, open points and key equations for presenting">Brief</button>
+            <button class="btn-small" id="toggle-notebook" title="Paper notebook beside the PDF">Notebook</button>
+            <button class="btn-small" id="toggle-panel" title="Marks, tasks and linked notes">Marks</button>
+          </div>
+        </div>
+        <div class="doc-split">
+          <div id="pdf-scroll" class="pdf-scroll"></div>
+          <div id="doc-notebook" class="doc-notebook hidden"></div>
+        </div>
+      </section>
+
+      <section id="view-note" class="view view-note hidden">
+        <div class="note-toolbar" role="toolbar" aria-label="Notebook tools">
+          <div class="tool-group" id="note-tool-group">
+            <button class="tool" data-tool="pen" title="Pen">Pen</button>
+            <button class="tool" data-tool="highlighter" title="Highlighter">Highlight</button>
+            <button class="tool" data-tool="eraser" title="Eraser">Erase</button>
+          </div>
+          <div class="tool-group" id="note-color-group"></div>
+          <div class="tool-group tool-group-end">
+            <button class="btn-small" id="delete-note">Delete note</button>
+          </div>
+        </div>
+        <div id="note-root" class="note-root"></div>
+      </section>
+
+      <section id="view-study" class="view view-study hidden"></section>
+      <section id="view-brief" class="view view-brief hidden"></section>
+    </main>
+
+    <aside id="panel" class="panel hidden" aria-label="Marks and links"></aside>
+  </div>
+
+  <div id="action-bar" class="action-bar hidden" role="toolbar" aria-label="Actions for selection"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div id="drop-overlay" class="drop-overlay hidden">Drop PDF to add it</div>
+
+  <dialog id="dialog" class="dialog"></dialog>
+
+  <div id="pyodide-status" class="hidden" role="status" aria-live="polite">
+    <div class="loader-row">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="loader-label">Loading Python environment…</span>
+      <span class="loader-pct">0%</span>
+    </div>
+    <div class="loader-bar"><div class="loader-bar-fill"></div></div>
+    <div class="loader-sub"></div>
+  </div>
+
+  <div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-modal-backdrop"></div>
+    <div class="settings-modal-panel" role="dialog" aria-labelledby="settings-title">
+      <h3 id="settings-title">Settings</h3>
+      <p class="settings-section-label">AI backend (handwriting, equations, explanations)</p>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="lmstudio">
+        <span>LM Studio (local)</span>
+      </label>
+      <label class="settings-radio">
+        <input type="radio" name="handwrite-backend" value="openrouter">
+        <span>OpenRouter (cloud, requires API key)</span>
+      </label>
+
+      <div id="settings-lmstudio" class="settings-group">
+        <label>
+          Endpoint
+          <input type="text" id="settings-lmstudio-endpoint" placeholder="http://localhost:1234/v1/chat/completions">
+        </label>
+        <label>
+          Model
+          <input type="text" id="settings-lmstudio-model" placeholder="qwen2-vl-7b-instruct">
+        </label>
+      </div>
+
+      <div id="settings-openrouter" class="settings-group">
+        <label>
+          API key
+          <input type="password" id="settings-openrouter-key" placeholder="sk-or-...">
+        </label>
+        <label>
+          Model
+          <select id="settings-openrouter-model-select"></select>
+        </label>
+        <label id="settings-openrouter-model-custom-label" class="hidden">
+          Custom model id
+          <input type="text" id="settings-openrouter-model" placeholder="provider/model-id">
+        </label>
+        <p class="settings-hint">Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. The key is stored only in your browser's localStorage and sent directly to OpenRouter.</p>
+      </div>
+
+      <div class="settings-actions">
+        <button id="settings-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="settings-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="lib/sync.js"></script>
+  <script src="lib/auth.js"></script>
+  <script src="lib/shared-core.js"></script>
+  <script type="module" src="reader.js"></script>
+</body>
+</html>

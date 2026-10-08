@@ -241,7 +241,7 @@ function inkAdded(docId, page, stroke) {
   });
 }
 
-function inkErased(docId, page, ids, label = 'Erase') {
+function inkErased(docId, page, ids, label = 'Erase', gesture) {
   let removed = [];
   const done = saveInk(docId, page, d => {
     const gone = new Set(ids);
@@ -250,6 +250,7 @@ function inkErased(docId, page, ids, label = 'Erase') {
   });
   undoHistory.push({
     label,
+    gesture,
     undo: () => {
       const back = revive(removed);
       return saveInk(docId, page, d => d.strokes.push(...back));
@@ -299,12 +300,12 @@ function trackedUpdate(id, patch) {
   return trackedPut(it.kind, id, { ...it.data, ...patch });
 }
 
-async function trackedRemove(id) {
+async function trackedRemove(id, gesture) {
   const it = store.get(id);
   if (!it) return;
   const prev = structuredClone(it.data);
   await store.remove(id);
-  undoHistory.push({ label: 'Delete', undo: () => store.put(it.kind, id, prev), redo: () => store.remove(id) });
+  undoHistory.push({ label: gesture ? 'Erase' : 'Delete', gesture, undo: () => store.put(it.kind, id, prev), redo: () => store.remove(id) });
 }
 
 async function undo() {
@@ -336,7 +337,7 @@ undoHistory.addEventListener('change', renderUndoButtons);
 // explicit action on the mark.
 const erasingMarks = new Set();
 let eraseWarned = 0;
-function eraseMark(a) {
+function eraseMark(a, gesture) {
   if (erasingMarks.has(a.id) || !store.get(a.id)) return;
   const linked = (itemsByAnno().get(a.id) || []).length;
   if (linked || a.data.comment || a.data.status) {
@@ -348,7 +349,7 @@ function eraseMark(a) {
     return;
   }
   erasingMarks.add(a.id);
-  trackedRemove(a.id).catch(e => reportError('Erasing the highlight failed', e)).finally(() => erasingMarks.delete(a.id));
+  trackedRemove(a.id, gesture).catch(e => reportError('Erasing the highlight failed', e)).finally(() => erasingMarks.delete(a.id));
 }
 
 function setTool(tool) {
@@ -888,9 +889,9 @@ async function openDoc(docId, page, annoId, query) {
     const view = new PdfView(scroll, {
       getTool,
       onInkAdd: (p, stroke) => inkAdded(docId, p, stroke),
-      onInkErase: (p, ids) => inkErased(docId, p, ids),
+      onInkErase: (p, ids, gesture) => inkErased(docId, p, ids, 'Erase', gesture),
       onInkTransform: (p, before, after) => inkReplaced(docId, p, before, after),
-      onEraseMark: a => eraseMark(a),
+      onEraseMark: (a, gesture) => eraseMark(a, gesture),
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
     });
     state.pdf = view;
@@ -980,6 +981,8 @@ function refreshDocOverlays() {
     let marker = labels.map(l => l[0]).join('');
     if (a.data.status === 'unclear') marker = '?' + marker;
     if (a.data.brief) marker += 'B';
+    // Regions have no text to tap: a small tag shows they are marks.
+    if (!marker && a.data.type === 'region') marker = 'Eq';
     const markerTitle = [
       a.data.status === 'unclear' ? 'Not understood yet' : a.data.status === 'understood' ? 'Understood' : '',
       ...details,
@@ -2686,6 +2689,8 @@ function briefMarkdown(docId) {
 
 // The "In plain terms" part of an explanation, as one line of text.
 function plainGist(md) {
+  const one = md.match(/in one sentence\**\s*[-:\u2013\u2014]?\s*(.+)/i);
+  if (one) return one[1].replace(/[*#>`]/g, '').trim();
   const m = md.match(/in plain terms\**\s*[-:\u2013\u2014]?\s*([\s\S]*?)(?:\n\s*\n|\n\s*\d+\.|$)/i);
   // Underscores stay: they are subscripts inside $...$ math.
   const text = (m ? m[1] : md).replace(/\$\$[\s\S]*?\$\$/g, '').replace(/[*#>`]/g, '').replace(/\s+/g, ' ').trim();
@@ -2978,6 +2983,14 @@ function wire() {
 
   addEventListener('keydown', e => {
     if (e.target.closest('input, textarea, [contenteditable], dialog')) return;
+    // Cmd/Ctrl +, - and 0 zoom the paper rather than the whole page.
+    if ((e.metaKey || e.ctrlKey) && state.view === 'doc' && state.pdf && ['=', '+', '-', '0'].includes(e.key)) {
+      e.preventDefault();
+      const v = state.pdf;
+      if (e.key === '0') v.setZoom(1, true);
+      else v.setZoom(v.zoom * (e.key === '-' ? 0.8 : 1.25), v.fitWidth);
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'f' && state.view === 'doc') {
       e.preventDefault();
       setPanel(true, 'contents');

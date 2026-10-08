@@ -1055,6 +1055,58 @@ try {
   const authorsNow = await page.evaluate(async id => (await __wa.serverItems('doc')).find(d => d.id === id)?.data.authors, docId);
   check('edited authors show in the Brief', (await page.textContent('.brief-body')).includes('A. Tester and B. Reader'), `server authors "${authorsNow}", brief starts "${(await page.textContent('.brief-body')).slice(0, 120)}"`);
 
+  // One eraser pass over ink and a highlight is one undo step
+  await page.goto(B + '/reader#doc=' + docId + '&p=3');
+  await page.waitForSelector('.pdf-page[data-page="3"] .textLayer span');
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(3, 'the weights stay spread out'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  await wait(300);
+  const band = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.pdf-page[data-page="3"] .anno-highlight')].pop();
+    const r = el.getBoundingClientRect(), p = el.closest('.pdf-page').getBoundingClientRect();
+    return { x0: (r.left - p.left + 3) / p.width, x1: (r.right - p.left - 3) / p.width, y: (r.top + r.height / 2 - p.top) / p.height };
+  });
+  await page.click('.tool[data-tool="highlighter"]');
+  await page.evaluate(b => __wa.penOnPage(3, b.x0, b.x1, b.y + 0.004), band);
+  await wait(400);
+  const count3 = () => page.evaluate(() => ({
+    marks: document.querySelectorAll('.pdf-page[data-page="3"] .anno-highlight').length,
+  }));
+  const inkOn3 = () => page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 3)?.data.strokes.length || 0);
+  const em0 = (await count3()).marks;
+  await wait(2500);
+  const ei0 = await inkOn3();
+  await page.click('.tool[data-tool="eraser"]');
+  await page.evaluate(b => __wa.penOnPage(3, b.x0, b.x1, b.y), band);
+  await wait(2500);
+  const em1 = (await count3()).marks, ei1 = await inkOn3();
+  await page.click('[data-history="undo"]:not([disabled]) >> nth=0');
+  await wait(2500);
+  const em2 = (await count3()).marks, ei2 = await inkOn3();
+  check('one eraser pass undoes in one step', em1 === em0 - 1 && ei1 === ei0 - 1 && em2 === em0 && ei2 === ei0, `marks ${em0}->${em1}->${em2}, ink ${ei0}->${ei1}->${ei2}`);
+  await page.click('.tool[data-tool="select"]');
+
+  // Cmd + zooms the paper
+  await page.keyboard.press('Meta+=');
+  await wait(600);
+  check('Cmd + zooms the paper', /^\d+%$/.test(await page.textContent('#zoom-fit')), await page.textContent('#zoom-fit'));
+  await page.keyboard.press('Meta+0');
+
+  // SymPy flags a single false line (runs real Pyodide + SymPy)
+  await page.click('#toggle-notebook');
+  await page.waitForSelector('#doc-notebook .note-add');
+  await page.click('#doc-notebook [data-add="ink"]');
+  await page.locator('#doc-notebook [data-ink="edit"]').last().click();
+  await page.locator('#doc-notebook .latex-editor textarea').last().fill('2 + 2 = 5');
+  await page.locator('#doc-notebook [data-ed="save"]').last().click();
+  await page.locator('#doc-notebook [data-ink="check"]').last().click();
+  await page.waitForFunction(() => /false|equivalent|one line|SymPy did not load/i.test([...document.querySelectorAll('#doc-notebook .ink-status')].pop()?.textContent || '') && !/Loading/.test([...document.querySelectorAll('#doc-notebook .ink-status')].pop().textContent), null, { timeout: 180000 });
+  const sym = await page.locator('#doc-notebook .ink-status').last().textContent();
+  check('SymPy flags a false single line', /false/i.test(sym), sym);
+  await page.click('#toggle-notebook');
+
   // Deleting a note moves it to Recently deleted
   await newNote();
   await page.fill('#note-root .note-title', 'Note to bin');

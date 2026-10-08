@@ -75,7 +75,12 @@
     },
     // Pencil stroke inside a notebook ink pad (nth pad on screen, 0-based).
     // pointerType 'touch' makes it a finger, which must not draw.
-    penInPad(n = 0, fracPoints = [[0.1, 0.3], [0.3, 0.4], [0.5, 0.3], [0.7, 0.45]], pointerType = 'pen') {
+    penInPad(n = 0, fracPoints, pointerType = 'pen') {
+      if (typeof fracPoints === 'string') {
+        pointerType = fracPoints;
+        fracPoints = undefined;
+      }
+      fracPoints = fracPoints || [[0.1, 0.3], [0.3, 0.4], [0.5, 0.3], [0.7, 0.45]];
       const pad = document.querySelectorAll('.ink-pad')[n];
       if (!pad) throw new Error('No ink pad #' + n);
       const r = pad.getBoundingClientRect();

@@ -164,6 +164,12 @@ function navigate(hash) {
 async function route() {
   const r = parseHash();
   hideActions();
+  // A dialog belongs to the view it was opened in.
+  const dlg = $('#dialog');
+  if (dlg.open) dlg.close('cancel');
+  if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !store.get(r.id) && !pendingNotes.has(r.id)) {
+    toast(r.view === 'note' ? 'That note no longer exists' : 'That paper is not in your library', true);
+  }
   if (r.view === 'doc' && store.get(r.id)) {
     await openDoc(r.id, r.page, r.anno);
   } else if (r.view === 'note' && (store.get(r.id) || pendingNotes.has(r.id))) {
@@ -266,7 +272,9 @@ function search(q) {
     else continue;
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) continue;
-    const title = it.kind === 'doc' || it.kind === 'note' ? it.data.title || 'Untitled' : snippet(text.slice(Math.max(0, at - 30)), 90);
+    let from = Math.max(0, at - 30);
+    while (from > 0 && /\S/.test(text[from - 1])) from--;
+    const title = it.kind === 'doc' || it.kind === 'note' ? it.data.title || 'Untitled' : (from > 0 ? '\u2026' : '') + snippet(text.slice(from), 90);
     hits.push({ label, href, title, rank: it.kind === 'doc' || it.kind === 'note' ? 0 : 1 });
   }
   hits.sort((a, b) => a.rank - b.rank);
@@ -642,20 +650,53 @@ function hideActions() {
   state.target = null;
 }
 
-async function ensureAnno(target) {
-  if (target.kind === 'anno') return target.anno;
-  const anno = await store.create('anno', {
-    docId: state.docId,
-    page: target.page,
-    type: target.kind === 'region' ? 'region' : 'highlight',
-    rects: target.rects,
-    quote: target.quote || '',
-    color: target.kind === 'region' ? '#2563eb' : state.tool.hlColor,
-  });
+// The mark an action applies to. Marks from a fresh selection or region are
+// saved only when the action completes, so a cancelled dialog or a failed AI
+// call leaves nothing behind. Returns { anno, saved }.
+function pendingAnno(target) {
+  if (target.kind === 'anno') return { anno: target.anno, saved: true };
+  const type = target.kind === 'region' ? 'region' : 'highlight';
+  if (type === 'region') {
+    // Dragging around an equation that is already marked reuses that mark.
+    const same = store.forDoc(state.docId, 'anno').find(a => a.data.type === 'region'
+      && a.data.page === target.page && overlap(a.data.rects[0], target.rects[0]) > 0.6);
+    if (same) return { anno: same, saved: true };
+  }
+  return {
+    saved: false,
+    anno: {
+      id: newId(),
+      kind: 'anno',
+      data: {
+        docId: state.docId,
+        page: target.page,
+        type,
+        rects: target.rects,
+        quote: target.quote || '',
+        color: type === 'region' ? '#2563eb' : state.tool.hlColor,
+      },
+    },
+  };
+}
+
+// Intersection over union of two [x, y, w, h] rects.
+function overlap([ax, ay, aw, ah], [bx, by, bw, bh]) {
+  const iw = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
+  const ih = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
+  const inter = iw * ih;
+  return inter / (aw * ah + bw * bh - inter || 1);
+}
+
+// Saves the mark (with any extra fields) and returns the stored item.
+async function commitAnno(p, patch = {}) {
+  if (p.saved) {
+    if (Object.keys(patch).length) await store.update(p.anno.id, patch);
+    return store.get(p.anno.id);
+  }
+  p.anno = await store.put('anno', p.anno.id, { ...p.anno.data, ...patch });
+  p.saved = true;
   window.getSelection().removeAllRanges();
-  // Later actions on the same bar apply to this annotation.
-  state.target = { kind: 'anno', anno, anchor: target.anchor };
-  return anno;
+  return p.anno;
 }
 
 function docTitle() {
@@ -669,11 +710,6 @@ async function runAction(act) {
   const page = target.page || (target.anno && target.anno.data.page);
   const isRegion = target.kind === 'region' || (target.anno && target.anno.data.type === 'region');
 
-  if (act === 'highlight') {
-    await ensureAnno(target);
-    hideActions();
-    return;
-  }
   if (act === 'delete') {
     const a = target.anno;
     const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
@@ -683,17 +719,22 @@ async function runAction(act) {
     return;
   }
 
-  const anno = await ensureAnno(target);
+  const p = pendingAnno(target);
   hideActions();
-  const quote = anno.data.quote;
+  const quote = p.anno.data.quote;
+  const regionLatex = async () => p.anno.data.latex
+    || equationToLatex(await state.pdf.regionImage(page, p.anno.data.rects[0]));
 
-  if (act === 'unclear' || act === 'understood') {
-    await store.update(anno.id, { status: act });
+  if (act === 'highlight') {
+    await commitAnno(p);
+  } else if (act === 'unclear' || act === 'understood') {
+    await commitAnno(p, { status: act });
     toast(act === 'unclear' ? 'Marked as not clear yet: it is listed in the Brief and the Marks panel' : 'Marked as understood');
   } else if (act === 'comment') {
-    const text = await promptDialog('Comment', anno.data.comment || '', { multiline: true, placeholder: 'Margin note for this passage', context: quote });
-    if (text !== null) await store.update(anno.id, { comment: text });
+    const text = await promptDialog('Comment', p.anno.data.comment || '', { multiline: true, placeholder: 'Margin note for this passage', context: quote });
+    if (text !== null) await commitAnno(p, { comment: text });
   } else if (act === 'link') {
+    const anno = await commitAnno(p);
     const link = `[[@${anno.id}]]`;
     try {
       await navigator.clipboard.writeText(link);
@@ -702,22 +743,23 @@ async function runAction(act) {
       await promptDialog('Copy this link into a note', link);
     }
   } else if (act === 'notebook') {
+    const anno = await commitAnno(p);
     const ed = await notebookTarget();
     ed.appendMarkdown(`> ${quote.replace(/\n/g, ' ')}\n> [[@${anno.id}|p. ${page}]]\n\n`);
   } else if (act === 'latex') {
     toast('Reading the equation...');
-    const latex = await equationToLatex(await state.pdf.regionImage(page, anno.data.rects[0]));
-    await store.update(anno.id, { latex });
+    const latex = await regionLatex();
+    const anno = await commitAnno(p, { latex });
     const ed = await notebookTarget();
     ed.appendMarkdown(`$$${latex}$$\n[[@${anno.id}|p. ${page}]]\n\n`);
   } else if (act === 'card' || act === 'eqcard') {
-    await cardDialog(anno, act === 'eqcard' || isRegion);
+    await cardDialog(p, act === 'eqcard' || isRegion);
   } else if (act === 'explain') {
-    await createExplainTask(anno, isRegion);
+    await createExplainTask(await commitAnno(p), isRegion);
   } else if (act === 'derive') {
     toast('Reading the equation...');
-    const latex = anno.data.latex || await equationToLatex(await state.pdf.regionImage(page, anno.data.rects[0]));
-    if (!anno.data.latex) await store.update(anno.id, { latex });
+    const latex = await regionLatex();
+    const anno = await commitAnno(p, { latex });
     await store.create('task', { text: `Re-derive: $${latex}$`, type: 'derive', status: 'open', docId: state.docId, annoId: anno.id });
     const ed = await notebookTarget();
     ed.draft.blocks.push(
@@ -734,7 +776,10 @@ async function runAction(act) {
       context: quote || `Region on p. ${page}`,
       placeholder: act === 'question' ? 'What do you want to ask or discuss?' : '',
     });
-    if (text) await store.create('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
+    if (text) {
+      const anno = await commitAnno(p);
+      await store.create('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
+    }
   }
 }
 
@@ -830,7 +875,9 @@ function promptDialog(title, value = '', opts = {}) {
   });
 }
 
-async function cardDialog(anno, fromEquation) {
+// p: { anno, saved } from pendingAnno. The mark is saved with the card.
+async function cardDialog(p, fromEquation) {
+  const anno = p.anno;
   const dlg = $('#dialog');
   dlg.innerHTML = `<form method="dialog" class="dialog-form card-form">
       <h3>New card</h3>
@@ -862,13 +909,14 @@ async function cardDialog(anno, fromEquation) {
   preview();
 
   const draft = async () => {
+    status.classList.remove('error');
     status.textContent = 'Drafting...';
     try {
       if (fromEquation && !latex) {
         status.textContent = 'Reading the equation...';
         latex = await equationToLatex(await withPaper(anno.data.docId, v => v.regionImage(anno.data.page, anno.data.rects[0])));
-        await store.update(anno.id, { latex });
         if (!back.value.trim()) back.value = `$$${latex}$$`;
+        preview();
         status.textContent = 'Drafting...';
       }
       const context = await withPaper(anno.data.docId, v => v.contextFor(anno.data.page, anno.data.quote, 3000));
@@ -886,21 +934,27 @@ async function cardDialog(anno, fromEquation) {
   };
   dlg.querySelector('[data-draft]').addEventListener('click', draft);
 
+  // Saving with an empty front keeps the editor open instead of losing the draft.
+  dlg.querySelector('form').addEventListener('submit', e => {
+    if (e.submitter && e.submitter.value === 'ok' && !front.value.trim()) {
+      e.preventDefault();
+      status.textContent = 'Write a question on the front first.';
+      status.classList.add('error');
+      front.focus();
+    }
+  });
   const done = new Promise(resolve => { dlg.onclose = resolve; });
   dlg.showModal();
   if (fromEquation) draft();
   else front.focus();
   await done;
   if (dlg.returnValue !== 'ok') return;
-  if (!front.value.trim()) {
-    toast('Card not saved: the front is empty', true);
-    return;
-  }
+  const saved = await commitAnno(p, latex && latex !== anno.data.latex ? { latex } : {});
   await store.create('card', {
     front: front.value.trim(),
     back: back.value.trim(),
-    docId: anno.data.docId,
-    annoId: anno.id,
+    docId: saved.data.docId,
+    annoId: saved.id,
     srs: newSrs(),
   });
   toast('Card saved');
@@ -925,6 +979,7 @@ function renderPanel() {
   const show = state.panelOpen && (state.view === 'doc' || state.view === 'note');
   panel.classList.toggle('hidden', !show);
   $('#toggle-panel').classList.toggle('active', state.panelOpen);
+  $('#toggle-note-panel').classList.toggle('active', state.panelOpen);
   if (!show) return;
   if (state.view === 'doc') renderDocPanel(panel);
   else renderNotePanel(panel);
@@ -1140,9 +1195,8 @@ function explanationCard(t) {
         toast('Saved as a note. The explanation stays here until you mark it understood.');
       } else if (act === 'card') {
         if (!a) throw new Error('The marked passage was deleted');
-        await cardDialog(a, a.data.type === 'region');
+        await cardDialog({ anno: a, saved: true }, a.data.type === 'region');
       } else if (act === 'again') {
-        await store.update(t.id, { status: 'open' });
         toast('Writing a new explanation...');
         generateExplanation(t.id);
       }
@@ -1209,9 +1263,12 @@ function renderReview(root) {
         ${dueNow.length ? `<button class="btn btn-primary" id="review-more">Keep going (${dueNow.length} due)</button>` : ''}
         <button class="btn btn-secondary" id="review-back">Back to Study</button>
       </div></section></div>`;
+    const lastWait = soon.length ? Math.ceil((soon[soon.length - 1].data.srs.due - now) / 60000) : 0;
     root.querySelector('.review-next').textContent = dueNow.length
-      ? `${dueNow.length} card(s) came due again while you reviewed.`
-      : soon.length ? `${soon.length} card(s) come back within ${wait} min.` : 'No more cards due.';
+      ? `${dueNow.length} card${dueNow.length === 1 ? '' : 's'} came due again while you reviewed.`
+      : soon.length === 1 ? `Next card back in ${wait} min.`
+      : soon.length ? `Next card back in ${wait} min; ${soon.length} back within ${lastWait} min.`
+      : 'No more cards due.';
     root.querySelector('#review-back').addEventListener('click', () => {
       state.review = null;
       renderStudy();
@@ -1331,11 +1388,20 @@ function briefMarkdown(docId) {
 
   const nb = paperNotebook(docId);
   const nbText = nb ? nb.data.blocks.filter(b => b.type === 'md').map(b => b.text.trim()).filter(Boolean) : [];
-  if (nbText.length) out.push('', '## From the notebook', '', ...nbText);
+  if (nbText.length) out.push('', '## From the notebook', '', nbText.join('\n\n'));
 
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   out.push('', `---`, `${plural(cards.length, 'card')}, ${plural(annos.length, 'mark')}.`);
   return out.join('\n');
+}
+
+function plainLinks(md) {
+  return md.replace(/\[\[([^\[\]|]+?)(?:\|([^\[\]]*))?\]\]/g, (m, target, label) => {
+    if (label) return label;
+    if (!target.startsWith('@')) return target;
+    const a = store.get(target.slice(1));
+    return a ? `p. ${a.data.page}` : '';
+  });
 }
 
 function renderBrief(docId) {
@@ -1361,7 +1427,8 @@ function renderBrief(docId) {
   root.querySelector('#brief-print').addEventListener('click', () => print());
   root.querySelector('#brief-copy').addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(md);
+      // Wikilinks mean nothing outside the app: copy their labels as text.
+      await navigator.clipboard.writeText(plainLinks(md));
       toast('Brief copied as Markdown');
     } catch (e) {
       reportError('Copy failed', e);
@@ -1398,9 +1465,12 @@ store.addEventListener('change', e => {
   if (e.detail.remote && state.view === 'empty') route();
 });
 
+const SYNC_SHORT = { synced: 'Synced', syncing: 'Syncing', offline: 'Offline', error: 'Sync error', local: 'This device', 'signed-out': 'Signed out' };
 store.addEventListener('status', e => {
   const el = $('#sync-status');
-  el.textContent = e.detail.message;
+  el.innerHTML = '<span class="sync-long"></span><span class="sync-short"></span>';
+  el.querySelector('.sync-long').textContent = e.detail.message;
+  el.querySelector('.sync-short').textContent = SYNC_SHORT[e.detail.state] || e.detail.state;
   el.title = e.detail.message;
   el.dataset.state = e.detail.state;
 });
@@ -1433,6 +1503,7 @@ function wire() {
   $('#zoom-fit').addEventListener('click', () => state.pdf && state.pdf.setZoom(1, true));
   $('#page-input').addEventListener('change', e => state.pdf && state.pdf.goTo(+e.target.value));
   $('#toggle-panel').addEventListener('click', () => setPanel(!state.panelOpen));
+  $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
   $('#open-brief').addEventListener('click', () => state.docId && navigate('#brief=' + state.docId));
   // Close the color menus on any outside tap.
   document.addEventListener('click', () => {

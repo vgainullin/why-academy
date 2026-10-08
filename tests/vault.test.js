@@ -325,3 +325,19 @@ describe('equation LaTeX tidy-up', async () => {
     assert.equal(tidyLatex(good), good);
   });
 });
+
+describe('card draft parsing', async () => {
+  const { parseCardReply } = await import('../lib/vault/ai.js');
+
+  test('reads FRONT/BACK sections with raw LaTeX', () => {
+    const card = parseCardReply('FRONT:\nWhat is $\\frac{\\partial s_i}{\\partial z_j}$?\nBACK:\n$s_i(\\delta_{ij} - s_j)$');
+    assert.equal(card.front, 'What is $\\frac{\\partial s_i}{\\partial z_j}$?');
+    assert.equal(card.back, '$s_i(\\delta_{ij} - s_j)$');
+  });
+
+  test('accepts valid JSON and rejects junk', () => {
+    assert.deepEqual(parseCardReply('{"front": "Q", "back": "A"}'), { front: 'Q', back: 'A' });
+    assert.throws(() => parseCardReply('{"front": "\\delta bad"}'));
+    assert.throws(() => parseCardReply('Sure, here is a card about softmax.'));
+  });
+});

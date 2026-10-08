@@ -592,7 +592,6 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
     z-index: 30;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
   }
-  .doc-notebook { width: 50%; }
   #add-passkey-btn { display: none; }
 }
 @media (max-width: 600px) {
@@ -718,19 +717,19 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
   .swatch-menu { position: fixed; top: auto; left: auto; margin-top: 44px; }
 }
 @media (max-width: 900px) {
-  .sync-status {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    font-size: 0;
-    overflow: hidden;
-    flex: none;
-    background: #86efac;
-  }
-  .sync-status[data-state="syncing"] { background: #fde68a; }
-  .sync-status[data-state="error"] { background: #fca5a5; }
-  .sync-status[data-state="offline"],
-  .sync-status[data-state="signed-out"],
-  .sync-status[data-state="local"] { background: #fbbf24; }
+  /* The notebook stacks under the page in portrait so equations stay readable. */
+  .doc-split { flex-direction: column; }
+  .doc-notebook { width: 100%; height: 45%; border-left: none; border-top: 1px solid var(--border); }
+}
+.sync-short { display: none; }
+@media (max-width: 1000px) {
+  .sync-long { display: none; }
+  .sync-short { display: inline; }
+  .sync-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; }
+  .sync-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #86efac; }
+  .sync-status[data-state="syncing"]::before { background: #fde68a; }
+  .sync-status[data-state="error"]::before { background: #fca5a5; border-radius: 1px; }
+  .sync-status[data-state="offline"]::before,
+  .sync-status[data-state="signed-out"]::before,
+  .sync-status[data-state="local"]::before { background: transparent; border: 2px solid #fbbf24; width: 6px; height: 6px; }
 }

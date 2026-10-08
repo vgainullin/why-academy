@@ -29,6 +29,7 @@ import { INK_COLORS, HIGHLIGHT_COLORS } from './lib/vault/ink.js';
 import { explainPassage, equationToLatex, draftCard } from './lib/vault/ai.js';
 import { newSrs, previewReview, GRADES } from './lib/vault/srs.js';
 import { History } from './lib/vault/history.js';
+import { exportAnnotatedPdf, deliverPdf } from './lib/vault/export.js';
 
 const $ = sel => document.querySelector(sel);
 const C = window.WhyCommon;
@@ -152,13 +153,24 @@ function relativeTime(t) {
 // ── Toast ──
 
 let toastTimer = null;
-function toast(msg, isError) {
+// action: optional { label, run } shown as a button in the toast.
+function toast(msg, isError, action) {
   const el = $('#toast');
   el.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-action';
+    b.textContent = action.label;
+    b.addEventListener('click', () => {
+      el.classList.add('hidden');
+      Promise.resolve(action.run()).catch(e => reportError(action.label + ' failed', e));
+    });
+    el.append(' ', b);
+  }
   el.classList.toggle('error', !!isError);
   el.classList.remove('hidden');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), isError ? 7000 : 3500);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), action ? 8000 : isError ? 7000 : 3500);
 }
 
 function reportError(context, e) {
@@ -179,6 +191,7 @@ function getTool() {
 function getInkTool() {
   const t = getTool();
   if (t.tool === 'select' || t.tool === 'region') return { tool: 'pen', color: state.tool.color, width: PEN_WIDTHS[state.tool.size].pen };
+  // lasso, pen, highlighter and eraser work on pads as on pages.
   return t;
 }
 
@@ -223,6 +236,28 @@ function inkErased(docId, page, ids, label = 'Erase') {
     redo: () => saveInk(docId, page, d => removeStrokes(d, removed.map(s => s.id))),
   });
   return done;
+}
+
+// Lasso move/resize: the old strokes are replaced by new ones. Undo and redo
+// swap them back and forth, each time under fresh ids.
+function inkReplaced(docId, page, before, after) {
+  let shown = after;
+  let hidden = before;
+  saveInk(docId, page, d => {
+    removeStrokes(d, before.map(s => s.id));
+    d.strokes.push(...after);
+  });
+  const swap = () => {
+    const fresh = hidden.map(s => ({ ...s, id: newId() }));
+    const gone = shown.map(s => s.id);
+    hidden = shown;
+    shown = fresh;
+    return saveInk(docId, page, d => {
+      removeStrokes(d, gone);
+      d.strokes.push(...fresh);
+    });
+  };
+  undoHistory.push({ label: 'Move ink', undo: swap, redo: swap });
 }
 
 // Vault writes that can be undone.
@@ -308,6 +343,8 @@ function setTool(tool) {
   });
   document.body.dataset.tool = tool;
   $('#clear-page').classList.toggle('hidden', tool !== 'eraser');
+  // Switching tools ends a lasso selection.
+  window.dispatchEvent(new Event('ink-tool-change'));
   renderColors();
 }
 
@@ -394,9 +431,24 @@ async function route() {
   if (dlg.open) dlg.close('cancel');
   const exists = id => (r.view === 'note' ? store.get(id) || pendingNotes.has(id) || noteBackup(id) : liveDoc(id));
   if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !exists(r.id)) {
-    toast(r.view === 'note' ? 'That note was empty or has been deleted'
-      : isTrashed(store.get(r.id)) ? 'That paper is in Recently deleted; restore it from the library'
-      : 'That paper is not in your library', r.view !== 'note');
+    const trashedDoc = r.view !== 'note' && isTrashed(store.get(r.id)) ? store.get(r.id) : null;
+    if (trashedDoc) {
+      const target = location.hash;
+      toast('That paper is in Recently deleted.', false, {
+        label: 'Restore',
+        run: async () => {
+          await trackedUpdate(trashedDoc.id, { trashedAt: undefined });
+          navigate(target);
+        },
+      });
+    } else {
+      toast(r.view === 'note' ? 'That note was empty or has been deleted' : 'That paper is not in your library', r.view !== 'note');
+    }
+    // From inside the app: stay where you were. On a fresh load: resume.
+    if (state.routedHash) {
+      history.replaceState(null, '', state.routedHash);
+      return;
+    }
     const last = localStorage.getItem('reader.last');
     const lr = last && new URLSearchParams(last.slice(1));
     const lastId = lr && (lr.get('doc') || lr.get('note'));
@@ -423,6 +475,7 @@ async function route() {
   } else {
     showView('empty');
   }
+  state.routedHash = location.hash || '#';
   // Only saved items: an unsaved new note is no place to resume.
   if ((r.view === 'doc' || r.view === 'note') && store.get(r.id)) {
     try {
@@ -808,6 +861,7 @@ async function openDoc(docId, page, annoId, query) {
       getTool,
       onInkAdd: (p, stroke) => inkAdded(docId, p, stroke),
       onInkErase: (p, ids) => inkErased(docId, p, ids),
+      onInkTransform: (p, before, after) => inkReplaced(docId, p, before, after),
       onEraseMark: a => eraseMark(a),
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
     });
@@ -897,6 +951,7 @@ function refreshDocOverlays() {
     return { ...a, marker, markerTitle };
   });
   state.pdf.setAnnos(annos);
+  state.pdf.setBookmarks(pageBookmarks(state.docId).map(b => b.page));
   for (const ink of store.forDoc(state.docId, 'ink')) state.pdf.setInk(ink.data.page, ink.data.strokes);
 }
 
@@ -977,6 +1032,20 @@ function renderTrash(trashed) {
   }
 }
 
+// The paper as a PDF with its ink, highlights and regions drawn in.
+async function exportPaper(docId) {
+  const doc = store.get(docId);
+  toast('Preparing the annotated PDF...');
+  const bytes = await store.getFile(docId);
+  const out = await withPaper(docId, view => exportAnnotatedPdf(bytes, view, {
+    annos: store.forDoc(docId, 'anno'),
+    inks: store.forDoc(docId, 'ink'),
+  }));
+  const name = (doc.data.title || 'paper').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 120).trim() + ' (annotated).pdf';
+  const how = await deliverPdf(out, name);
+  if (how === 'downloaded') toast('Annotated PDF downloaded');
+}
+
 // Rename a paper, or remove it with its marks and ink. Cards, tasks and notes
 // are study material and stay.
 async function paperDialog(docId) {
@@ -987,6 +1056,7 @@ async function paperDialog(docId) {
       <h3>Paper</h3>
       <label>Title <input type="text" name="title" maxlength="500"></label>
       <p class="muted paper-meta"></p>
+      <button type="button" class="btn btn-secondary" data-export>Export with annotations</button>
       <div class="dialog-actions">
         <button value="remove" class="btn btn-secondary danger">Remove paper</button>
         <span class="spacer"></span>
@@ -998,6 +1068,10 @@ async function paperDialog(docId) {
   title.value = doc.data.title;
   const marks = store.forDoc(docId, 'anno').length;
   dlg.querySelector('[value="remove"]').textContent = 'Move to Recently deleted';
+  dlg.querySelector('[data-export]').addEventListener('click', () => {
+    dlg.close('cancel');
+    exportPaper(docId).catch(e => reportError('Export failed', e));
+  });
   dlg.querySelector('.paper-meta').textContent = `${doc.data.filename} \u00b7 ${doc.data.pages} pages \u00b7 ${marks} marks`;
   const done = new Promise(r => { dlg.onclose = r; });
   dlg.showModal();
@@ -1302,13 +1376,13 @@ async function runActionNow(act) {
   if (act === 'delete') {
     const a = target.anno;
     const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
-    if (linked.length && !confirm(`Delete this mark? Its ${linked.length} card(s)/task(s) are kept, with the passage's text and page.`)) return;
+
     // Cards and tasks keep what they were about.
     const source = { page: a.data.page, quote: a.data.type === 'region' ? (a.data.latex ? `$${a.data.latex}$` : '') : snippet(a.data.quote, 2000) };
     for (const it of linked) await trackedUpdate(it.id, { source });
     await trackedRemove(a.id);
     hideActions();
-    toast('Mark deleted: Undo brings it back');
+    toast(linked.length ? `Mark deleted; its ${linked.length} card(s)/task(s) keep the passage` : 'Mark deleted', false, { label: 'Undo', run: undo });
     return;
   }
 
@@ -1337,7 +1411,13 @@ async function runActionNow(act) {
   } else if (act === 'highlight') {
     await commitAnno(p);
   } else if (act === 'unclear' || act === 'understood') {
-    await commitAnno(p, { status: act });
+    const anno = await commitAnno(p, { status: act });
+    // Understanding a passage also settles its explanations.
+    if (act === 'understood') {
+      for (const t of store.all('task').filter(t => t.data.type === 'explain' && t.data.annoId === anno.id && t.data.status !== 'done')) {
+        await trackedUpdate(t.id, { status: 'done' });
+      }
+    }
     toast(act === 'unclear' ? 'Marked as not clear yet: it is listed in the Brief and the Marks panel' : 'Marked as understood');
   } else if (act === 'comment') {
     const text = await promptDialog('Comment', p.anno.data.comment || '', { multiline: true, placeholder: 'Margin note for this passage', context: quote, maxLength: 50_000 });
@@ -1382,6 +1462,7 @@ async function runActionNow(act) {
     const def = act === 'todo' ? 'Follow up: ' + snippet(quote || 'region on p. ' + page, 80) : '';
     const text = await promptDialog(label, def, {
       multiline: true,
+      enterSaves: true,
       context: quote || `Region on p. ${page}`,
       placeholder: act === 'question' ? 'What do you want to ask or discuss?' : '',
     });
@@ -1413,6 +1494,13 @@ function showExplanation(t) {
 
 async function createExplainTask(anno, isRegion) {
   const docId = anno.data.docId;
+  // An equation region gets its LaTeX too, so it reads well in the Brief.
+  if (isRegion && !anno.data.latex && state.pdf && state.docId === docId) {
+    state.pdf.regionImage(anno.data.page, anno.data.rects[0])
+      .then(img => equationToLatex(img))
+      .then(latex => store.get(anno.id) && store.update(anno.id, { latex }))
+      .catch(e => console.warn('No LaTeX for the explained region', e));
+  }
   // Asking for an explanation means it is not clear (again).
   if (anno.data.status !== 'unclear') await trackedUpdate(anno.id, { status: 'unclear' });
   const task = await trackedCreate('task', {
@@ -1538,6 +1626,15 @@ function promptDialog(title, value = '', opts = {}) {
   field.maxLength = opts.maxLength || 5000;
   field.value = value;
   if (opts.placeholder) field.placeholder = opts.placeholder;
+  // Short fields (tasks, questions) save on Enter; Shift+Enter is a new line.
+  if (opts.enterSaves) {
+    field.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        dlg.close('ok');
+      }
+    });
+  }
   return new Promise(resolve => {
     dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? field.value.trim() : null);
     dlg.showModal();
@@ -1709,6 +1806,9 @@ function renderPanel() {
 }
 
 function renderContentsPanel(panel) {
+  const tab = state.contentsTab || 'sections';
+  const doc = store.get(state.docId);
+  const marks = (doc && doc.data.bookmarks) || [];
   panel.innerHTML = `<section>
       <h3>Contents</h3>
       <div class="find-row">
@@ -1716,12 +1816,36 @@ function renderContentsPanel(panel) {
         <span class="find-count muted" aria-live="polite"></span>
       </div>
       <ol class="find-results hidden"></ol>
-      <p class="muted toc-note">Reading the table of contents...</p>
-      <ol class="toc"></ol>
+      <div class="contents-body">
+        <div class="contents-tabs" role="tablist">
+          <button role="tab" data-tab="sections">Sections</button>
+          <button role="tab" data-tab="pages">Pages</button>
+          <button role="tab" data-tab="bookmarks">Bookmarks${marks.length ? ' (' + marks.length + ')' : ''}</button>
+        </div>
+        <button class="btn-small bookmark-toggle"></button>
+        <div class="contents-tab" data-panel="sections">
+          <p class="muted toc-note">Reading the table of contents...</p>
+          <ol class="toc"></ol>
+        </div>
+        <div class="contents-tab thumbs" data-panel="pages"></div>
+        <ol class="contents-tab bookmarks" data-panel="bookmarks"></ol>
+      </div>
     </section>`;
   const view = state.pdf;
   if (!view || !view.pdf) return;
   wireFind(panel, view);
+  panel.querySelectorAll('[role="tab"]').forEach(b => {
+    b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    b.addEventListener('click', () => {
+      state.contentsTab = b.dataset.tab;
+      renderPanel();
+    });
+  });
+  panel.querySelectorAll('[data-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== tab));
+  wireBookmarkToggle(panel, view);
+  if (tab === 'pages') renderThumbs(panel.querySelector('.thumbs'), view, marks);
+  if (tab === 'bookmarks') renderBookmarks(panel.querySelector('.bookmarks'), view, marks);
+  if (tab !== 'sections') return;
   view.contents().then(({ items, source }) => {
     if (state.pdf !== view || !state.panelOpen || state.panelMode !== 'contents') return;
     const note = panel.querySelector('.toc-note');
@@ -1747,13 +1871,98 @@ function renderContentsPanel(panel) {
   }).catch(e => reportError('Reading the contents failed', e));
 }
 
+// ── Bookmarks and page thumbnails ──
+
+function pageBookmarks(docId) {
+  const d = store.get(docId);
+  return (d && d.data.bookmarks) || [];
+}
+
+async function toggleBookmark(docId, page) {
+  const marks = pageBookmarks(docId);
+  const on = marks.some(b => b.page === page);
+  const next = on ? marks.filter(b => b.page !== page) : [...marks, { page, at: Date.now() }].sort((a, b) => a.page - b.page);
+  await trackedUpdate(docId, { bookmarks: next });
+  if (state.panelOpen && state.panelMode === 'contents') renderPanel();
+  toast(on ? `Removed the bookmark on page ${page}` : `Bookmarked page ${page}`, false, { label: 'Undo', run: undo });
+}
+
+function wireBookmarkToggle(panel, view) {
+  const btn = panel.querySelector('.bookmark-toggle');
+  const sync = () => {
+    // A re-rendered panel replaces this button: drop the stale listener.
+    if (!btn.isConnected) {
+      view.removeEventListener('page', sync);
+      return;
+    }
+    const page = view.currentPage;
+    const on = pageBookmarks(state.docId).some(b => b.page === page);
+    btn.textContent = on ? `Remove bookmark (page ${page})` : `Bookmark page ${page}`;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', String(on));
+  };
+  sync();
+  view.addEventListener('page', sync, { signal: view.signal });
+  btn.addEventListener('click', () => toggleBookmark(state.docId, view.currentPage).catch(e => reportError('Bookmark failed', e)));
+}
+
+function renderBookmarks(list, view, marks) {
+  if (!marks.length) {
+    list.innerHTML = '<li class="muted">No bookmarks yet. Use "Bookmark page" while reading.</li>';
+    return;
+  }
+  for (const b of marks) {
+    const li = document.createElement('li');
+    li.innerHTML = '<button class="toc-item"><span class="toc-title"></span><span class="toc-page"></span></button>';
+    li.querySelector('.toc-page').textContent = String(b.page);
+    li.querySelector('.toc-title').textContent = 'Page ' + b.page;
+    view.pageText(b.page).then(t => {
+      if (t.trim()) li.querySelector('.toc-title').textContent = snippet(t, 70);
+    }).catch(e => console.warn('No text for bookmark', e));
+    li.querySelector('button').addEventListener('click', () => {
+      if (NARROW.matches) setPanel(false);
+      view.goTo(b.page, 0, 'smooth', 16);
+    });
+    list.appendChild(li);
+  }
+}
+
+// A grid of page thumbnails, rendered as they scroll into view.
+function renderThumbs(grid, view, marks) {
+  const marked = new Set(marks.map(b => b.page));
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) {
+      if (!e.isIntersecting || e.target.dataset.drawn) continue;
+      e.target.dataset.drawn = '1';
+      view.renderThumb(+e.target.dataset.page, e.target.querySelector('canvas'), 110)
+        .catch(err => console.warn('Thumbnail failed', err));
+    }
+  }, { root: grid.closest('.panel'), rootMargin: '300px' });
+  for (let n = 1; n <= view.numPages; n++) {
+    const b = document.createElement('button');
+    b.className = 'thumb' + (n === view.currentPage ? ' current' : '') + (marked.has(n) ? ' bookmarked' : '');
+    b.dataset.page = String(n);
+    b.setAttribute('aria-label', 'Page ' + n);
+    b.innerHTML = '<canvas></canvas><span class="thumb-num"></span>';
+    b.querySelector('.thumb-num').textContent = String(n);
+    b.addEventListener('click', () => {
+      if (NARROW.matches) setPanel(false);
+      view.goTo(n, 0, 'smooth', 16);
+    });
+    grid.appendChild(b);
+    io.observe(b);
+  }
+  view.signal.addEventListener('abort', () => io.disconnect());
+  grid.querySelector('.thumb.current')?.scrollIntoView({ block: 'center' });
+}
+
 // Find in paper: results replace the contents list while there is a query.
 let findTimer = null;
 let lastFind = '';
 function wireFind(panel, view) {
   const box = panel.querySelector('.find-box');
   const results = panel.querySelector('.find-results');
-  const toc = panel.querySelector('.toc');
+  const body = panel.querySelector('.contents-body');
   const count = panel.querySelector('.find-count');
   let hitsNow = [];
   let at = -1;
@@ -1773,14 +1982,13 @@ function wireFind(panel, view) {
     view.goTo(h.page, 0, 'instant');
     view.markText(h.page, box.value.trim());
   };
-  const note = panel.querySelector('.toc-note');
   const run = async () => {
     // The panel may have switched or closed during the debounce.
     if (!box.isConnected) return;
     const q = box.value.trim();
     lastFind = box.value;
-    toc.classList.toggle('hidden', !!q);
-    note.classList.toggle('hidden', !!q || !note.textContent);
+    // While finding, results replace the tabs.
+    body.classList.toggle('hidden', !!q);
     results.classList.toggle('hidden', !q);
     if (!q) {
       view.markText(null);
@@ -1792,7 +2000,7 @@ function wireFind(panel, view) {
     if (!box.isConnected || box.value.trim() !== q) return;
     hitsNow = hits.slice(0, 200);
     at = -1;
-    count.textContent = hits.length ? `${hits.length}${hits.length >= 300 ? '+' : ''} found` : '';
+    count.textContent = hits.length ? `1 of ${hits.length}${hits.length >= 300 ? '+' : ''}` : '';
     results.innerHTML = hits.length ? '' : '<li class="muted">No matches in this paper.</li>';
     hits.slice(0, 200).forEach((h, i) => {
       const li = document.createElement('li');
@@ -1817,7 +2025,8 @@ function wireFind(panel, view) {
   box.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    show(at < 0 ? 0 : at + (e.shiftKey ? -1 : 1), true);
+    // The count already reads "1 of n", so the first Enter shows match 1.
+    show(at < 0 ? (e.shiftKey ? -1 : 0) : at + (e.shiftKey ? -1 : 1), true);
   });
   if (lastFind) {
     box.value = lastFind;
@@ -1995,13 +2204,20 @@ function renderStudy() {
   const root = $('#view-study');
   if (state.review) return renderReview(root);
   const now = Date.now();
-  const q = studyQueue(store.all(), now);
+  // Cards and tasks of papers in Recently deleted wait there with the paper.
+  const inTrash = it => it.data.docId && isTrashed(store.get(it.data.docId));
+  const all = store.all();
+  const hiddenCount = all.filter(it => (it.kind === 'card' || it.kind === 'task') && inTrash(it)).length;
+  const q = studyQueue(all.filter(it => !inTrash(it)), now);
   const questions = q.open.filter(t => t.data.type === 'question');
+  // Passages marked not clear that have no explanation yet.
+  const explainedAnnos = new Set(store.all('task').filter(t => t.data.type === 'explain').map(t => t.data.annoId));
+  const unclear = visibleItems().filter(a => a.kind === 'anno' && a.data.status === 'unclear' && !explainedAnnos.has(a.id));
   // Explanations still being written, or failed, belong with the others.
   const explaining = q.open.filter(t => t.data.type === 'explain');
   const open = q.open.filter(t => t.data.type !== 'question' && t.data.type !== 'explain');
   const understood = store.all('task')
-    .filter(t => t.data.type === 'explain' && t.data.status === 'done' && t.data.explanation)
+    .filter(t => t.data.type === 'explain' && t.data.status === 'done' && t.data.explanation && !inTrash(t))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
   root.innerHTML = `
@@ -2011,6 +2227,9 @@ function renderStudy() {
         <p class="muted cards-line"></p>
         <button class="btn btn-primary" id="start-review" ${q.dueCards.length ? '' : 'disabled'}>Review ${q.dueCards.length} due</button>
       </section>
+      ${unclear.length ? `<section class="study-block"><h2>Not clear yet <span class="muted">${unclear.length}</span></h2>
+        <p class="muted">Passages you marked as not understood, with no explanation yet.</p>
+        <div class="study-list" id="study-unclear"></div></section>` : ''}
       <section class="study-block"><h2>Explanations to read <span class="muted">${q.toReview.length + explaining.length}</span></h2>
         <div class="study-list" id="study-ready"></div>
         ${understood.length ? `<details class="study-archive"><summary>Understood (${understood.length})</summary><div class="study-list" id="study-understood"></div></details>` : ''}
@@ -2019,7 +2238,10 @@ function renderStudy() {
       <section class="study-block"><h2>Questions for journal club <span class="muted">${questions.length}</span></h2>
         <p class="muted">Each paper's <strong>Brief</strong> (in its toolbar) collects its questions, open points and key equations for presenting.</p>
         <div class="study-list" id="study-questions"></div></section>
+      ${hiddenCount ? `<p class="muted">${hiddenCount} card(s) and task(s) from papers in Recently deleted are hidden until you restore them.</p>` : ''}
     </div>`;
+  const unclearBox = root.querySelector('#study-unclear');
+  for (const a of unclear) unclearBox.appendChild(unclearRow(a));
   const allCards = store.all('card');
   const next = allCards.filter(c => c.data.srs.due > now).sort((a, b) => a.data.srs.due - b.data.srs.due)[0];
   root.querySelector('.cards-line').textContent = `${allCards.length} card${allCards.length === 1 ? '' : 's'}, ${q.dueCards.length} due now` +
@@ -2116,6 +2338,25 @@ function explanationCard(t, archived) {
     } catch (err) {
       reportError('Action failed', err);
     }
+  });
+  return el;
+}
+
+function unclearRow(a) {
+  const el = document.createElement('div');
+  el.className = 'task-row';
+  const doc = store.get(a.data.docId);
+  el.innerHTML = `<span class="tag tag-unclear">Not clear yet</span>
+    <span class="task-text md-inline"></span>
+    <a class="source" href="#doc=${a.data.docId}&a=${a.id}"></a>
+    <button class="btn-small" data-explain>Explain</button>`;
+  el.querySelector('.task-text').innerHTML = renderMarkdown(a.data.type === 'region'
+    ? (a.data.latex ? `$${a.data.latex}$` : `Region on p. ${a.data.page}`)
+    : snippet(a.data.quote, 300), resolveLink);
+  el.querySelector('.source').textContent = (doc ? doc.data.title : 'Paper') + ', p. ' + a.data.page;
+  el.querySelector('[data-explain]').addEventListener('click', e => {
+    e.target.disabled = true;
+    createExplainTask(a, a.data.type === 'region').catch(err => reportError('Explain failed', err));
   });
   return el;
 }
@@ -2295,7 +2536,9 @@ function briefMarkdown(docId) {
     if (gist) out.push(`  **In short:** ${gist}`);
   }
 
-  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief));
+  // Every equation region you worked on: read, pinned, explained or rated.
+  const explainedIds = new Set(tasks.filter(t => t.data.type === 'explain').map(t => t.data.annoId));
+  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief || a.data.status || explainedIds.has(a.id)));
   out.push('', `## Key equations (${equations.length})`);
   if (!equations.length) out.push('Use the Region tool on an equation and choose Equation card or LaTeX to notebook.');
   for (const a of equations) {
@@ -2362,7 +2605,8 @@ function plainGist(md) {
 function plainLinks(md) {
   const base = location.origin + location.pathname;
   return md.replace(WIKILINK, (m, target, label) => {
-    if (!target.startsWith('@')) return label || target;
+    // Note links stay wikilinks (they work in Obsidian); paper links become titles.
+    if (!target.startsWith('@')) return linkIndex().notesByTitle.has(normTitle(target)) ? m : label || target;
     const a = store.get(target.slice(1));
     if (!a) return label || '';
     return `[${label || 'p. ' + a.data.page}](${base}#doc=${a.data.docId}&a=${a.id})`;
@@ -2378,6 +2622,7 @@ function renderBrief(docId) {
       <div class="brief-actions">
         <a class="btn btn-secondary" href="#doc=${docId}">Back to paper</a>
         <button class="btn btn-secondary" id="brief-copy">Copy as Markdown</button>
+        <button class="btn btn-secondary" id="brief-export">Annotated PDF</button>
         <button class="btn btn-primary" id="brief-print">Print</button>
       </div>
       <article class="brief-body md-view"></article>
@@ -2390,6 +2635,7 @@ function renderBrief(docId) {
     openLink(link);
   });
   root.querySelector('#brief-print').addEventListener('click', () => print());
+  root.querySelector('#brief-export').addEventListener('click', () => exportPaper(docId).catch(e => reportError('Export failed', e)));
   root.querySelector('#brief-copy').addEventListener('click', async () => {
     try {
       // Wikilinks mean nothing outside the app: copy their labels as text.
@@ -2608,7 +2854,7 @@ function wire() {
       }
       return;
     }
-    const keys = { s: 'select', p: 'pen', h: 'highlighter', e: 'eraser', r: 'region' };
+    const keys = { s: 'select', p: 'pen', h: 'highlighter', e: 'eraser', r: 'region', l: 'lasso' };
     if (state.view === 'doc' && keys[e.key] && !e.metaKey && !e.ctrlKey) setTool(keys[e.key]);
     if (e.key === 'Escape') {
       if (state.target) hideActions();

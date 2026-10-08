@@ -152,6 +152,12 @@ that the flow handles the result sensibly.
   size after a reload.
 - Explanations stream in: watch Study while one is written.
 - "Add to Brief" pins any passage or equation to the Brief.
+- Lasso selects ink to move, resize or delete it (undoable), on pages and in
+  notebook pads.
+- Contents has page thumbnails and bookmarks (bookmarked pages show a
+  ribbon).
+- "Export with annotations" (paper menu, Brief) gives a PDF with ink and
+  highlights drawn in; open it to check that the marks line up.
 - Report anything else a GoodNotes or PDF Expert user would reach for and
   not find.
 

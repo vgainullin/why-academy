@@ -241,6 +241,7 @@ try {
   check('panel overlays in portrait (toolbar keeps full width)', tb.w >= tb.vw - 2, JSON.stringify(tb));
   const reachable = await page.evaluate(() => ['#toggle-panel', '#toggle-contents', '#open-brief', '#zoom-in'].map(sel => {
     const b = document.querySelector(sel).getBoundingClientRect();
+    if (!b.width) return 'ok'; // hidden on touch screens (pinch zooms)
     const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
     return hit && hit.closest(sel) ? 'ok' : sel;
   }).filter(x => x !== 'ok'));
@@ -657,7 +658,7 @@ try {
   await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
   if (!(await page.evaluate(() => document.querySelector('#toggle-contents').classList.contains('active')))) await page.click('#toggle-contents');
   await page.fill('#panel .find-box', 'variance');
-  await page.waitForFunction(() => /found/.test(document.querySelector('#panel .find-count')?.textContent || ''));
+  await page.waitForFunction(() => /^1 of \d+/.test(document.querySelector('#panel .find-count')?.textContent || ''));
   await page.focus('#panel .find-box');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Enter');
@@ -787,6 +788,109 @@ try {
     purged = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plain2Id && d.deleted);
   }
   check('Delete now removes a paper for good', purged && !(await page.isVisible('#trash')));
+
+  // Lasso: select a stroke, move it, undo, then delete it
+  await page.evaluate(id => { location.hash = '#doc=' + id + '&p=1'; }, docId);
+  await page.waitForSelector('#view-doc:not(.hidden) .pdf-page[data-page="1"] .textLayer span');
+  await page.click('.tool[data-tool="pen"]');
+  await page.evaluate(() => __wa.penOnPage(1, 0.3, 0.5, 0.86));
+  await wait(400);
+  await page.click('.tool[data-tool="lasso"]');
+  await page.evaluate(() => {
+    // A loop around the stroke at y = 0.86.
+    const pts = [[0.26, 0.83], [0.55, 0.83], [0.55, 0.89], [0.26, 0.89], [0.26, 0.83]];
+    window.__wa._loop = pts;
+  });
+  await page.evaluate(() => {
+    const page = document.querySelector('.pdf-page[data-page="1"]').getBoundingClientRect();
+    const pts = [];
+    const loop = window.__wa._loop;
+    for (let i = 0; i < loop.length - 1; i++) for (let t = 0; t < 8; t++) {
+      const [ax, ay] = loop[i], [bx, by] = loop[i + 1];
+      pts.push([page.left + (ax + (bx - ax) * t / 8) * page.width, page.top + (ay + (by - ay) * t / 8) * page.height]);
+    }
+    let id = 7000;
+    const fire = (type, [x, y]) => document.elementFromPoint(x, y).dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: id, pointerType: 'pen', clientX: x, clientY: y, pressure: 0.5, buttons: type === 'pointerup' ? 0 : 1 }));
+    fire('pointerdown', pts[0]);
+    pts.slice(1).forEach(p => fire('pointermove', p));
+    fire('pointerup', pts[pts.length - 1]);
+  });
+  await wait(300);
+  const selected = await page.locator('.pdf-page[data-page="1"] .ink-sel-bar').count();
+  // Drag inside the box down by 5% of the page.
+  await page.evaluate(() => __wa.dragOnPage(1, 0.4, 0.86, 0.4, 0.91));
+  await wait(2500);
+  const ysMoved = await page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 1).data.strokes.map(s => +s.points[1].toFixed(2)));
+  check('lasso selects and moves ink', selected === 1 && ysMoved.some(y => y >= 0.9), `selection ${selected}, start ys ${ysMoved.join(',')}`);
+  await page.click('[data-history="undo"] >> nth=0');
+  await wait(2500);
+  const ysBack = await page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 1).data.strokes.map(s => +s.points[1].toFixed(2)));
+  check('undo puts lassoed ink back', ysBack.some(y => Math.abs(y - 0.86) < 0.02) && !ysBack.some(y => y >= 0.9), ysBack.join(','));
+  await page.click('.tool[data-tool="select"]');
+
+  // Bookmarks and page thumbnails
+  if (!(await page.evaluate(() => document.querySelector('#toggle-contents').classList.contains('active')))) await page.click('#toggle-contents');
+  await page.click('#panel .bookmark-toggle');
+  await wait(300);
+  await page.click('#panel [data-tab="pages"]');
+  await page.waitForSelector('#panel .thumb');
+  await wait(1200);
+  const thumbs = await page.evaluate(() => [...document.querySelectorAll('#panel .thumb canvas')].map(c => c.width));
+  const marked = await page.locator('#panel .thumb.bookmarked').count();
+  check('page thumbnails render, bookmarked page marked', thumbs.length === 3 && thumbs.every(w => w > 50) && marked === 1, `${thumbs.join(',')} / ${marked}`);
+  await page.click('#panel [data-tab="bookmarks"]');
+  check('bookmarks tab lists the page', (await page.locator('#panel .bookmarks .toc-item').count()) === 1);
+  await page.click('#panel [data-tab="sections"]');
+  await page.click('#panel .panel-close');
+
+  // Export the annotated PDF
+  await page.evaluate(() => { navigator.canShare = undefined; });
+  const dl = page.waitForEvent('download', { timeout: 20000 });
+  await page.goto(B + '/reader#brief=' + docId);
+  await page.waitForSelector('#brief-export');
+  await page.click('#brief-export');
+  const download = await dl;
+  await download.saveAs(`${OUT}/annotated.pdf`);
+  const path = `${OUT}/annotated.pdf`;
+  const { readFileSync: rf, statSync } = await import('node:fs');
+  const head = rf(path).subarray(0, 5).toString();
+  const exportedSize = statSync(path).size;
+  const originalSize = statSync(FIXTURE).size;
+  check('export annotated PDF', head === '%PDF-' && exportedSize > originalSize && download.suggestedFilename().endsWith('(annotated).pdf'), `${download.suggestedFilename()}, ${originalSize} -> ${exportedSize} bytes`);
+
+  // A Study link to a paper in Recently deleted keeps you in Study and offers Restore
+  await page.goto(B + '/reader');
+  await page.setInputFiles('#file-input', FIXTURE_PLAIN);
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  const plainIdForTrash = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('doc'));
+  await library();
+  await page.locator(`#doc-list .side-row:has(a[href="#doc=${plainIdForTrash}"]) .side-more`).click();
+  await page.click('dialog button[value="remove"]');
+  await wait(500);
+  await page.goto(B + '/reader#study');
+  await page.waitForSelector('.study');
+  await page.evaluate(id => { location.hash = '#doc=' + id; }, plainIdForTrash);
+  await wait(500);
+  check('link to a trashed paper stays put and offers Restore', (await page.evaluate(() => location.hash)) === '#study' && (await page.locator('#toast .toast-action').textContent()) === 'Restore');
+
+  // Enter saves a follow-up; Not clear yet section in Study
+  await page.goto(B + '/reader#doc=' + docId + '&p=2');
+  await page.waitForSelector('.pdf-page[data-page="2"] .textLayer span');
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(2, 'Dividing by sqrt(d_k) restores'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Follow-up")');
+  await page.fill('dialog textarea', 'Saved with Enter');
+  await page.keyboard.press('Enter');
+  await wait(300);
+  check('Enter saves a follow-up', !(await page.evaluate(() => document.querySelector('#dialog').open)));
+  await page.evaluate(() => __wa.selectText(2, 'Each term q_i k_i has mean 0'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Not clear yet")');
+  await wait(400);
+  await page.goto(B + '/reader#study');
+  await page.waitForSelector('.study');
+  check('Study lists passages not clear yet', (await page.locator('#study-unclear .task-row').count()) >= 1);
 
   // Tapping the open paper in the library puts the library away
   await library();

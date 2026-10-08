@@ -71,7 +71,10 @@ function noteTitle(n) {
 
 function snippet(s, n = 120) {
   s = String(s || '').replace(/\s+/g, ' ').trim();
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  if (s.length <= n) return s;
+  const cut = s.slice(0, n - 1);
+  const space = cut.lastIndexOf(' ');
+  return (space > n * 0.6 ? cut.slice(0, space) : cut) + '…';
 }
 
 // ── Toast ──
@@ -293,7 +296,9 @@ function search(q) {
     else continue;
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) continue;
-    let from = Math.max(0, at - 30);
+    text = text.replace(/[#*_>`]+/g, '');
+    const at2 = text.toLowerCase().indexOf(q);
+    let from = Math.max(0, (at2 < 0 ? at : at2) - 30);
     while (from > 0 && /\S/.test(text[from - 1])) from--;
     const title = it.kind === 'doc' ? it.data.title : it.kind === 'note' ? noteTitle(it) : (from > 0 ? '\u2026' : '') + snippet(text.slice(from), 90);
     hits.push({ label, href, title, rank: it.kind === 'doc' || it.kind === 'note' ? 0 : 1 });
@@ -1027,7 +1032,7 @@ async function cardDialog(p, fromEquation) {
         preview();
         status.textContent = 'Drafting...';
       }
-      const context = await withPaper(anno.data.docId, v => v.contextFor(anno.data.page, anno.data.quote, 3000));
+      const context = await withPaper(anno.data.docId, v => v.contextFor(anno.data.page, anno.data.quote, latex ? 1500 : 3000));
       const doc = store.get(anno.data.docId);
       const card = await draftCard({ docTitle: doc ? doc.data.title : '', quote: anno.data.quote, latex, context });
       front.value = card.front;
@@ -1542,7 +1547,8 @@ function briefMarkdown(docId) {
   }
 
   const nb = paperNotebook(docId);
-  const nbText = nb ? nb.data.blocks.filter(b => b.type === 'md').map(b => b.text.trim()).filter(Boolean) : [];
+  const nbText = nb ? nb.data.blocks.filter(b => b.type === 'md')
+    .map(b => b.text.trim().replace(/^(#{1,5}) /gm, '#$1 ')).filter(Boolean) : [];
   if (nbText.length) out.push('', '## From the notebook', '', nbText.join('\n\n'));
 
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -1694,6 +1700,7 @@ function wire() {
   $('#pdf-scroll').addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   $('#pdf-scroll').addEventListener('click', e => {
     if (!state.pdf || !window.getSelection().isCollapsed) return;
+    if (NARROW.matches && state.panelOpen) setPanel(false);
     if (lastPointer !== 'touch' && state.tool.tool !== 'select') return;
     const a = state.pdf.annoAt(e.clientX, e.clientY);
     if (a) showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: e.clientX, top: e.clientY, bottom: e.clientY, width: 0 } });

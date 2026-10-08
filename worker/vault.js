@@ -10,7 +10,7 @@
 // Must stay in sync with lib/vault/model.js.
 
 import { z } from 'zod';
-import { mergeInk, sameInk } from '../lib/vault/model.js';
+import { mergeInk, sameInk, sha256Hex } from '../lib/vault/model.js';
 
 export const MAX_PUSH_BYTES = 2 * 1024 * 1024;
 export const MAX_PUSH_ITEMS = 200;
@@ -134,6 +134,28 @@ export function validateItem(raw) {
     return { error: { message: item.kind + ' item too large' } };
   }
   return { item: { ...item, data: data.data } };
+}
+
+// Splits a pushed batch into valid items and rejections. A bad item must not
+// block the rest of the batch: the client keeps the rejected ones locally and
+// shows that they did not sync. Returns { items, rejected: [{ id, issue }] }.
+export function partitionItems(raw) {
+  const items = [];
+  const rejected = [];
+  const seen = new Set();
+  for (const r of raw) {
+    const id = r && typeof r.id === 'string' ? r.id : null;
+    const { item, error } = validateItem(r);
+    if (error) {
+      rejected.push({ id, issue: error.message || 'invalid item' });
+    } else if (seen.has(item.id)) {
+      rejected.push({ id: item.id, issue: 'duplicate id in batch' });
+    } else {
+      seen.add(item.id);
+      items.push(item);
+    }
+  }
+  return { items, rejected };
 }
 
 export function docIdOf(item) {
@@ -268,10 +290,7 @@ export async function accountFileBytes(db, accountId) {
   return row.total;
 }
 
-export async function sha256Hex(buffer) {
-  const digest = await crypto.subtle.digest('SHA-256', buffer);
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
+export { sha256Hex };
 
 export function isPdf(bytes) {
   // "%PDF-" may be preceded by junk; readers accept it within the first 1 KB.

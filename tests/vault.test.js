@@ -341,3 +341,16 @@ describe('card draft parsing', async () => {
     assert.throws(() => parseCardReply('Sure, here is a card about softmax.'));
   });
 });
+
+describe('push batches with bad items', async () => {
+  const { partitionItems } = await import('../worker/vault.js');
+
+  test('valid items go through, bad ones are reported by id', () => {
+    const good = item('task', { text: 'ok', type: 'todo', status: 'open' });
+    const bad = item('anno', { docId: DOC, page: 1, type: 'highlight', rects: [[0, 0, 1, 1]], quote: 'x'.repeat(20_001), color: 'y' });
+    const { items, rejected } = partitionItems([good, bad, good]);
+    assert.deepEqual(items.map(i => i.id), [good.id]);
+    assert.deepEqual(rejected.map(r => r.id), [bad.id, good.id]);
+    assert.match(rejected[1].issue, /duplicate/);
+  });
+});

@@ -20,10 +20,11 @@ import {
   noteText,
   normTitle,
   studyQueue,
+  WIKILINK,
 } from './lib/vault/model.js';
 import { PdfView, readPdfInfo } from './lib/vault/pdf-view.js';
 import { NoteEditor, noteBackup } from './lib/vault/notes.js';
-import { renderMarkdown } from './lib/vault/markdown.js';
+import { renderMarkdown, escapeHtml } from './lib/vault/markdown.js';
 import { INK_COLORS, HIGHLIGHT_COLORS } from './lib/vault/ink.js';
 import { explainPassage, equationToLatex, draftCard } from './lib/vault/ai.js';
 import { newSrs, previewReview, GRADES } from './lib/vault/srs.js';
@@ -38,6 +39,7 @@ const COLOR_NAMES = {
   '#fde047': 'Yellow', '#86efac': 'Green', '#f9a8d4': 'Pink', '#93c5fd': 'Blue',
 };
 const NARROW = matchMedia('(max-width: 900px)');
+const MAX_PDF_BYTES = 64 * 1024 * 1024; // worker/vault.js MAX_FILE_BYTES
 
 const store = new VaultStore();
 const state = {
@@ -58,10 +60,6 @@ const state = {
 // Notes made with "New note" stay here until their first edit, so an
 // abandoned new note never reaches the vault.
 const pendingNotes = new Map();
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 // A note without a title is shown by its first line of text.
 function noteTitle(n) {
@@ -239,12 +237,15 @@ function renderSidebar() {
   const docs = store.all('doc').sort((a, b) => b.updatedAt - a.updatedAt);
   const notes = store.all('note').sort((a, b) => b.updatedAt - a.updatedAt);
 
+  const markCounts = new Map();
+  for (const a of store.all('anno')) markCounts.set(a.data.docId, (markCounts.get(a.data.docId) || 0) + 1);
+
   const docList = $('#doc-list');
   docList.innerHTML = '';
   if (!docs.length) docList.innerHTML = '<li class="side-empty">No papers yet</li>';
   for (const d of docs) {
     const li = document.createElement('li');
-    const marks = store.forDoc(d.id, 'anno').length;
+    const marks = markCounts.get(d.id) || 0;
     li.innerHTML = `<a href="#doc=${d.id}" class="side-item${state.docId === d.id ? ' active' : ''}">
       <span class="side-item-title"></span><span class="side-item-meta">${d.data.pages} pp${marks ? ' &middot; ' + marks + ' marks' : ''}</span></a>`;
     li.querySelector('.side-item-title').textContent = d.data.title;
@@ -411,13 +412,23 @@ async function importFiles(files) {
       continue;
     }
     try {
+      if (file.size > MAX_PDF_BYTES) {
+        toast(`${file.name} is ${Math.round(file.size / 1048576)} MB; the limit is ${MAX_PDF_BYTES / 1048576} MB`, true);
+        continue;
+      }
       const bytes = new Uint8Array(await file.arrayBuffer());
       const id = await store.addFile(bytes);
       if (!store.get(id)) {
         const meta = await readPdfInfo(bytes);
         const fallback = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ');
         const title = meta.title && meta.title.length > 3 && !/^untitled|\.(docx?|tex|dvi)$/i.test(meta.title) ? meta.title : fallback;
-        await store.put('doc', id, { title, filename: file.name, pages: meta.pages, size: bytes.length, authors: meta.authors || undefined });
+        await store.put('doc', id, {
+          title: title.slice(0, 500),
+          filename: file.name.slice(0, 300),
+          pages: meta.pages,
+          size: bytes.length,
+          authors: meta.authors ? meta.authors.slice(0, 2000) : undefined,
+        });
       }
       navigate('#doc=' + id);
     } catch (e) {
@@ -469,7 +480,15 @@ async function openDoc(docId, page, annoId) {
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
     });
     state.pdf = view;
-    const n = await view.load(bytes);
+    let n;
+    try {
+      n = await view.load(bytes);
+    } catch (e) {
+      // Another paper was opened while this one loaded.
+      if (e.closed || state.pdf !== view) return;
+      throw e;
+    }
+    if (state.pdf !== view) return;
     $('#page-count').textContent = '/ ' + n;
     $('#page-input').max = n;
     if (doc.data.pages !== n) store.update(docId, { pages: n });
@@ -491,6 +510,7 @@ async function openDoc(docId, page, annoId) {
     // Open the notebook first: it changes the PDF pane's size, and the
     // scroll position must be set for the final size.
     await applyNotebook();
+    if (state.pdf !== view) return;
     const localPage = +localStorage.getItem('reader.page.' + docId) || 0;
     view.goTo(page || localPage || doc.data.lastPage || 1, 0, 'instant');
   } else if (page) {
@@ -503,10 +523,22 @@ async function openDoc(docId, page, annoId) {
   renderPanel();
 }
 
+// Cards and tasks grouped by the mark they belong to, in one pass.
+function itemsByAnno() {
+  const map = new Map();
+  for (const it of store.all()) {
+    if ((it.kind !== 'card' && it.kind !== 'task') || !it.data.annoId) continue;
+    if (!map.has(it.data.annoId)) map.set(it.data.annoId, []);
+    map.get(it.data.annoId).push(it);
+  }
+  return map;
+}
+
 function refreshDocOverlays() {
   if (!state.pdf) return;
+  const byAnno = itemsByAnno();
   const annos = store.forDoc(state.docId, 'anno').map(a => {
-    const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
+    const linked = byAnno.get(a.id) || [];
     const labels = linked.map(it => (it.kind === 'card' ? 'Card' : TASK_LABELS[it.data.type]));
     const details = linked.map(it => (it.kind === 'card'
       ? 'Card: ' + snippet(it.data.front, 60)
@@ -542,18 +574,27 @@ function saveInk(docId, page, mutate) {
 
 // ── Paper notebook (split view) ──
 
+// One notebook per paper, with an id derived from the paper, so two devices
+// that open it offline create the same note (and sync merges it) rather than
+// two notebooks.
+function notebookId(docId) {
+  return 'nb-' + docId.slice(0, 40);
+}
+
 function paperNotebook(docId) {
-  return store.all('note').find(n => n.data.notebookFor === docId);
+  return store.get(notebookId(docId)) || store.all('note').find(n => n.data.notebookFor === docId);
 }
 
 async function ensurePaperNotebook(docId) {
   const existing = paperNotebook(docId);
   if (existing) return existing;
   const doc = store.get(docId);
-  return store.create('note', {
-    title: 'Notes: ' + doc.data.title,
+  // Deterministic content too: two untouched notebooks from two devices are
+  // identical, so merging them makes no conflict copy.
+  return store.put('note', notebookId(docId), {
+    title: ('Notes: ' + doc.data.title).slice(0, 300),
     notebookFor: docId,
-    blocks: [{ id: newId(), type: 'md', text: `Reading [[${doc.data.title}]]\n` }],
+    blocks: [{ id: 'nbb-' + docId.slice(0, 40), type: 'md', text: `Reading [[${doc.data.title}]]\n` }],
   });
 }
 
@@ -590,7 +631,8 @@ function currentSelectionTarget() {
   const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
   const pageEl = startEl && startEl.closest('.pdf-page');
   if (!pageEl || !startEl.closest('.textLayer')) return null;
-  const quote = sel.toString().replace(/\s+/g, ' ').trim();
+  // Capped at the vault's limit; a select-all highlight still works.
+  const quote = sel.toString().replace(/\s+/g, ' ').trim().slice(0, 20_000);
   if (!quote) return null;
   const box = pageEl.getBoundingClientRect();
   const rects = [...range.getClientRects()]
@@ -763,7 +805,7 @@ async function runAction(act) {
     await commitAnno(p, { status: act });
     toast(act === 'unclear' ? 'Marked as not clear yet: it is listed in the Brief and the Marks panel' : 'Marked as understood');
   } else if (act === 'comment') {
-    const text = await promptDialog('Comment', p.anno.data.comment || '', { multiline: true, placeholder: 'Margin note for this passage', context: quote });
+    const text = await promptDialog('Comment', p.anno.data.comment || '', { multiline: true, placeholder: 'Margin note for this passage', context: quote, maxLength: 50_000 });
     if (text !== null) await commitAnno(p, { comment: text });
   } else if (act === 'link') {
     const anno = await commitAnno(p);
@@ -930,6 +972,8 @@ function promptDialog(title, value = '', opts = {}) {
   dlg.querySelector('textarea, input').setAttribute('aria-label', title);
   if (opts.context) dlg.querySelector('.dialog-context').textContent = snippet(opts.context, 300);
   const field = dlg.querySelector('textarea, input');
+  // Matches the vault's limits (task text 5k, comments 50k).
+  field.maxLength = opts.maxLength || 5000;
   field.value = value;
   if (opts.placeholder) field.placeholder = opts.placeholder;
   return new Promise(resolve => {
@@ -946,9 +990,9 @@ async function cardDialog(p, fromEquation) {
   dlg.innerHTML = `<form method="dialog" class="dialog-form card-form">
       <h3>New card</h3>
       <p class="dialog-status" role="status"></p>
-      <label>Front <textarea name="front" rows="3" placeholder="A precise question"></textarea></label>
+      <label>Front <textarea name="front" rows="3" maxlength="20000" placeholder="A precise question"></textarea></label>
       <div class="card-preview" data-for="front"></div>
-      <label>Back <textarea name="back" rows="4" placeholder="Answer, with $math$"></textarea></label>
+      <label>Back <textarea name="back" rows="4" maxlength="20000" placeholder="Answer, with $math$"></textarea></label>
       <div class="card-preview" data-for="back"></div>
       <div class="dialog-actions">
         <button type="button" class="btn btn-secondary" data-draft>Draft with AI</button>
@@ -1418,15 +1462,19 @@ function renderReview(root) {
 
 async function grade(i) {
   const r = state.review;
+  // A double click or a repeated key must grade the card once, not skip the next.
+  if (!r || r.grading || !r.revealed) return;
+  r.grading = true;
   const card = store.get(r.queue[r.index]);
   try {
     await store.update(card.id, { srs: r.preview[i].srs });
+    r.index += 1;
+    r.revealed = false;
   } catch (e) {
     reportError('Saving the review failed', e);
-    return;
+  } finally {
+    r.grading = false;
   }
-  r.index += 1;
-  r.revealed = false;
   renderStudy();
 }
 
@@ -1510,7 +1558,7 @@ function plainGist(md) {
 }
 
 function plainLinks(md) {
-  return md.replace(/\[\[([^\[\]|]+?)(?:\|([^\[\]]*))?\]\]/g, (m, target, label) => {
+  return md.replace(WIKILINK, (m, target, label) => {
     if (label) return label;
     if (!target.startsWith('@')) return target;
     const a = store.get(target.slice(1));

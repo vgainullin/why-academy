@@ -35,9 +35,13 @@
   // a finger ('touch'). points: [[x, y], ...] in client pixels.
   function stroke(points, pointerType = 'pen') {
     const pointerId = nextPointerId++;
+    let downTarget = null;
     const fire = (type, [x, y], i) => {
-      const target = document.elementFromPoint(x, y);
+      // After pointerdown, events go to the same element even off screen,
+      // like real pointer capture.
+      const target = downTarget || document.elementFromPoint(x, y);
       if (!target) throw new Error(`No element at ${x},${y}`);
+      if (type === 'pointerdown') downTarget = target;
       target.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true, composed: true,
         pointerId, pointerType, isPrimary: true,

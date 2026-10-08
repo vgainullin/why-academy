@@ -41,7 +41,7 @@ import {
   MAX_FILE_BYTES,
   MAX_ACCOUNT_FILE_BYTES,
   FILE_ID,
-  validateItem,
+  partitionItems,
   pushItems,
   pullItems,
   fileKey,
@@ -234,18 +234,10 @@ async function handleVaultPush(request, env, user) {
     return json({ error: `items must be an array of at most ${MAX_PUSH_ITEMS}` }, 400);
   }
 
-  // One bad item rejects the whole push so the client sees the bug instead of
-  // losing data silently.
-  const items = [];
-  const seen = new Set();
-  for (let i = 0; i < raw.length; i++) {
-    const { item, error: issue } = validateItem(raw[i]);
-    if (issue) return json({ error: 'Invalid item', index: i, issue }, 400);
-    if (seen.has(item.id)) return json({ error: 'Duplicate item id', index: i }, 400);
-    seen.add(item.id);
-    items.push(item);
-  }
-  return json(await pushItems(env.DB, user.id, items));
+  const { items, rejected } = partitionItems(raw);
+  if (rejected.length) console.warn('Vault push rejected items', user.id, rejected.slice(0, 5));
+  const { stale } = await pushItems(env.DB, user.id, items);
+  return json({ stale, rejected });
 }
 
 async function handleVaultPull(request, env, user) {

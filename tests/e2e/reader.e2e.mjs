@@ -195,6 +195,16 @@ try {
   nbStrokes = await page.evaluate(async () => (await __wa.serverItems('note')).filter(n => n.data.notebookFor)
     .flatMap(n => n.data.blocks).filter(b => b.type === 'ink').reduce((k, b) => k + b.strokes.length, 0));
   check('pen draws in notebook with Select tool; finger does not', nbStrokes === 1, nbStrokes + ' strokes');
+
+  // A stroke that runs far off the pad (pointer capture keeps reporting) still syncs
+  await page.evaluate(() => __wa.penInPad(0, [[0.3, 0.5], [0.35, 1.2], [0.4, 3.5]]));
+  let offPad = 0;
+  for (let i = 0; i < 16 && offPad < 2; i++) {
+    await wait(500);
+    offPad = await page.evaluate(async () => (await __wa.serverItems('note')).filter(n => n.data.notebookFor)
+      .flatMap(n => n.data.blocks).filter(b => b.type === 'ink').reduce((k, b) => k + b.strokes.length, 0));
+  }
+  check('stroke dragged off the pad syncs (clamped)', offPad === 2 && !/rejected/.test(await page.textContent('#sync-status')), `${offPad} strokes, status "${await page.textContent('#sync-status')}"`);
   // portrait panel overlays instead of squeezing the toolbar
   await page.click('#toggle-panel');
   await wait(400);
@@ -360,7 +370,8 @@ try {
   check('highlight colors are named', new Set(labels).size === labels.length, labels.join(', '));
 } catch (e) {
   failures++;
-  console.log('ERROR', e.message.split('\n')[0]);
+  const at = (e.stack || '').split('\n').find(l => l.includes('reader.e2e.mjs')) || '';
+  console.log('ERROR', e.message.split('\n')[0], at.trim());
   await shot('error');
 }
 const unexpected = errors.filter(e => !/upstream overloaded|500|Explanation failed|pointer capture/.test(e));

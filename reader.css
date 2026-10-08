@@ -822,3 +822,5 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 .swatch[data-size="fine"]::after { width: 3px; height: 3px; }
 .swatch[data-size="medium"]::after { width: 6px; height: 6px; }
 .swatch[data-size="thick"]::after { width: 10px; height: 10px; }
+
+.pdf-detail { position: absolute; pointer-events: none; }

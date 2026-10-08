@@ -541,6 +541,20 @@ async function searchPaperText(q, box) {
   appendSearchHits(box, hits.slice(0, 40));
 }
 
+// [before, match, after] with the original spacing, cut at word boundaries.
+function splitAround(text, at, len, radius) {
+  let from = Math.max(0, at - radius);
+  let to = Math.min(text.length, at + len + radius);
+  while (from > 0 && /\S/.test(text[from - 1])) from--;
+  while (to < text.length && /\S/.test(text[to])) to++;
+  const clean = s => s.replace(/\s+/g, ' ');
+  return [
+    (from > 0 ? '\u2026' : '') + clean(text.slice(from, at)).replace(/^ /, ''),
+    text.slice(at, at + len),
+    clean(text.slice(at + len, to)).replace(/ $/, '') + (to < text.length ? '\u2026' : ''),
+  ];
+}
+
 // "...words around the match..." cut at word boundaries.
 function contextSnippet(text, at, len, radius = 50) {
   let from = Math.max(0, at - radius);
@@ -884,6 +898,10 @@ async function paperDialog(docId) {
       const newTitle = title.value.trim();
       const n = await undoHistory.batch('Rename', async () => {
         await trackedUpdate(docId, { title: newTitle });
+        const nb = paperNotebook(docId);
+        if (nb && nb.data.title === ('Notes: ' + doc.data.title).slice(0, 300)) {
+          await trackedUpdate(nb.id, { title: ('Notes: ' + newTitle).slice(0, 300) });
+        }
         return retitleLinks(doc.data.title, newTitle);
       });
       if (state.docId === docId) $('#view-title').textContent = newTitle;
@@ -1215,7 +1233,8 @@ function showExplanation(t) {
 
 async function createExplainTask(anno, isRegion) {
   const docId = anno.data.docId;
-  if (!anno.data.status) await trackedUpdate(anno.id, { status: 'unclear' });
+  // Asking for an explanation means it is not clear (again).
+  if (anno.data.status !== 'unclear') await trackedUpdate(anno.id, { status: 'unclear' });
   const task = await trackedCreate('task', {
     text: 'Explain: ' + (isRegion ? `region on p. ${anno.data.page}` : snippet(anno.data.quote, 100)),
     type: 'explain',
@@ -1456,6 +1475,10 @@ function renderPanel() {
   $('#toggle-contents').classList.toggle('active', state.panelOpen && state.panelMode === 'contents');
   $('#toggle-note-panel').classList.toggle('active', state.panelOpen);
   if (!show) return;
+  // In portrait the panel overlays the page; it starts below the toolbar so
+  // every toolbar button stays reachable.
+  const bar = state.view === 'doc' ? $('.doc-toolbar') : $('.note-toolbar');
+  panel.style.top = NARROW.matches && bar ? bar.offsetHeight + 'px' : '';
   if (state.view === 'doc' && state.panelMode === 'contents') renderContentsPanel(panel);
   else if (state.view === 'doc') renderDocPanel(panel);
   else renderNotePanel(panel);
@@ -1531,9 +1554,7 @@ function wireFind(panel, view) {
       li.querySelector('.toc-page').textContent = 'p. ' + h.page;
       // The match itself is wrapped in <mark>; the text around it is set as text.
       const snip = li.querySelector('.find-snippet');
-      const before = contextSnippet(h.text.slice(0, h.at), h.at, 0, 45).replace(/\u2026$/, '');
-      const match = h.text.slice(h.at, h.at + q.length);
-      const after = contextSnippet(h.text.slice(h.at + q.length), 0, 0, 45).replace(/^\u2026/, '');
+      const [before, match, after] = splitAround(h.text, h.at, q.length, 45);
       const mark = document.createElement('mark');
       mark.textContent = match;
       snip.append(before, mark, after);
@@ -2270,7 +2291,13 @@ function wire() {
     if ((e.metaKey || e.ctrlKey) && e.key === 'f' && state.view === 'doc') {
       e.preventDefault();
       setPanel(true, 'contents');
-      setTimeout(() => document.querySelector('#panel .find-box')?.focus(), 50);
+      setTimeout(() => {
+        const box = document.querySelector('#panel .find-box');
+        if (box) {
+          box.focus();
+          box.select();
+        }
+      }, 50);
       return;
     }
     // Text fields keep their own undo; everywhere else Cmd/Ctrl+Z is ours.
@@ -2309,6 +2336,8 @@ function wire() {
   });
 
   addEventListener('hashchange', () => route().catch(e => reportError('Navigation failed', e)));
+  // Rotation: the panel's position depends on portrait or landscape.
+  NARROW.addEventListener('change', () => renderPanel());
   const flushEditors = () => {
     mainEditor.flush();
     sideEditor.flush();

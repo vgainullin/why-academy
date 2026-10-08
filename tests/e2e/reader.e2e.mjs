@@ -231,6 +231,12 @@ try {
   await wait(400);
   const tb = await page.evaluate(() => ({ w: document.querySelector('.doc-toolbar').clientWidth, vw: innerWidth }));
   check('panel overlays in portrait (toolbar keeps full width)', tb.w >= tb.vw - 2, JSON.stringify(tb));
+  const reachable = await page.evaluate(() => ['#toggle-panel', '#toggle-contents', '#open-brief', '#zoom-in'].map(sel => {
+    const b = document.querySelector(sel).getBoundingClientRect();
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return hit && hit.closest(sel) ? 'ok' : sel;
+  }).filter(x => x !== 'ok'));
+  check('toolbar stays reachable with the panel open', reachable.length === 0, reachable.join(', '));
   await page.click('#panel .panel-close');
 
   // page re-fits when the panel opens and closes (landscape, side by side)
@@ -473,16 +479,57 @@ try {
   check('eraser erases a plain highlight', m4 === m0, `${m3} -> ${m4}`);
   await page.click('.tool[data-tool="select"]');
 
+  // Explain on a passage marked Understood flags it Not clear yet again
+  await page.evaluate(() => __wa.selectText(1, 'keys K and values V'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Not clear yet")');
+  await wait(400);
+  const tapMark = async () => {
+    const pt = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('.pdf-page[data-page="1"] .anno-highlight')].pop();
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.click(pt.x, pt.y);
+    await page.waitForSelector('#action-bar:not(.hidden)');
+  };
+  await tapMark();
+  await page.click('#action-bar .action-btn:text-is("Understood")');
+  await wait(400);
+  await tapMark();
+  await page.click('#action-bar .action-btn:text-is("Explain")');
+  let reflagged;
+  for (let i = 0; i < 20 && reflagged !== 'unclear'; i++) {
+    await wait(500);
+    reflagged = await page.evaluate(async () => (await __wa.serverItems('anno')).find(a => !a.deleted && /keys K\s*and values V/.test(a.data.quote))?.data.status);
+  }
+  check('explain re-flags an understood passage as not clear', reflagged === 'unclear', String(reflagged));
+
   // Pinch zoom (trackpad pinch arrives as ctrl+wheel) zooms the page only
   const w0z = await page.evaluate(() => document.querySelector('.pdf-page').getBoundingClientRect().width);
   const box = await page.locator('#pdf-scroll').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + 300);
   await page.keyboard.down('Control');
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -40);
+  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -40);
   await page.keyboard.up('Control');
   await wait(900);
   const w1z = await page.evaluate(() => document.querySelector('.pdf-page').getBoundingClientRect().width);
   const tbw = await page.evaluate(() => document.querySelector('.doc-toolbar').getBoundingClientRect().width);
+  await wait(1200);
+  const sharpness = await page.evaluate(() => {
+    const p = [...document.querySelectorAll('.pdf-page')].find(el => {
+      const r = el.getBoundingClientRect();
+      return r.bottom > 100 && r.top < innerHeight;
+    });
+    const base = p.querySelector('.pdf-canvas');
+    const d = p.querySelector('.pdf-detail');
+    return {
+      base: base.width / p.clientWidth,
+      detail: d ? d.width / d.getBoundingClientRect().width : 0,
+    };
+  });
+  check('high zoom renders the visible area at full resolution', sharpness.base < 1.8 && sharpness.detail >= 1.8,
+    `page canvas ${sharpness.base.toFixed(2)}x, detail ${sharpness.detail.toFixed(2)}x`);
   check('pinch zoom enlarges the page, not the interface', w1z > w0z * 1.3 && Math.abs(tbw - 834) < 2, `${Math.round(w0z)} -> ${Math.round(w1z)}, toolbar ${Math.round(tbw)}`);
   await page.click('#zoom-fit').catch(() => {});
 
@@ -523,6 +570,14 @@ try {
   await page.waitForSelector('.pdf-page[data-page="3"] .textLayer span.find-hit', { timeout: 8000 }).catch(() => {});
   check('find in paper jumps to and highlights the match', findHits === 1 && (await page.inputValue('#page-input')) === '3'
     && (await page.locator('.pdf-page[data-page="3"] .textLayer span.find-hit').count()) > 0, `${findHits} hit(s), page ${await page.inputValue('#page-input')}`);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Meta+f');
+  await wait(300);
+  await page.keyboard.type('variance');
+  await page.waitForFunction(() => /variance/i.test(document.querySelector('#panel .find-results mark')?.textContent || ''));
+  check('Cmd+F selects the previous query so typing replaces it', (await page.inputValue('#panel .find-box')) === 'variance', await page.inputValue('#panel .find-box'));
+  const snip = await page.locator('#panel .find-snippet').first().textContent();
+  check('find snippets keep the spaces around the match', /\s(the )?variance\s/.test(snip), JSON.stringify(snip));
   await page.click('#panel .panel-close').catch(() => {});
 
   // Library search finds the paper's own text
@@ -554,6 +609,8 @@ try {
     await wait(500);
   }
   const probeText = noteText(probe);
+  const nbTitle = (await page.evaluate(() => __wa.serverItems('note'))).find(n => n.data.notebookFor)?.data.title;
+  check('renaming a paper renames its notebook', nbTitle === 'Notes: Attention note', nbTitle);
   check('renaming a paper updates links to it', probeText.includes('[[Attention note|the paper]]') && probeText.includes('[[Attention note]]'), probeText);
   // ...and the rename undoes as one step (title and links)
   await library();

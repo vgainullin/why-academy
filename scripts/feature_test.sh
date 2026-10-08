@@ -50,19 +50,11 @@ case "$DEVICE" in
 esac
 
 RUN="$ROOT/tests/feature-reports/$(date +%Y%m%d-%H%M%S)-$AREA"
-mkdir -p "$RUN/state" "$RUN/shots" "$RUN/fixture"
-WRANGLER=(npx wrangler -c "$ROOT/worker/wrangler.toml")
-PORT=$(node -e "const s=require('net').createServer().listen(0,()=>{console.log(s.address().port);s.close()})")
-ORIGIN="http://localhost:$PORT"
-SERVER_PID=""
+mkdir -p "$RUN/shots" "$RUN/fixture"
+source "$ROOT/scripts/feature_test/isolated_server.sh"
 
 cleanup() {
-  if [[ -n "$SERVER_PID" ]]; then
-    # npx -> wrangler -> workerd: stop the whole tree, then anything left on the port.
-    pkill -P "$SERVER_PID" 2>/dev/null || true
-    kill "$SERVER_PID" 2>/dev/null || true
-    lsof -ti "tcp:$PORT" 2>/dev/null | xargs kill 2>/dev/null || true
-  fi
+  stop_isolated_server
   # The kit holds the session token and possibly the AI key.
   rm -f "$RUN/testkit.js" "$RUN/mcp.json"
   [[ $KEEP_STATE == 1 ]] || rm -rf "$RUN/state"
@@ -70,27 +62,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Run: $RUN"
-
-# ── Isolated server with a seeded account ──
-"${WRANGLER[@]}" d1 migrations apply why-academy --local --persist-to "$RUN/state" > "$RUN/setup.log" 2>&1
-TOKEN=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
-HASH=$(printf %s "$TOKEN" | shasum -a 256 | cut -d' ' -f1)
-NOW=$(node -e "console.log(Date.now())")
-"${WRANGLER[@]}" d1 execute why-academy --local --persist-to "$RUN/state" --command \
-  "INSERT INTO accounts (id, display_name, created_at, last_login_at) VALUES ('feature-tester', 'Feature Tester', $NOW, $NOW);
-   INSERT INTO account_sessions (id, account_id, created_at, expires_at) VALUES ('$HASH', 'feature-tester', $NOW, $((NOW + 86400000)));" \
-  >> "$RUN/setup.log" 2>&1
-
-"${WRANGLER[@]}" dev --port "$PORT" --persist-to "$RUN/state" > "$RUN/server.log" 2>&1 &
-SERVER_PID=$!
-for _ in $(seq 1 90); do
-  grep -q "Ready on" "$RUN/server.log" && break
-  kill -0 "$SERVER_PID" 2>/dev/null || { echo "Server exited:" >&2; tail -20 "$RUN/server.log" >&2; exit 1; }
-  sleep 1
-done
-grep -q "Ready on" "$RUN/server.log" || { echo "Server not ready after 90s" >&2; tail -20 "$RUN/server.log" >&2; exit 1; }
-curl -sf "$ORIGIN/api/me" -H "Cookie: __Host-wa_session=$TOKEN" > /dev/null \
-  || { echo "Seeded session does not work against $ORIGIN" >&2; exit 1; }
+start_isolated_server "$RUN"
 
 # ── Fixture, test kit, browser ──
 node "$ROOT/scripts/feature_test/make_fixture.mjs" "$RUN/fixture/attention-note.pdf"

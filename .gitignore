@@ -53,3 +53,4 @@ test-lesson.html
 
 # LLM feature test runs (scripts/feature_test.sh)
 tests/feature-reports/
+tests/e2e/out/

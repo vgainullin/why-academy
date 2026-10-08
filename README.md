@@ -82,6 +82,12 @@ OPENROUTER_API_KEY=... scripts/feature_test.sh  # also judges real AI output
 
 Reports go to `tests/feature-reports/<run>/` (`report.md`, `findings.json`, `shots/`). In an interactive session, `/feature-test` uses the same method.
 
+Bugs the tester finds are pinned by a deterministic browser suite (no LLM, AI calls stubbed), which runs in about two minutes:
+
+```bash
+npm run test:e2e        # tests/e2e/reader.e2e.mjs at iPad portrait size; needs Google Chrome
+```
+
 ### Adding Lessons
 Lessons are authored as structured JSON files inside `lessons/`. You can load a custom lesson by passing it as a query parameter:
 `http://localhost:8765/lesson.html?lesson=lessons/physics/oscillations/01-single-spring.json`

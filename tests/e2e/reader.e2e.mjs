@@ -60,6 +60,12 @@ const check = (name, ok, extra = '') => {
   console.log((ok ? 'PASS ' : 'FAIL ') + name + (extra ? ' -- ' + extra : ''));
 };
 const wait = ms => page.waitForTimeout(ms);
+// Back to fit width: on touch screens the zoom chip opens a menu with Fit.
+const fitZoom = async () => {
+  await page.click('#zoom-fit');
+  if (await page.isVisible('#zoom-menu')) await page.click('#zoom-menu [data-zoom="fit"]');
+  await page.keyboard.press('Escape');
+};
 const visibleAt = sel => page.evaluate(sel => {
   const el = document.querySelector(sel);
   if (!el) return 'missing';
@@ -540,7 +546,7 @@ try {
   check('high zoom renders the visible area at full resolution', sharpness.base < 1.8 && sharpness.detail >= 1.8,
     `page canvas ${sharpness.base.toFixed(2)}x, detail ${sharpness.detail.toFixed(2)}x`);
   check('pinch zoom enlarges the page, not the interface', w1z > w0z * 1.3 && Math.abs(tbw - 834) < 2, `${Math.round(w0z)} -> ${Math.round(w1z)}, toolbar ${Math.round(tbw)}`);
-  await page.click('#zoom-fit').catch(() => {});
+  await fitZoom().catch(() => {});
 
   // Rename and remove a paper (the outline-less copy, not the main one)
   await page.goto(B + '/reader');
@@ -952,7 +958,7 @@ try {
   await wait(800);
   const zl = await page.textContent('#zoom-fit');
   check('Fit shows the zoom level when zoomed', /^\d+%$/.test(zl), zl);
-  await page.click('#zoom-fit');
+  await fitZoom();
 
   // Typed LaTeX when handwriting cannot be read
   await page.click('#toggle-notebook');
@@ -963,6 +969,90 @@ try {
   await page.locator('#doc-notebook [data-ed="save"]').last().click();
   check('LaTeX lines can be typed for a pad', (await page.locator('#doc-notebook .ink-latex').last().locator('.latex-line').count()) === 2);
   await page.click('#toggle-notebook');
+
+  // Pinch zoom keeps the point under the fingers in place
+  await page.goto(B + '/reader#doc=' + docId + '&p=2');
+  await page.waitForSelector('.pdf-page[data-page="2"] .textLayer span');
+  await fitZoom();
+  await wait(600);
+  const anchorPt = await page.evaluate(() => {
+    const span = [...document.querySelectorAll('.pdf-page[data-page="2"] .textLayer span')].find(s => s.textContent.includes('restores unit variance'));
+    const r = span.getBoundingClientRect();
+    return { x: r.left + 10, y: r.top + r.height / 2 };
+  });
+  await page.mouse.move(anchorPt.x, anchorPt.y);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 2; i++) await page.mouse.wheel(0, -40);
+  await page.keyboard.up('Control');
+  await wait(1200);
+  const anchorAfter = await page.evaluate(() => {
+    const span = [...document.querySelectorAll('.pdf-page[data-page="2"] .textLayer span')].find(s => s.textContent.includes('restores unit variance'));
+    const r = span.getBoundingClientRect();
+    return { x: r.left, y: r.top + r.height / 2 };
+  });
+  const drift = Math.hypot(anchorAfter.y - anchorPt.y, 0);
+  check('pinch zoom stays anchored at the pinch point', drift < 40 && anchorAfter.y > 0, `moved ${Math.round(drift)} px vertically`);
+  await fitZoom();
+
+  // Pen and highlighter keep separate sizes
+  await page.click('.tool[data-tool="highlighter"]');
+  await page.click('#color-group .swatch.active');
+  await page.click('#color-group .size-fine');
+  await page.click('.tool[data-tool="pen"]');
+  const penLabel = await page.getAttribute('#color-group .swatch.active', 'data-size');
+  check('pen and highlighter keep their own sizes', penLabel === 'medium', 'pen size ' + penLabel);
+
+  // Recolor an existing highlight from its actions
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(2, 'so by independence'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  await wait(400);
+  const hlPt = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.pdf-page[data-page="2"] .anno-highlight')].pop();
+    const r = el.getBoundingClientRect();
+    return { x: r.left + 6, y: r.top + r.height / 2, id: el.dataset.anno };
+  });
+  await page.mouse.click(hlPt.x, hlPt.y);
+  await page.waitForSelector('#action-bar:not(.hidden) .swatch');
+  await page.click('#action-bar .swatch >> nth=2');
+  await wait(400);
+  const newColor = await page.evaluate(id => document.querySelector(`.anno-highlight[data-anno="${id}"]`)?.style.getPropertyValue('--anno-color'), hlPt.id);
+  check('an existing highlight can change color', newColor === '#f9a8d4', newColor);
+
+  // A region without LaTeX shows its picture in the Marks panel
+  await page.click('.tool[data-tool="region"]');
+  await page.evaluate(() => __wa.dragOnPage(2, 0.12, 0.44, 0.9, 0.5));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Comment")');
+  await page.fill('dialog textarea', 'Which equation is this?');
+  await page.click('dialog button[value="ok"]');
+  await page.click('.tool[data-tool="select"]');
+  await page.click('#toggle-panel');
+  await page.waitForSelector('#panel .mark');
+  await page.waitForSelector('#panel .mark-region', { timeout: 8000 }).catch(() => {});
+  check('a region without LaTeX shows its picture in Marks', (await page.locator('#panel .mark-region').count()) >= 1);
+  await page.click('#panel .panel-close');
+
+  // Card questions in the Brief
+  await page.goto(B + '/reader#brief=' + docId);
+  await page.waitForSelector('.brief-body h2');
+  check('the Brief lists card questions', (await page.locator('.brief-body h2').allTextContents()).some(h => h.startsWith('Card questions')));
+
+  // Deleting a note moves it to Recently deleted
+  await newNote();
+  await page.fill('#note-root .note-title', 'Note to bin');
+  await wait(1200);
+  const binId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('note'));
+  await page.click('#delete-note');
+  await wait(500);
+  await library();
+  const inBin = await page.locator(`#trash li[data-doc="${binId}"]`).count();
+  const listed = await page.locator(`#note-list a[href="#note=${binId}"]`).count();
+  if (!(await page.evaluate(() => document.querySelector('#trash').open))) await page.click('#trash summary');
+  await page.click(`#trash li[data-doc="${binId}"] [data-act="restore"]`);
+  await wait(500);
+  check('deleted notes go to Recently deleted and can be restored', inBin === 1 && listed === 0 && (await page.locator(`#note-list a[href="#note=${binId}"]`).count()) === 1, `bin ${inBin}, listed ${listed}`);
 
   // Tapping the open paper in the library puts the library away
   await library();

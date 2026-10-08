@@ -59,7 +59,11 @@ const state = {
     tool: matchMedia('(pointer: coarse)').matches ? 'pen' : 'select',
     color: INK_COLORS[0],
     hlColor: HIGHLIGHT_COLORS[0],
-    size: PEN_SIZES.includes(localStorage.getItem('reader.penSize')) ? localStorage.getItem('reader.penSize') : 'medium',
+    // Pen and highlighter keep their own sizes, as in GoodNotes.
+    sizes: {
+      pen: PEN_SIZES.includes(localStorage.getItem('reader.penSize')) ? localStorage.getItem('reader.penSize') : 'medium',
+      highlighter: PEN_SIZES.includes(localStorage.getItem('reader.hlSize')) ? localStorage.getItem('reader.hlSize') : 'medium',
+    },
   },
   links: null,
   // On narrow screens the panel covers the page, so it never reopens by itself.
@@ -99,8 +103,9 @@ function snippet(s, n = 120) {
 const TRASH_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Papers and notes go to Recently deleted.
 function isTrashed(d) {
-  return !!(d && d.kind === 'doc' && d.data.trashedAt);
+  return !!(d && (d.kind === 'doc' || d.kind === 'note') && d.data.trashedAt);
 }
 
 // A paper that is in the library (not in the trash).
@@ -113,8 +118,7 @@ function liveDoc(id) {
 // are left out.
 function visibleItems() {
   const trashed = new Set(store.all('doc').filter(isTrashed).map(d => d.id));
-  if (!trashed.size) return store.all();
-  return store.all().filter(it => !(it.kind === 'doc' && trashed.has(it.id))
+  return store.all().filter(it => !isTrashed(it)
     && !((it.kind === 'anno' || it.kind === 'ink') && trashed.has(it.data.docId)));
 }
 
@@ -130,9 +134,10 @@ async function purgePaper(docId) {
 
 async function purgeExpiredTrash() {
   const cutoff = Date.now() - TRASH_DAYS * DAY_MS;
-  for (const d of store.all('doc').filter(d => isTrashed(d) && d.data.trashedAt < cutoff)) {
+  for (const d of store.all().filter(d => isTrashed(d) && d.data.trashedAt < cutoff)) {
     try {
-      await purgePaper(d.id);
+      if (d.kind === 'note') await store.remove(d.id);
+      else await purgePaper(d.id);
     } catch (e) {
       console.error('Emptying the trash failed for', d.id, e);
     }
@@ -183,14 +188,15 @@ function reportError(context, e) {
 function getTool() {
   const t = state.tool;
   const isHl = t.tool === 'highlighter';
-  return { tool: t.tool, color: isHl ? t.hlColor : t.color, width: PEN_WIDTHS[t.size][isHl ? 'highlighter' : 'pen'] };
+  const kind = isHl ? 'highlighter' : 'pen';
+  return { tool: t.tool, color: isHl ? t.hlColor : t.color, width: PEN_WIDTHS[t.sizes[kind]][kind] };
 }
 
 // Notebook ink pads always take the Pencil: Select and Region are reading
 // tools and mean nothing on a pad.
 function getInkTool() {
   const t = getTool();
-  if (t.tool === 'select' || t.tool === 'region') return { tool: 'pen', color: state.tool.color, width: PEN_WIDTHS[state.tool.size].pen };
+  if (t.tool === 'select' || t.tool === 'region') return { tool: 'pen', color: state.tool.color, width: PEN_WIDTHS[state.tool.sizes.pen].pen };
   // lasso, pen, highlighter and eraser work on pads as on pages.
   return t;
 }
@@ -368,8 +374,9 @@ function renderColors() {
     const btn = document.createElement('button');
     btn.className = 'swatch active';
     btn.style.setProperty('--swatch', current);
-    btn.title = `${isHl ? 'Highlighter' : 'Pen'}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.size} (tap for colors and sizes)`;
-    btn.dataset.size = state.tool.size;
+    const kind = isHl ? 'highlighter' : 'pen';
+    btn.title = `${isHl ? 'Highlighter' : 'Pen'}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.sizes[kind]} (tap for colors and sizes)`;
+    btn.dataset.size = state.tool.sizes[kind];
     btn.setAttribute('aria-label', btn.title);
     btn.setAttribute('aria-expanded', 'false');
     const menu = document.createElement('div');
@@ -391,15 +398,15 @@ function renderColors() {
     sizes.className = 'size-row';
     for (const size of PEN_SIZES) {
       const b = document.createElement('button');
-      b.className = 'size-dot size-' + size + (size === state.tool.size ? ' active' : '');
+      b.className = 'size-dot size-' + size + (size === state.tool.sizes[kind] ? ' active' : '');
       b.title = size[0].toUpperCase() + size.slice(1) + ' line';
       b.setAttribute('aria-label', b.title);
-      b.setAttribute('aria-pressed', String(size === state.tool.size));
+      b.setAttribute('aria-pressed', String(size === state.tool.sizes[kind]));
       b.addEventListener('click', e => {
         e.stopPropagation();
-        state.tool.size = size;
+        state.tool.sizes[kind] = size;
         try {
-          localStorage.setItem('reader.penSize', size);
+          localStorage.setItem(kind === 'pen' ? 'reader.penSize' : 'reader.hlSize', size);
         } catch (err) {
           console.warn('Could not remember the pen size', err);
         }
@@ -439,12 +446,12 @@ async function route() {
   // A dialog belongs to the view it was opened in.
   const dlg = $('#dialog');
   if (dlg.open) dlg.close('cancel');
-  const exists = id => (r.view === 'note' ? store.get(id) || pendingNotes.has(id) || noteBackup(id) : liveDoc(id));
+  const exists = id => (r.view === 'note' ? (store.get(id) && !isTrashed(store.get(id))) || pendingNotes.has(id) || noteBackup(id) : liveDoc(id));
   if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !exists(r.id)) {
-    const trashedDoc = r.view !== 'note' && isTrashed(store.get(r.id)) ? store.get(r.id) : null;
+    const trashedDoc = isTrashed(store.get(r.id)) ? store.get(r.id) : null;
     if (trashedDoc) {
       const target = location.hash;
-      toast('That paper is in Recently deleted.', false, {
+      toast(trashedDoc.kind === 'note' ? 'That note is in Recently deleted.' : 'That paper is in Recently deleted.', false, {
         label: 'Restore',
         run: async () => {
           await trackedUpdate(trashedDoc.id, { trashedAt: undefined });
@@ -520,8 +527,8 @@ function setSidebar(open) {
 
 function renderSidebar() {
   const docs = store.all('doc').filter(d => !isTrashed(d)).sort((a, b) => b.updatedAt - a.updatedAt);
-  renderTrash(store.all('doc').filter(isTrashed));
-  const notes = store.all('note').sort((a, b) => b.updatedAt - a.updatedAt);
+  renderTrash(store.all().filter(isTrashed));
+  const notes = store.all('note').filter(n => !isTrashed(n)).sort((a, b) => b.updatedAt - a.updatedAt);
 
   const markCounts = new Map();
   for (const a of store.all('anno')) markCounts.set(a.data.docId, (markCounts.get(a.data.docId) || 0) + 1);
@@ -751,7 +758,7 @@ async function openLink(el) {
 
 function titles() {
   return [
-    ...store.all('note').filter(n => n.data.title && n.data.title.trim()).map(n => ({ title: n.data.title, kind: 'note' })),
+    ...store.all('note').filter(n => !isTrashed(n) && n.data.title && n.data.title.trim()).map(n => ({ title: n.data.title, kind: 'note' })),
     ...store.all('doc').filter(d => !isTrashed(d)).map(d => ({ title: d.data.title, kind: 'paper' })),
   ];
 }
@@ -972,9 +979,11 @@ function refreshDocOverlays() {
       : TASK_LABELS[it.data.type] + ': ' + snippet(it.data.text.replace(/^Explain:\s*/, ''), 60)));
     let marker = labels.map(l => l[0]).join('');
     if (a.data.status === 'unclear') marker = '?' + marker;
+    if (a.data.brief) marker += 'B';
     const markerTitle = [
       a.data.status === 'unclear' ? 'Not understood yet' : a.data.status === 'understood' ? 'Understood' : '',
       ...details,
+      a.data.brief ? 'In the Brief' : '',
       a.data.comment ? 'Comment: ' + a.data.comment : '',
     ].filter(Boolean).join('\n');
     return { ...a, marker, markerTitle };
@@ -1037,21 +1046,23 @@ function renderTrash(trashed) {
     const li = document.createElement('li');
     li.className = 'trash-item';
     li.dataset.doc = d.id;
-    li.innerHTML = `<div class="trash-title"></div><div class="side-item-meta">Deleted for good in ${days} day${days === 1 ? '' : 's'}</div>
+    li.innerHTML = `<div class="trash-title"></div><div class="side-item-meta">${d.kind === 'note' ? 'Note' : 'Paper'} \u00b7 deleted for good in ${days} day${days === 1 ? '' : 's'}</div>
       <div class="trash-actions"><button class="btn-small" data-act="restore">Restore</button><button class="btn-small danger" data-act="purge">Delete now</button></div>`;
-    li.querySelector('.trash-title').textContent = d.data.title;
+    const name = d.kind === 'note' ? noteTitle(d) : d.data.title;
+    li.querySelector('.trash-title').textContent = name;
     li.querySelector('[data-act="restore"]').addEventListener('click', async () => {
       try {
         await trackedUpdate(d.id, { trashedAt: undefined });
-        toast('Restored ' + snippet(d.data.title, 50));
+        toast('Restored ' + snippet(name, 50));
       } catch (e) {
         reportError('Restoring failed', e);
       }
     });
     li.querySelector('[data-act="purge"]').addEventListener('click', async () => {
-      if (!confirm(`Delete "${d.data.title}" for good, with its marks and ink? Cards, tasks and notes are kept. This cannot be undone.`)) return;
+      if (!confirm(d.kind === 'note' ? `Delete "${name}" for good? This cannot be undone.` : `Delete "${name}" for good, with its marks and ink? Cards, tasks and notes are kept. This cannot be undone.`)) return;
       try {
-        await purgePaper(d.id);
+        if (d.kind === 'note') await store.remove(d.id);
+        else await purgePaper(d.id);
         toast('Deleted for good');
       } catch (e) {
         reportError('Deleting failed', e);
@@ -1143,6 +1154,8 @@ function paperNotebook(docId) {
 
 async function ensurePaperNotebook(docId) {
   const existing = paperNotebook(docId);
+  // Opening the notebook of a paper brings it back from Recently deleted.
+  if (existing && isTrashed(existing)) return trackedUpdate(existing.id, { trashedAt: undefined });
   if (existing) return existing;
   const doc = store.get(docId);
   // Deterministic content too: two untouched notebooks from two devices are
@@ -1282,7 +1295,12 @@ function showActions(target) {
     bar.appendChild(head);
   }
   const status = target.kind === 'anno' ? target.anno.data.status : null;
-  for (const act of ACTIONS[target.kind]) {
+  // A saved region keeps the equation actions it had when new.
+  const isSavedRegion = target.kind === 'anno' && target.anno.data.type === 'region';
+  const actions = isSavedRegion
+    ? ['readexp', 'eqcard', 'latex', 'explain', 'derive', 'unclear', 'understood', 'comment', 'todo', 'question', 'pin', 'unpin', 'link', 'delete']
+    : ACTIONS[target.kind];
+  for (const act of actions) {
     if ((act === 'unclear' && status === 'unclear') || (act === 'understood' && status !== 'unclear')) continue;
     if (act === 'readexp' && !explanationFor(target.anno.id)) continue;
     const pinned = target.kind === 'anno' && target.anno.data.brief;
@@ -1294,17 +1312,23 @@ function showActions(target) {
     b.addEventListener('click', () => runAction(act).catch(e => reportError(ACTION_LABELS[act] + ' failed', e)));
     bar.appendChild(b);
   }
-  if (target.kind === 'selection') {
+  const recolor = target.kind === 'anno' && target.anno.data.type === 'highlight';
+  if (target.kind === 'selection' || recolor) {
     for (const c of HIGHLIGHT_COLORS) {
       const s = document.createElement('button');
-      s.className = 'swatch small' + (c === state.tool.hlColor ? ' active' : '');
+      s.className = 'swatch small' + (c === (recolor ? target.anno.data.color : state.tool.hlColor) ? ' active' : '');
       s.style.setProperty('--swatch', c);
       s.setAttribute('aria-label', 'Highlight ' + COLOR_NAMES[c].toLowerCase());
       s.title = 'Highlight ' + COLOR_NAMES[c].toLowerCase();
       s.addEventListener('pointerdown', e => e.preventDefault());
       s.addEventListener('click', () => {
         state.tool.hlColor = c;
-        runAction('highlight').catch(e => reportError('Highlight failed', e));
+        if (recolor) {
+          trackedUpdate(target.anno.id, { color: c }).catch(e => reportError('Changing the color failed', e));
+          hideActions();
+        } else {
+          runAction('highlight').catch(e => reportError('Highlight failed', e));
+        }
       });
       bar.appendChild(s);
     }
@@ -1431,16 +1455,12 @@ async function runActionNow(act) {
     const pin = act === 'pin';
     const anno = await commitAnno(p, { brief: pin });
     toast(pin ? 'Added to the Brief' : 'Removed from the Brief');
-    // An equation in the Brief should read as an equation.
-    if (pin && anno.data.type === 'region' && !anno.data.latex && state.pdf) {
-      equationToLatex(await state.pdf.regionImage(anno.data.page, anno.data.rects[0]))
-        .then(latex => store.get(anno.id) && store.update(anno.id, { latex }))
-        .catch(e => console.warn('No LaTeX for the pinned region', e));
-    }
+    if (pin) ensureRegionLatex(anno);
   } else if (act === 'highlight') {
     await commitAnno(p);
   } else if (act === 'unclear' || act === 'understood') {
     const anno = await commitAnno(p, { status: act });
+    ensureRegionLatex(anno);
     // Understanding a passage also settles its explanations.
     if (act === 'understood') {
       for (const t of store.all('task').filter(t => t.data.type === 'explain' && t.data.annoId === anno.id && t.data.status !== 'done')) {
@@ -1488,13 +1508,14 @@ async function runActionNow(act) {
     ed.render();
   } else if (act === 'todo' || act === 'question') {
     const label = act === 'todo' ? 'Follow-up task' : 'Question for journal club';
-    const def = act === 'todo' ? 'Follow up: ' + snippet(quote || 'region on p. ' + page, 80) : '';
-    const text = await promptDialog(label, def, {
+    // The passage is shown above the field; the field is for your words.
+    const entered = await promptDialog(label, '', {
       multiline: true,
       enterSaves: true,
       context: quote || `Region on p. ${page}`,
-      placeholder: act === 'question' ? 'What do you want to ask or discuss?' : '',
+      placeholder: act === 'question' ? 'What do you want to ask or discuss?' : 'What to follow up on (empty: just this passage)',
     });
+    const text = entered === '' && act === 'todo' ? 'Follow up: ' + snippet(quote || 'region on p. ' + page, 80) : entered;
     if (text) {
       const anno = await commitAnno(p);
       await trackedCreate('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
@@ -1521,15 +1542,20 @@ function showExplanation(t) {
   dlg.showModal();
 }
 
+// A region you work with (pin, rate, explain) gets its LaTeX read in the
+// background, so the Marks panel and the Brief can show which equation it is.
+function ensureRegionLatex(anno) {
+  if (anno.data.type !== 'region' || anno.data.latex || !state.pdf || state.docId !== anno.data.docId) return;
+  if (C.handwriteBackend() === 'openrouter' && !C.openrouterApiKey()) return;
+  state.pdf.regionImage(anno.data.page, anno.data.rects[0])
+    .then(img => equationToLatex(img))
+    .then(latex => store.get(anno.id) && store.update(anno.id, { latex }))
+    .catch(e => console.warn('Could not read the LaTeX of a region', e));
+}
+
 async function createExplainTask(anno, isRegion) {
   const docId = anno.data.docId;
-  // An equation region gets its LaTeX too, so it reads well in the Brief.
-  if (isRegion && !anno.data.latex && state.pdf && state.docId === docId) {
-    state.pdf.regionImage(anno.data.page, anno.data.rects[0])
-      .then(img => equationToLatex(img))
-      .then(latex => store.get(anno.id) && store.update(anno.id, { latex }))
-      .catch(e => console.warn('No LaTeX for the explained region', e));
-  }
+  ensureRegionLatex(anno);
   // Asking for an explanation means it is not clear (again).
   if (anno.data.status !== 'unclear') await trackedUpdate(anno.id, { status: 'unclear' });
   const task = await trackedCreate('task', {
@@ -2149,6 +2175,16 @@ function renderDocPanel(panel) {
       ${a.data.comment ? '<div class="mark-comment"></div>' : ''}
       <div class="mark-items">${a.data.status ? `<span class="tag tag-${a.data.status}">${a.data.status === 'unclear' ? 'Not clear yet' : 'Understood'}</span>` : ''}${items.map(it => `<span class="tag tag-${it.kind === 'card' ? 'card' : it.data.type} ${it.data.status === 'done' ? 'done' : ''}">${it.kind === 'card' ? 'Card' : TASK_LABELS[it.data.type]}</span>`).join('')}</div>`;
     li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : 'Region') : snippet(a.data.quote, 160);
+    if (a.data.type === 'region' && !a.data.latex && state.pdf) {
+      // No LaTeX (yet): show the region itself so it can be recognised.
+      state.pdf.regionImage(a.data.page, a.data.rects[0], 260).then(src => {
+        const img = document.createElement('img');
+        img.className = 'mark-region';
+        img.alt = 'Region on page ' + a.data.page;
+        img.src = src;
+        li.querySelector('.mark-quote').replaceChildren(img);
+      }).catch(e => console.warn('Region preview failed', e));
+    }
     if (a.data.type === 'region' && a.data.latex) li.querySelector('.mark-quote').innerHTML = renderMarkdown(`$${a.data.latex}$`, resolveLink);
     if (a.data.comment) li.querySelector('.mark-comment').textContent = a.data.comment;
     for (const q of items.filter(it => it.kind === 'task' && it.data.type !== 'explain')) {
@@ -2360,7 +2396,9 @@ function explanationCard(t, archived) {
         await store.update(t.id, { status: 'ready' });
         if (a) await store.update(a.id, { status: 'unclear' });
       } else if (act === 'note') {
-        const title = await promptDialog('Note title', snippet(t.data.text.replace(/^Explain:\s*/, ''), 60));
+        const heading = (t.data.explanation || '').match(/^#{1,4}\s+(.+)$/m) || (t.data.explanation || '').match(/^\*\*([^*]{8,90})\*\*\s*$/m);
+        const suggested = heading ? heading[1].replace(/^(Study note|Explanation)\s*:\s*/i, '').trim() : snippet(t.data.text.replace(/^Explain:\s*/, ''), 60);
+        const title = await promptDialog('Note title', suggested);
         if (!title) return;
         const ref = t.data.annoId ? `\n\nSource: [[@${t.data.annoId}]]` : '';
         const note = await store.create('note', { title, blocks: [{ id: newId(), type: 'md', text: t.data.explanation + ref }] });
@@ -2594,6 +2632,14 @@ function briefMarkdown(docId) {
     out.push(`- [ ] ${TASK_LABELS[t.data.type]}: ${text}` + (a ? ` ${ref(a)}` : ''));
   }
 
+  if (cards.length) {
+    out.push('', `## Card questions (${cards.length})`);
+    for (const c of cards) {
+      const a = c.data.annoId && store.get(c.data.annoId);
+      out.push(`- ${c.data.front.replace(/\n+/g, ' ')}${a ? ' ' + ref(a) : ''}`);
+    }
+  }
+
   const pinned = annos.filter(a => a.data.brief && a.data.type !== 'region');
   if (pinned.length) {
     out.push('', `## Key passages (${pinned.length})`);
@@ -2751,16 +2797,34 @@ function wire() {
   $('#new-note').addEventListener('click', newNote);
   $('#delete-note').addEventListener('click', async () => {
     const n = store.get(state.noteId);
-    if (n && !confirm(`Delete "${noteTitle(n)}"?`)) return;
     mainEditor.close();
-    if (n) await store.remove(n.id);
     navigate('#');
+    if (!n) return;
+    await trackedUpdate(n.id, { trashedAt: Date.now() });
+    toast(`Moved "${snippet(noteTitle(n), 40)}" to Recently deleted`, false, { label: 'Undo', run: undo });
   });
 
   document.querySelectorAll('.tool[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
   $('#zoom-in').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom * 1.2, state.pdf.fitWidth));
   $('#zoom-out').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom / 1.2, state.pdf.fitWidth));
-  $('#zoom-fit').addEventListener('click', () => state.pdf && state.pdf.setZoom(1, true));
+  $('#zoom-fit').addEventListener('click', e => {
+    if (!state.pdf) return;
+    // Touch screens without the − and + buttons get them from the chip.
+    if (matchMedia('(max-width: 1000px) and (pointer: coarse)').matches) {
+      e.stopPropagation();
+      $('#zoom-menu').classList.toggle('hidden');
+      return;
+    }
+    state.pdf.setZoom(1, true);
+  });
+  $('#zoom-menu').addEventListener('click', e => {
+    const act = e.target.closest('[data-zoom]')?.dataset.zoom;
+    if (!act || !state.pdf) return;
+    e.stopPropagation();
+    const v = state.pdf;
+    if (act === 'fit') v.setZoom(1, true);
+    else v.setZoom(v.zoom * (act === 'in' ? 1.25 : 0.8), v.fitWidth);
+  });
   $('#page-input').addEventListener('change', e => state.pdf && state.pdf.goTo(+e.target.value));
   document.querySelectorAll('[data-history]').forEach(b => b.addEventListener('click', () => (b.dataset.history === 'undo' ? undo() : redo())));
   $('#clear-page').addEventListener('click', async () => {
@@ -2810,7 +2874,7 @@ function wire() {
   $('#open-brief').addEventListener('click', () => state.docId && navigate('#brief=' + state.docId));
   // Close the color menus on any outside tap.
   document.addEventListener('click', () => {
-    document.querySelectorAll('.swatch-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    document.querySelectorAll('.swatch-menu:not(.hidden), #zoom-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
   });
   $('#toggle-notebook').addEventListener('click', () => {
     state.notebookOpen = !state.notebookOpen;
@@ -2901,7 +2965,7 @@ function wire() {
     const keys = { s: 'select', p: 'pen', h: 'highlighter', e: 'eraser', r: 'region', l: 'lasso' };
     if (state.view === 'doc' && keys[e.key] && !e.metaKey && !e.ctrlKey) setTool(keys[e.key]);
     if (e.key === 'Escape') {
-      const menu = document.querySelector('.swatch-menu:not(.hidden)');
+      const menu = document.querySelector('.swatch-menu:not(.hidden), #zoom-menu:not(.hidden)');
       if (menu) {
         menu.classList.add('hidden');
         return;

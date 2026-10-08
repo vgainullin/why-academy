@@ -889,3 +889,15 @@ body[data-tool="lasso"] .pdf-page .textLayer, body[data-tool="lasso"] .pdf-page 
 @media (max-width: 1000px) and (pointer: coarse) {
   #zoom-in, #zoom-out { display: none; }
 }
+
+a.wl-trashed { text-decoration: line-through; }
+
+.latex-editor { margin-top: 6px; }
+.latex-editor.hidden { display: none; }
+.latex-editor textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; padding: 8px; border: 1px solid var(--accent); border-radius: 6px; }
+.latex-editor-actions { display: flex; gap: 6px; margin-top: 4px; }
+
+.ink-sel-bar { align-items: center; background: #111827; border-radius: 8px; padding: 3px; }
+.ink-sel-bar button { padding: 5px 10px; }
+.ink-sel-bar .ink-sel-color { width: 22px; height: 22px; padding: 0; border-radius: 50%; background: var(--swatch); border: 2px solid #111827; box-shadow: 0 0 0 1px #6b7280; }
+.ink-handle { position: absolute; z-index: 6; width: 18px; height: 18px; border-radius: 50%; background: white; border: 3px solid var(--accent); cursor: nwse-resize; touch-action: none; }

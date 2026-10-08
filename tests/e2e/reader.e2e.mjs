@@ -660,7 +660,7 @@ try {
   await page.fill('#panel .find-box', 'variance');
   await page.waitForFunction(() => /^1 of \d+/.test(document.querySelector('#panel .find-count')?.textContent || ''));
   await page.focus('#panel .find-box');
-  await page.keyboard.press('Enter');
+  // Typing already shows match 1; Enter goes on, Shift+Enter back.
   await page.keyboard.press('Enter');
   const counter = await page.textContent('#panel .find-count');
   await page.keyboard.press('Shift+Enter');
@@ -822,8 +822,20 @@ try {
   await wait(2500);
   const ysMoved = await page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 1).data.strokes.map(s => +s.points[1].toFixed(2)));
   check('lasso selects and moves ink', selected === 1 && ysMoved.some(y => y >= 0.9), `selection ${selected}, start ys ${ysMoved.join(',')}`);
-  await page.click('[data-history="undo"] >> nth=0');
+  // Duplicate and recolor the selection
+  const strokesNow = async () => page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 1).data.strokes);
+  const before = (await strokesNow()).length;
+  await page.click('.pdf-page[data-page="1"] .ink-sel-bar button:text-is("Duplicate")');
+  await page.click('.pdf-page[data-page="1"] .ink-sel-color >> nth=2');
   await wait(2500);
+  const after = await strokesNow();
+  check('lasso duplicates and recolors', after.length === before + 1 && after.some(s => s.color === '#dc2626'), `${before} -> ${after.length}, colors ${[...new Set(after.map(s => s.color))].join(',')}`);
+  check('lasso shows a resize handle', (await page.locator('.pdf-page[data-page="1"] .ink-handle').count()) === 1);
+  for (let i = 0; i < 3; i++) {
+    await page.click('[data-history="undo"]:not([disabled]) >> nth=0');
+    await wait(700);
+  }
+  await wait(2000);
   const ysBack = await page.evaluate(async () => (await __wa.serverItems('ink')).find(x => x.data.page === 1).data.strokes.map(s => +s.points[1].toFixed(2)));
   check('undo puts lassoed ink back', ysBack.some(y => Math.abs(y - 0.86) < 0.02) && !ysBack.some(y => y >= 0.9), ysBack.join(','));
   await page.click('.tool[data-tool="select"]');
@@ -891,6 +903,66 @@ try {
   await page.goto(B + '/reader#study');
   await page.waitForSelector('.study');
   check('Study lists passages not clear yet', (await page.locator('#study-unclear .task-row').count()) >= 1);
+
+  // A [[link]] to a paper in Recently deleted offers Restore, never a stray note
+  // (restore the binned copy, give it a unique title, bin it again)
+  await library();
+  if (!(await page.evaluate(() => document.querySelector('#trash').open))) await page.click('#trash summary');
+  await page.click(`#trash li[data-doc="${plainIdForTrash}"] [data-act="restore"]`);
+  await wait(500);
+  await library();
+  await page.locator(`#doc-list .side-row:has(a[href="#doc=${plainIdForTrash}"]) .side-more`).click();
+  await page.fill('dialog [name=title]', 'Binned paper');
+  await page.click('dialog button[value="ok"]');
+  await wait(400);
+  await library();
+  await page.locator(`#doc-list .side-row:has(a[href="#doc=${plainIdForTrash}"]) .side-more`).click();
+  await page.click('dialog button[value="remove"]');
+  await wait(500);
+  await newNote();
+  await page.fill('#note-root .note-title', 'Links to binned');
+  await page.click('#note-root .md-view');
+  const plainTitle = 'Binned paper';
+  await page.keyboard.type(`[[${plainTitle}]]`);
+  await page.click('#note-root .note-title');
+  await wait(600);
+  await page.click('#note-root a.wl-trashed');
+  await wait(400);
+  const notesNamed = (await page.evaluate(t => __wa.serverItems('note').then(ns => ns.filter(n => !n.deleted && n.data.title === t).length), plainTitle));
+  check('link to a binned paper offers Restore and makes no note', (await page.locator('#toast .toast-action').textContent()) === 'Restore' && notesNamed === 0);
+
+  // The sidebar Study badge leaves out binned papers like Study does
+  const badge = await page.textContent('#study-counts');
+  await page.goto(B + '/reader#study');
+  await page.waitForSelector('.study');
+  const dueNow = (await page.textContent('.cards-line')).match(/(\d+) due now/)[1];
+  check('Study badge matches Study', (badge.match(/(\d+) due/) || [0, '0'])[1] === dueNow, `badge "${badge}", study ${dueNow} due`);
+
+  // Escape closes the pen menu; Fit shows the zoom level
+  await page.goto(B + '/reader#doc=' + docId);
+  await page.waitForSelector('.pdf-page .textLayer span');
+  await page.click('#color-group .swatch.active');
+  await page.keyboard.press('Escape');
+  check('Escape closes the pen menu', !(await page.isVisible('#color-group .swatch-menu')));
+  const box2 = await page.locator('#pdf-scroll').boundingBox();
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + 300);
+  await page.keyboard.down('Control');
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -40);
+  await page.keyboard.up('Control');
+  await wait(800);
+  const zl = await page.textContent('#zoom-fit');
+  check('Fit shows the zoom level when zoomed', /^\d+%$/.test(zl), zl);
+  await page.click('#zoom-fit');
+
+  // Typed LaTeX when handwriting cannot be read
+  await page.click('#toggle-notebook');
+  await page.waitForSelector('#doc-notebook .note-add');
+  await page.click('#doc-notebook [data-add="ink"]');
+  await page.locator('#doc-notebook [data-ink="edit"]').last().click();
+  await page.locator('#doc-notebook .latex-editor textarea').last().fill('x^2 - 1 = 0\n(x-1)(x+1) = 0');
+  await page.locator('#doc-notebook [data-ed="save"]').last().click();
+  check('LaTeX lines can be typed for a pad', (await page.locator('#doc-notebook .ink-latex').last().locator('.latex-line').count()) === 2);
+  await page.click('#toggle-notebook');
 
   // Tapping the open paper in the library puts the library away
   await library();

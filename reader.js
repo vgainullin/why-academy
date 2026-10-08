@@ -205,17 +205,32 @@ function removeStrokes(d, ids) {
   d.erased.push(...ids);
 }
 
-// Ink merges by stroke id and erasing is permanent per id, so redoing a
-// stroke (or undoing an erase) re-adds it under a fresh id.
+// Ink merges by stroke id and erasing an id is permanent, so undo and redo
+// bring strokes back under fresh ids. inkAlias records old id -> new id, so
+// every older undo step still finds the stroke it refers to.
+const inkAlias = new Map();
+
+function liveId(id) {
+  while (inkAlias.has(id)) id = inkAlias.get(id);
+  return id;
+}
+
+function revive(strokes) {
+  return strokes.map(s => {
+    const id = newId();
+    inkAlias.set(liveId(s.id), id);
+    return { ...s, id };
+  });
+}
+
 function inkAdded(docId, page, stroke) {
-  let current = stroke;
   saveInk(docId, page, d => d.strokes.push(stroke));
   undoHistory.push({
     label: 'Pen stroke',
-    undo: () => saveInk(docId, page, d => removeStrokes(d, [current.id])),
+    undo: () => saveInk(docId, page, d => removeStrokes(d, [liveId(stroke.id)])),
     redo: () => {
-      current = { ...current, id: newId() };
-      return saveInk(docId, page, d => d.strokes.push(current));
+      const [again] = revive([stroke]);
+      return saveInk(docId, page, d => d.strokes.push(again));
     },
   });
 }
@@ -230,34 +245,29 @@ function inkErased(docId, page, ids, label = 'Erase') {
   undoHistory.push({
     label,
     undo: () => {
-      removed = removed.map(s => ({ ...s, id: newId() }));
-      return saveInk(docId, page, d => d.strokes.push(...removed));
+      const back = revive(removed);
+      return saveInk(docId, page, d => d.strokes.push(...back));
     },
-    redo: () => saveInk(docId, page, d => removeStrokes(d, removed.map(s => s.id))),
+    redo: () => saveInk(docId, page, d => removeStrokes(d, removed.map(s => liveId(s.id)))),
   });
   return done;
 }
 
-// Lasso move/resize: the old strokes are replaced by new ones. Undo and redo
-// swap them back and forth, each time under fresh ids.
+// Lasso move/resize/recolor/duplicate: `before` strokes are replaced by `after`.
 function inkReplaced(docId, page, before, after) {
-  let shown = after;
-  let hidden = before;
   saveInk(docId, page, d => {
     removeStrokes(d, before.map(s => s.id));
     d.strokes.push(...after);
   });
-  const swap = () => {
-    const fresh = hidden.map(s => ({ ...s, id: newId() }));
-    const gone = shown.map(s => s.id);
-    hidden = shown;
-    shown = fresh;
+  const swap = (out, inn) => () => {
+    const gone = out.map(s => liveId(s.id));
+    const back = revive(inn);
     return saveInk(docId, page, d => {
       removeStrokes(d, gone);
-      d.strokes.push(...fresh);
+      d.strokes.push(...back);
     });
   };
-  undoHistory.push({ label: 'Move ink', undo: swap, redo: swap });
+  undoHistory.push({ label: 'Edit ink', undo: swap(after, before), redo: swap(before, after) });
 }
 
 // Vault writes that can be undone.
@@ -541,7 +551,7 @@ function renderSidebar() {
     noteList.appendChild(li);
   }
 
-  const q = studyQueue(store.all(), Date.now());
+  const q = studyQueue(store.all().filter(it => !(it.data.docId && isTrashed(store.get(it.data.docId)))), Date.now());
   const parts = [];
   if (q.dueCards.length) parts.push(`<span class="count due">${q.dueCards.length} due</span>`);
   if (q.toReview.length) parts.push(`<span class="count ready">${q.toReview.length} to read</span>`);
@@ -576,7 +586,7 @@ function search(q) {
     else continue;
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) continue;
-    text = text.replace(/[#*_>`]+/g, '');
+    text = text.replace(/[#*>`$]+/g, '').replace(/\\(operatorname|mathrm|text)\{([^}]*)\}/g, '$2');
     const at2 = text.toLowerCase().indexOf(q);
     let from = Math.max(0, (at2 < 0 ? at : at2) - 30);
     while (from > 0 && /\S/.test(text[from - 1])) from--;
@@ -711,6 +721,9 @@ function resolveLink(link) {
   const label = link.label || link.title;
   if (idx.notesByTitle.has(key)) return { label, cls: 'wl-note', attrs: { kind: 'note', id: idx.notesByTitle.get(key) } };
   if (idx.docsByTitle.has(key)) return { label, cls: 'wl-doc', attrs: { kind: 'doc', id: idx.docsByTitle.get(key) } };
+  // A paper in Recently deleted: offer to restore it, never make a stray note.
+  const binned = store.all('doc').find(d => isTrashed(d) && normTitle(d.data.title) === key);
+  if (binned) return { label, cls: 'wl-missing wl-trashed', attrs: { kind: 'trashed', id: binned.id } };
   return { label, cls: 'wl-missing', attrs: { kind: 'new', title: link.title } };
 }
 
@@ -722,6 +735,14 @@ async function openLink(el) {
   else if (kind === 'anno') {
     const a = store.get(id);
     navigate(`#doc=${a.data.docId}&a=${id}`);
+  } else if (kind === 'trashed') {
+    toast('That paper is in Recently deleted.', false, {
+      label: 'Restore',
+      run: async () => {
+        await trackedUpdate(id, { trashedAt: undefined });
+        navigate('#doc=' + id);
+      },
+    });
   } else if (kind === 'new') {
     const note = await store.create('note', { title, blocks: [{ id: newId(), type: 'md', text: '' }] });
     navigate('#note=' + note.id);
@@ -878,6 +899,14 @@ async function openDoc(docId, page, annoId, query) {
     $('#page-count').textContent = '/ ' + n;
     $('#page-input').max = n;
     if (doc.data.pages !== n) store.update(docId, { pages: n });
+    // Fit shows the zoom level when zoomed; tapping it goes back to fit.
+    const zoomLabel = () => {
+      const z = Math.round(view.zoom * 100);
+      $('#zoom-fit').textContent = z === 100 ? 'Fit' : z + '%';
+      $('#zoom-fit').title = z === 100 ? 'Fit width' : `Zoom ${z}% of fit width: tap to fit`;
+    };
+    zoomLabel();
+    view.addEventListener('zoom', zoomLabel);
     view.addEventListener('page', e => {
       $('#page-input').value = e.detail;
       markCurrentSection();
@@ -1535,6 +1564,14 @@ const explaining = new Set();
 // Explanations stream in: the text so far, shown in Study while it is written.
 const liveText = new Map(); // taskId -> markdown so far
 let liveTimer = null;
+// "Waiting for the model... 12 s" until the first words arrive.
+setInterval(() => {
+  for (const el of document.querySelectorAll('[data-wait]')) {
+    const s = Math.round((Date.now() - +el.dataset.wait) / 1000);
+    el.textContent = `Waiting for the model... ${s} s (you can keep reading meanwhile)`;
+  }
+}, 1000);
+
 function showLiveText() {
   if (liveTimer) return;
   liveTimer = setTimeout(() => {
@@ -1680,7 +1717,7 @@ async function cardDialog(p, fromEquation) {
   // The source stays in view, to check the draft against.
   const source = dlg.querySelector('.card-source');
   const showSource = () => {
-    source.innerHTML = renderMarkdown('**From the paper:** ' + (latex ? `$$${latex}$$` : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+    source.innerHTML = renderMarkdown('**From the paper:**\n\n' + (latex ? `$$${latex}$$` : '> ' + snippet(anno.data.quote, 600)), resolveLink);
   };
   showSource();
 
@@ -1792,6 +1829,7 @@ function renderPanel() {
   // every toolbar button stays reachable.
   const bar = state.view === 'doc' ? $('.doc-toolbar') : $('.note-toolbar');
   panel.style.top = NARROW.matches && bar ? bar.offsetHeight + 'px' : '';
+  panel.setAttribute('aria-label', state.view === 'note' ? 'Links and backlinks' : state.panelMode === 'contents' ? 'Contents' : 'Marks and linked notes');
   if (state.view === 'doc' && state.panelMode === 'contents') renderContentsPanel(panel);
   else if (state.view === 'doc') renderDocPanel(panel);
   else renderNotePanel(panel);
@@ -2000,7 +2038,7 @@ function wireFind(panel, view) {
     if (!box.isConnected || box.value.trim() !== q) return;
     hitsNow = hits.slice(0, 200);
     at = -1;
-    count.textContent = hits.length ? `1 of ${hits.length}${hits.length >= 300 ? '+' : ''}` : '';
+    count.textContent = '';
     results.innerHTML = hits.length ? '' : '<li class="muted">No matches in this paper.</li>';
     hits.slice(0, 200).forEach((h, i) => {
       const li = document.createElement('li');
@@ -2016,6 +2054,8 @@ function wireFind(panel, view) {
       results.appendChild(li);
     });
     if (hits.length >= 300) results.insertAdjacentHTML('beforeend', '<li class="muted">Showing the first 300 matches.</li>');
+    // Like find-as-you-type in a browser: show the first match; Enter goes on.
+    if (hitsNow.length) show(0, true);
   };
   box.addEventListener('input', () => {
     clearTimeout(findTimer);
@@ -2025,7 +2065,6 @@ function wireFind(panel, view) {
   box.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    // The count already reads "1 of n", so the first Enter shows match 1.
     show(at < 0 ? (e.shiftKey ? -1 : 0) : at + (e.shiftKey ? -1 : 1), true);
   });
   if (lastFind) {
@@ -2112,10 +2151,10 @@ function renderDocPanel(panel) {
     li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : 'Region') : snippet(a.data.quote, 160);
     if (a.data.type === 'region' && a.data.latex) li.querySelector('.mark-quote').innerHTML = renderMarkdown(`$${a.data.latex}$`, resolveLink);
     if (a.data.comment) li.querySelector('.mark-comment').textContent = a.data.comment;
-    for (const q of items.filter(it => it.kind === 'task' && it.data.type === 'question')) {
+    for (const q of items.filter(it => it.kind === 'task' && it.data.type !== 'explain')) {
       const d = document.createElement('div');
       d.className = 'mark-question';
-      d.textContent = 'Q: ' + q.data.text;
+      d.textContent = (q.data.type === 'question' ? 'Q: ' : TASK_LABELS[q.data.type] + ': ') + q.data.text.replace(/^(Follow[ -]up|Re-derive):\s*/i, '');
       li.querySelector('.mark-items').before(d);
     }
     li.addEventListener('click', () => {
@@ -2382,7 +2421,7 @@ function taskRow(t) {
     ${sourceLink(t)}
     ${gen ? `<button class="btn-small" data-gen ${gen === 'writing' ? 'disabled' : ''}>${genLabel}</button>` : ''}
     ${quote ? '<blockquote class="task-quote md-inline"></blockquote>' : ''}
-    ${gen === 'writing' ? `<div class="md-view live-explain" data-live="${t.id}"><p class="muted">Writing...</p></div>` : ''}
+    ${gen === 'writing' ? `<div class="md-view live-explain" data-live="${t.id}"><p class="muted" data-wait="${t.data.pending || Date.now()}">Waiting for the model...</p></div>` : ''}
     ${t.data.error || gen === 'interrupted' ? '<span class="task-error"></span>' : ''}`;
   el.querySelector('.task-text').innerHTML = renderMarkdown(t.data.text, resolveLink);
   if (quote) el.querySelector('.task-quote').innerHTML = renderMarkdown(snippet(quote, 400), resolveLink);
@@ -2551,7 +2590,8 @@ function briefMarkdown(docId) {
   if (!open.length) out.push('Nothing open.');
   for (const t of open) {
     const a = t.data.annoId && store.get(t.data.annoId);
-    out.push(`- [ ] ${TASK_LABELS[t.data.type]}: ${t.data.text.replace(/^Explain:\s*/, '')}` + (a ? ` ${ref(a)}` : ''));
+    const text = t.data.text.replace(/^(Explain|Follow[ -]up|Re-derive):\s*/i, '');
+    out.push(`- [ ] ${TASK_LABELS[t.data.type]}: ${text}` + (a ? ` ${ref(a)}` : ''));
   }
 
   const pinned = annos.filter(a => a.data.brief && a.data.type !== 'region');
@@ -2597,7 +2637,11 @@ function plainGist(md) {
   const m = md.match(/in plain terms\**\s*[-:\u2013\u2014]?\s*([\s\S]*?)(?:\n\s*\n|\n\s*\d+\.|$)/i);
   // Underscores stay: they are subscripts inside $...$ math.
   const text = (m ? m[1] : md).replace(/\$\$[\s\S]*?\$\$/g, '').replace(/[*#>`]/g, '').replace(/\s+/g, ' ').trim();
-  return snippet(text, 240);
+  if (text.length <= 240) return text;
+  // Whole sentences, up to about 240 characters.
+  const cut = text.slice(0, 260);
+  const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('? '), cut.lastIndexOf('! '));
+  return end > 80 ? cut.slice(0, end + 1) : snippet(text, 240);
 }
 
 // Wikilinks for use outside the app: passages become web links that open
@@ -2857,6 +2901,11 @@ function wire() {
     const keys = { s: 'select', p: 'pen', h: 'highlighter', e: 'eraser', r: 'region', l: 'lasso' };
     if (state.view === 'doc' && keys[e.key] && !e.metaKey && !e.ctrlKey) setTool(keys[e.key]);
     if (e.key === 'Escape') {
+      const menu = document.querySelector('.swatch-menu:not(.hidden)');
+      if (menu) {
+        menu.classList.add('hidden');
+        return;
+      }
       if (state.target) hideActions();
       else if (state.panelOpen && NARROW.matches) setPanel(false);
     }

@@ -70,6 +70,18 @@ npm run dev            # http://localhost:8787
 
 See [worker/README.md](worker/README.md) for the account model and deployment.
 
+### LLM feature testing
+
+`scripts/feature_test.sh` starts an isolated server (its own D1/R2 state, a seeded account, a fixture paper) and lets a headless Claude test a page in a real browser through Playwright MCP. The tester follows a charter (`.claude/skills/feature-test/charters/<area>.md`), checks results on the server as well as on screen, does an exploratory pass as the charter's persona, and writes a bug list with UX feedback. It has no shell or file tools, only the browser.
+
+```bash
+scripts/feature_test.sh --smoke                 # setup check, about $0.30
+scripts/feature_test.sh --device ipad           # full reader charter, iPad emulation
+OPENROUTER_API_KEY=... scripts/feature_test.sh  # also judges real AI output
+```
+
+Reports go to `tests/feature-reports/<run>/` (`report.md`, `findings.json`, `shots/`). In an interactive session, `/feature-test` uses the same method.
+
 ### Adding Lessons
 Lessons are authored as structured JSON files inside `lessons/`. You can load a custom lesson by passing it as a query parameter:
 `http://localhost:8765/lesson.html?lesson=lessons/physics/oscillations/01-single-spring.json`

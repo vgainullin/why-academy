@@ -672,7 +672,9 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 }
 .swatch-menu.hidden { display: none; }
 
-.panel { position: relative; }
+@media (min-width: 901px) {
+  .panel { position: relative; }
+}
 .panel-close { position: absolute; top: 8px; right: 8px; min-height: 30px; min-width: 30px; }
 .panel section:first-of-type h3 { padding-right: 40px; }
 .mark-filter { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -733,3 +735,7 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
   .sync-status[data-state="signed-out"]::before,
   .sync-status[data-state="local"]::before { background: transparent; border: 2px solid #fbbf24; width: 6px; height: 6px; }
 }
+
+.mark-question { margin-top: 4px; font-size: 0.85rem; color: #9d174d; }
+.explain-card.is-writing .explain-body { opacity: 0.55; }
+.dialog .explain-body { max-height: 60vh; overflow-y: auto; }

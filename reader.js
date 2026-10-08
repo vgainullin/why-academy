@@ -22,11 +22,11 @@ import {
   studyQueue,
 } from './lib/vault/model.js';
 import { PdfView, readPdfInfo } from './lib/vault/pdf-view.js';
-import { NoteEditor } from './lib/vault/notes.js';
+import { NoteEditor, noteBackup } from './lib/vault/notes.js';
 import { renderMarkdown } from './lib/vault/markdown.js';
 import { INK_COLORS, HIGHLIGHT_COLORS } from './lib/vault/ink.js';
 import { explainPassage, equationToLatex, draftCard } from './lib/vault/ai.js';
-import { newSrs, review, previewIntervals, GRADES } from './lib/vault/srs.js';
+import { newSrs, previewReview, GRADES } from './lib/vault/srs.js';
 
 const $ = sel => document.querySelector(sel);
 const C = window.WhyCommon;
@@ -61,6 +61,14 @@ const pendingNotes = new Map();
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// A note without a title is shown by its first line of text.
+function noteTitle(n) {
+  if (n.data.title && n.data.title.trim()) return n.data.title;
+  const md = (n.data.blocks || []).find(b => b.type === 'md' && b.text.trim());
+  if (!md) return 'Untitled';
+  return snippet(md.text.trim().split('\n')[0].replace(/^[#>*\-\s]+|\[\[|\]\]/g, ''), 50) || 'Untitled';
 }
 
 function snippet(s, n = 120) {
@@ -103,7 +111,10 @@ function getInkTool() {
 
 function setTool(tool) {
   state.tool.tool = tool;
-  document.querySelectorAll('.tool[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  document.querySelectorAll('.tool[data-tool]').forEach(b => {
+    b.classList.toggle('active', b.dataset.tool === tool);
+    b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
+  });
   document.body.dataset.tool = tool;
   renderColors();
 }
@@ -167,12 +178,20 @@ async function route() {
   // A dialog belongs to the view it was opened in.
   const dlg = $('#dialog');
   if (dlg.open) dlg.close('cancel');
-  if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !store.get(r.id) && !pendingNotes.has(r.id)) {
-    toast(r.view === 'note' ? 'That note no longer exists' : 'That paper is not in your library', true);
+  const exists = id => store.get(id) || pendingNotes.has(id) || noteBackup(id);
+  if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !exists(r.id)) {
+    toast(r.view === 'note' ? 'That note was empty or has been deleted' : 'That paper is not in your library', r.view !== 'note');
+    const last = localStorage.getItem('reader.last');
+    const lr = last && new URLSearchParams(last.slice(1));
+    const lastId = lr && (lr.get('doc') || lr.get('note'));
+    history.replaceState(null, '', lastId && store.get(lastId) ? last : location.pathname);
+    return route();
   }
+  // In portrait the panel covers the page, so it does not follow you around.
+  if (NARROW.matches && state.panelOpen) state.panelOpen = false;
   if (r.view === 'doc' && store.get(r.id)) {
     await openDoc(r.id, r.page, r.anno);
-  } else if (r.view === 'note' && (store.get(r.id) || pendingNotes.has(r.id))) {
+  } else if (r.view === 'note' && exists(r.id)) {
     openNoteView(r.id);
   } else if (r.view === 'brief' && store.get(r.id)) {
     showView('brief');
@@ -184,7 +203,8 @@ async function route() {
   } else {
     showView('empty');
   }
-  if (r.view === 'doc' || r.view === 'note') {
+  // Only saved items: an unsaved new note is no place to resume.
+  if ((r.view === 'doc' || r.view === 'note') && store.get(r.id)) {
     try {
       localStorage.setItem('reader.last', location.hash);
     } catch (e) {
@@ -237,7 +257,7 @@ function renderSidebar() {
   for (const n of notes) {
     const li = document.createElement('li');
     li.innerHTML = `<a href="#note=${n.id}" class="side-item${state.noteId === n.id && state.view === 'note' ? ' active' : ''}"><span class="side-item-title"></span></a>`;
-    li.querySelector('.side-item-title').textContent = n.data.title || 'Untitled';
+    li.querySelector('.side-item-title').textContent = noteTitle(n);
     noteList.appendChild(li);
   }
 
@@ -274,7 +294,7 @@ function search(q) {
     if (at < 0) continue;
     let from = Math.max(0, at - 30);
     while (from > 0 && /\S/.test(text[from - 1])) from--;
-    const title = it.kind === 'doc' || it.kind === 'note' ? it.data.title || 'Untitled' : (from > 0 ? '\u2026' : '') + snippet(text.slice(from), 90);
+    const title = it.kind === 'doc' ? it.data.title : it.kind === 'note' ? noteTitle(it) : (from > 0 ? '\u2026' : '') + snippet(text.slice(from), 90);
     hits.push({ label, href, title, rank: it.kind === 'doc' || it.kind === 'note' ? 0 : 1 });
   }
   hits.sort((a, b) => a.rank - b.rank);
@@ -336,7 +356,7 @@ async function openLink(el) {
 
 function titles() {
   return [
-    ...store.all('note').map(n => ({ title: n.data.title || 'Untitled', kind: 'note' })),
+    ...store.all('note').filter(n => n.data.title && n.data.title.trim()).map(n => ({ title: n.data.title, kind: 'note' })),
     ...store.all('doc').map(d => ({ title: d.data.title, kind: 'paper' })),
   ];
 }
@@ -349,7 +369,7 @@ function renderNoteLinks(box, noteId) {
     const a = document.createElement('a');
     a.href = '#note=' + n.id;
     a.className = 'chip';
-    a.textContent = n.data.title || 'Untitled';
+    a.textContent = noteTitle(n);
     box.appendChild(a);
   }
 }
@@ -486,13 +506,16 @@ function refreshDocOverlays() {
   const annos = store.forDoc(state.docId, 'anno').map(a => {
     const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
     const labels = linked.map(it => (it.kind === 'card' ? 'Card' : TASK_LABELS[it.data.type]));
+    const details = linked.map(it => (it.kind === 'card'
+      ? 'Card: ' + snippet(it.data.front, 60)
+      : TASK_LABELS[it.data.type] + ': ' + snippet(it.data.text.replace(/^Explain:\s*/, ''), 60)));
     let marker = labels.map(l => l[0]).join('');
     if (a.data.status === 'unclear') marker = '?' + marker;
     const markerTitle = [
       a.data.status === 'unclear' ? 'Not understood yet' : a.data.status === 'understood' ? 'Understood' : '',
-      labels.join(', '),
-      a.data.comment || '',
-    ].filter(Boolean).join(' \u00b7 ');
+      ...details,
+      a.data.comment ? 'Comment: ' + a.data.comment : '',
+    ].filter(Boolean).join('\n');
     return { ...a, marker, markerTitle };
   });
   state.pdf.setAnnos(annos);
@@ -579,12 +602,12 @@ function currentSelectionTarget() {
 const ACTIONS = {
   selection: ['highlight', 'comment', 'notebook', 'card', 'explain', 'unclear', 'todo', 'question', 'link'],
   region: ['eqcard', 'latex', 'explain', 'unclear', 'comment', 'todo', 'question', 'derive', 'link'],
-  anno: ['comment', 'notebook', 'card', 'explain', 'unclear', 'understood', 'todo', 'question', 'link', 'delete'],
+  anno: ['readexp', 'comment', 'notebook', 'card', 'explain', 'unclear', 'understood', 'todo', 'question', 'link', 'delete'],
 };
 const ACTION_LABELS = {
   highlight: 'Highlight', comment: 'Comment', notebook: 'To notebook', card: 'Card', explain: 'Explain',
   todo: 'Follow-up', question: 'Question', link: 'Copy link', eqcard: 'Equation card', latex: 'LaTeX to notebook',
-  derive: 'Re-derive', delete: 'Delete', unclear: 'Not clear yet', understood: 'Understood',
+  derive: 'Re-derive', delete: 'Delete', unclear: 'Not clear yet', understood: 'Understood', readexp: 'Read explanation',
 };
 
 function showActions(target) {
@@ -600,6 +623,7 @@ function showActions(target) {
   const status = target.kind === 'anno' ? target.anno.data.status : null;
   for (const act of ACTIONS[target.kind]) {
     if ((act === 'unclear' && status === 'unclear') || (act === 'understood' && status !== 'unclear')) continue;
+    if (act === 'readexp' && !explanationFor(target.anno.id)) continue;
     const b = document.createElement('button');
     b.className = 'action-btn' + (act === 'delete' ? ' danger' : '');
     b.textContent = ACTION_LABELS[act];
@@ -719,6 +743,12 @@ async function runAction(act) {
     return;
   }
 
+  if (act === 'readexp') {
+    hideActions();
+    showExplanation(explanationFor(target.anno.id));
+    return;
+  }
+
   const p = pendingAnno(target);
   hideActions();
   const quote = p.anno.data.quote;
@@ -781,6 +811,25 @@ async function runAction(act) {
       await store.create('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
     }
   }
+}
+
+// The latest written explanation for a mark, if any.
+function explanationFor(annoId) {
+  return store.all('task')
+    .filter(t => t.data.type === 'explain' && t.data.annoId === annoId && t.data.explanation)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] || null;
+}
+
+function showExplanation(t) {
+  const dlg = $('#dialog');
+  dlg.innerHTML = `<form method="dialog" class="dialog-form">
+      <h3></h3>
+      <div class="md-view explain-body"></div>
+      <div class="dialog-actions"><button value="cancel" class="btn btn-primary">Close</button></div>
+    </form>`;
+  dlg.querySelector('h3').textContent = t.data.text;
+  dlg.querySelector('.explain-body').innerHTML = renderMarkdown(t.data.explanation, resolveLink);
+  dlg.showModal();
 }
 
 async function createExplainTask(anno, isRegion) {
@@ -864,6 +913,7 @@ function promptDialog(title, value = '', opts = {}) {
       </div>
     </form>`;
   dlg.querySelector('h3').textContent = title;
+  dlg.querySelector('textarea, input').setAttribute('aria-label', title);
   if (opts.context) dlg.querySelector('.dialog-context').textContent = snippet(opts.context, 300);
   const field = dlg.querySelector('textarea, input');
   field.value = value;
@@ -945,7 +995,8 @@ async function cardDialog(p, fromEquation) {
   });
   const done = new Promise(resolve => { dlg.onclose = resolve; });
   dlg.showModal();
-  if (fromEquation) draft();
+  // Draft right away when an AI backend is set up; otherwise write by hand.
+  if (fromEquation || C.handwriteBackend() === 'lmstudio' || C.openrouterApiKey()) draft();
   else front.focus();
   await done;
   if (dlg.returnValue !== 'ok') return;
@@ -1026,7 +1077,7 @@ function renderDocPanel(panel) {
     const a = document.createElement('a');
     a.className = 'chip';
     a.href = '#note=' + id;
-    a.textContent = n.data.title || 'Untitled';
+    a.textContent = noteTitle(n);
     notesBox.appendChild(a);
   }
 
@@ -1047,6 +1098,12 @@ function renderDocPanel(panel) {
     li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : 'Region') : snippet(a.data.quote, 160);
     if (a.data.type === 'region' && a.data.latex) li.querySelector('.mark-quote').innerHTML = renderMarkdown(`$${a.data.latex}$`, resolveLink);
     if (a.data.comment) li.querySelector('.mark-comment').textContent = a.data.comment;
+    for (const q of items.filter(it => it.kind === 'task' && it.data.type === 'question')) {
+      const d = document.createElement('div');
+      d.className = 'mark-question';
+      d.textContent = 'Q: ' + q.data.text;
+      li.querySelector('.mark-items').before(d);
+    }
     li.addEventListener('click', () => {
       // On narrow screens the panel covers the page: get out of the way.
       if (NARROW.matches) setPanel(false);
@@ -1095,7 +1152,7 @@ function renderNotePanel(panel) {
     const a = document.createElement('a');
     a.className = 'chip';
     a.href = '#note=' + nid;
-    a.textContent = n.data.title || 'Untitled';
+    a.textContent = noteTitle(n);
     backBox.appendChild(a);
   }
 }
@@ -1177,6 +1234,12 @@ function explanationCard(t) {
   el.querySelector('h3').textContent = t.data.text;
   fillSourceLabels(el, t);
   el.querySelector('.explain-body').innerHTML = renderMarkdown(t.data.explanation || '', resolveLink);
+  if (explainState(t) === 'writing') {
+    const again = el.querySelector('[data-act="again"]');
+    again.disabled = true;
+    again.textContent = 'Writing a new one...';
+    el.classList.add('is-writing');
+  }
   el.querySelector('.explain-foot').addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
@@ -1288,7 +1351,12 @@ function renderReview(root) {
     renderSidebar();
     return;
   }
-  const intervals = previewIntervals(card.data.srs);
+  // Computed once per card so the labels match what grading saves.
+  if (!r.preview || r.previewFor !== card.id) {
+    r.preview = previewReview(card.data.srs);
+    r.previewFor = card.id;
+  }
+  const intervals = r.preview.map(p => p.interval);
   root.innerHTML = `
     <div class="review">
       <div class="review-progress">${r.index + 1} / ${r.queue.length} <button class="btn-small" id="review-stop">Stop</button></div>
@@ -1319,7 +1387,7 @@ async function grade(i) {
   const r = state.review;
   const card = store.get(r.queue[r.index]);
   try {
-    await store.update(card.id, { srs: review(card.data.srs, GRADES[i].rating) });
+    await store.update(card.id, { srs: r.preview[i].srs });
   } catch (e) {
     reportError('Saving the review failed', e);
     return;
@@ -1372,7 +1440,7 @@ function briefMarkdown(docId) {
     out.push('', `$$${a.data.latex}$$`, `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
   }
 
-  const open = tasks.filter(t => t.data.type !== 'question' && t.data.status !== 'done');
+  const open = tasks.filter(t => t.data.type !== 'question' && t.data.type !== 'explain' && t.data.status !== 'done');
   out.push('', `## Open follow-ups (${open.length})`);
   if (!open.length) out.push('Nothing open.');
   for (const t of open) {
@@ -1491,7 +1559,7 @@ function wire() {
   $('#new-note').addEventListener('click', newNote);
   $('#delete-note').addEventListener('click', async () => {
     const n = store.get(state.noteId);
-    if (n && !confirm(`Delete "${n.data.title || 'Untitled'}"?`)) return;
+    if (n && !confirm(`Delete "${noteTitle(n)}"?`)) return;
     mainEditor.close();
     if (n) await store.remove(n.id);
     navigate('#');
@@ -1590,9 +1658,13 @@ function wire() {
   });
 
   addEventListener('hashchange', () => route().catch(e => reportError('Navigation failed', e)));
-  addEventListener('pagehide', () => {
+  const flushEditors = () => {
     mainEditor.flush();
     sideEditor.flush();
+  };
+  addEventListener('pagehide', flushEditors);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushEditors();
   });
 }
 

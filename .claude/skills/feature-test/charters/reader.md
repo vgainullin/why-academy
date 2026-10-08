@@ -144,7 +144,14 @@ that the flow handles the result sensibly.
 - Pinch zoom (ctrl+wheel in the test browser) zooms the page, not the
   interface.
 - The Contents panel lists chapters and sections and jumps to them.
-- A paper can be renamed and removed from the library.
+- A paper can be renamed. Removing one moves it to Recently deleted, where
+  it can be restored or deleted for good; re-adding the same PDF restores it.
+- Find in paper (Contents, Cmd+F): Enter / Shift+Enter step through matches
+  with an "i of n" count. Library search also finds text inside papers.
+- The notebook beside or under the PDF resizes with its handle and keeps the
+  size after a reload.
+- Explanations stream in: watch Study while one is written.
+- "Add to Brief" pins any passage or equation to the Brief.
 - Report anything else a GoodNotes or PDF Expert user would reach for and
   not find.
 

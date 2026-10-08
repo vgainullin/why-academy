@@ -354,3 +354,20 @@ describe('push batches with bad items', async () => {
     assert.match(rejected[1].issue, /duplicate/);
   });
 });
+
+describe('streamed replies', async () => {
+  const { parseSSE } = await import('../lib/vault/ai.js');
+
+  test('collects deltas, keeps partial lines, sees DONE', () => {
+    const a = parseSSE(': keep-alive\ndata: {"choices":[{"delta":{"content":"Hel"}}]}\ndata: {"choices":[{"delta":{"content":"lo"}}]}\ndata: {"choi');
+    assert.deepEqual(a.deltas, ['Hel', 'lo']);
+    assert.equal(a.done, false);
+    const b = parseSSE(a.rest + 'ces":[{"delta":{"content":"!"}}]}\ndata: [DONE]\n');
+    assert.deepEqual(b.deltas, ['!']);
+    assert.equal(b.done, true);
+  });
+
+  test('surfaces errors sent mid-stream', () => {
+    assert.throws(() => parseSSE('data: {"error":{"message":"rate limited"}}\n'), /rate limited/);
+  });
+});

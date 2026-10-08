@@ -90,6 +90,65 @@ function snippet(s, n = 120) {
   return (space > n * 0.6 ? cut.slice(0, space) : cut) + '…';
 }
 
+// ── Recently deleted ──
+//
+// Removing a paper moves it to the trash (doc.data.trashedAt) for 30 days:
+// hidden everywhere, restorable, then purged with its marks, ink and file.
+
+const TRASH_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isTrashed(d) {
+  return !!(d && d.kind === 'doc' && d.data.trashedAt);
+}
+
+// A paper that is in the library (not in the trash).
+function liveDoc(id) {
+  const d = store.get(id);
+  return d && d.kind === 'doc' && !d.data.trashedAt ? d : null;
+}
+
+// The vault as the app shows it: trashed papers, and their marks and ink,
+// are left out.
+function visibleItems() {
+  const trashed = new Set(store.all('doc').filter(isTrashed).map(d => d.id));
+  if (!trashed.size) return store.all();
+  return store.all().filter(it => !(it.kind === 'doc' && trashed.has(it.id))
+    && !((it.kind === 'anno' || it.kind === 'ink') && trashed.has(it.data.docId)));
+}
+
+// Deletes a paper for good: marks, ink, the file and its search text.
+// Cards, tasks and notes are study material and stay.
+async function purgePaper(docId) {
+  for (const it of [...store.forDoc(docId, 'anno'), ...store.forDoc(docId, 'ink')]) await store.remove(it.id);
+  await store.remove(docId);
+  await store.removeFile(docId);
+  if (textIndex) textIndex.delete(docId);
+  localStorage.removeItem('reader.page.' + docId);
+}
+
+async function purgeExpiredTrash() {
+  const cutoff = Date.now() - TRASH_DAYS * DAY_MS;
+  for (const d of store.all('doc').filter(d => isTrashed(d) && d.data.trashedAt < cutoff)) {
+    try {
+      await purgePaper(d.id);
+    } catch (e) {
+      console.error('Emptying the trash failed for', d.id, e);
+    }
+  }
+}
+
+// "in 5 min", "in 3 h", "tomorrow", "in 12 days".
+function relativeTime(t) {
+  const min = Math.round((t - Date.now()) / 60000);
+  if (min < 1) return 'now';
+  if (min < 60) return `in ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `in ${h} h`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'tomorrow' : `in ${d} days`;
+}
+
 // ── Toast ──
 
 let toastTimer = null;
@@ -225,14 +284,15 @@ undoHistory.addEventListener('change', renderUndoButtons);
 // comments, an understanding state) are left alone: deleting those is an
 // explicit action on the mark.
 const erasingMarks = new Set();
-let eraseWarned = false;
+let eraseWarned = 0;
 function eraseMark(a) {
   if (erasingMarks.has(a.id) || !store.get(a.id)) return;
   const linked = (itemsByAnno().get(a.id) || []).length;
   if (linked || a.data.comment || a.data.status) {
-    if (!eraseWarned) {
-      eraseWarned = true;
-      toast('Highlights with cards, tasks or comments are kept; delete them from the mark itself');
+    if (Date.now() - eraseWarned > 4000) {
+      eraseWarned = Date.now();
+      const why = linked ? 'has cards or tasks' : a.data.comment ? 'has a comment' : 'is marked ' + (a.data.status === 'unclear' ? 'not clear yet' : 'understood');
+      toast(`This highlight ${why}, so the eraser keeps it. Tap it and choose Delete.`);
     }
     return;
   }
@@ -317,7 +377,7 @@ function parseHash() {
   if (h.has('doc')) return { view: 'doc', id: h.get('doc'), page: +h.get('p') || null, anno: h.get('a'), q: h.get('q') };
   if (h.has('note')) return { view: 'note', id: h.get('note') };
   if (h.has('brief')) return { view: 'brief', id: h.get('brief') };
-  if (h.has('study')) return { view: 'study' };
+  if (h.has('study')) return { view: 'study', task: h.get('t') };
   return { view: 'empty' };
 }
 
@@ -332,9 +392,11 @@ async function route() {
   // A dialog belongs to the view it was opened in.
   const dlg = $('#dialog');
   if (dlg.open) dlg.close('cancel');
-  const exists = id => store.get(id) || pendingNotes.has(id) || noteBackup(id);
+  const exists = id => (r.view === 'note' ? store.get(id) || pendingNotes.has(id) || noteBackup(id) : liveDoc(id));
   if ((r.view === 'doc' || r.view === 'note' || r.view === 'brief') && !exists(r.id)) {
-    toast(r.view === 'note' ? 'That note was empty or has been deleted' : 'That paper is not in your library', r.view !== 'note');
+    toast(r.view === 'note' ? 'That note was empty or has been deleted'
+      : isTrashed(store.get(r.id)) ? 'That paper is in Recently deleted; restore it from the library'
+      : 'That paper is not in your library', r.view !== 'note');
     const last = localStorage.getItem('reader.last');
     const lr = last && new URLSearchParams(last.slice(1));
     const lastId = lr && (lr.get('doc') || lr.get('note'));
@@ -346,17 +408,18 @@ async function route() {
   // On narrow screens the library covers the content: any navigation out of
   // it (even to the paper already open) puts it away, before slow loading.
   if (NARROW.matches && r.view !== 'empty') setSidebar(false);
-  if (r.view === 'doc' && store.get(r.id)) {
+  if (r.view === 'doc' && liveDoc(r.id)) {
     await openDoc(r.id, r.page, r.anno, r.q);
   } else if (r.view === 'note' && exists(r.id)) {
     openNoteView(r.id);
-  } else if (r.view === 'brief' && store.get(r.id)) {
+  } else if (r.view === 'brief' && liveDoc(r.id)) {
     showView('brief');
     renderBrief(r.id);
   } else if (r.view === 'study') {
     showView('study');
     if (state.review && state.review.done) state.review = null;
     renderStudy();
+    if (r.task) focusStudyItem(r.task);
   } else {
     showView('empty');
   }
@@ -393,7 +456,8 @@ function setSidebar(open) {
 }
 
 function renderSidebar() {
-  const docs = store.all('doc').sort((a, b) => b.updatedAt - a.updatedAt);
+  const docs = store.all('doc').filter(d => !isTrashed(d)).sort((a, b) => b.updatedAt - a.updatedAt);
+  renderTrash(store.all('doc').filter(isTrashed));
   const notes = store.all('note').sort((a, b) => b.updatedAt - a.updatedAt);
 
   const markCounts = new Map();
@@ -445,13 +509,17 @@ function search(q) {
     return;
   }
   const hits = [];
-  for (const it of store.all()) {
+  for (const it of visibleItems()) {
     let text = '', label = '', href = '';
     if (it.kind === 'doc') { text = it.data.title + ' ' + (it.data.authors || ''); label = 'Paper'; href = '#doc=' + it.id; }
     else if (it.kind === 'note') { text = it.data.title + '\n' + noteText(it); label = 'Note'; href = '#note=' + it.id; }
     else if (it.kind === 'anno') { text = it.data.quote + ' ' + (it.data.comment || ''); label = 'p. ' + it.data.page; href = `#doc=${it.data.docId}&a=${it.id}`; }
     else if (it.kind === 'card') { text = it.data.front + ' ' + it.data.back; label = 'Card'; href = markHref(it) || '#study'; }
-    else if (it.kind === 'task') { text = it.data.text + ' ' + (it.data.explanation || ''); label = TASK_LABELS[it.data.type]; href = markHref(it) || '#study'; }
+    else if (it.kind === 'task') {
+      text = it.data.text + ' ' + (it.data.explanation || '');
+      label = TASK_LABELS[it.data.type];
+      href = it.data.type === 'explain' || !markHref(it) ? '#study&t=' + it.id : markHref(it);
+    }
     else continue;
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) continue;
@@ -517,7 +585,7 @@ async function searchPaperText(q, box) {
   if (query !== lastQuery.trim().toLowerCase()) return;
   const hits = [];
   for (const [docId, pages] of index) {
-    const doc = store.get(docId);
+    const doc = liveDoc(docId);
     if (!doc) continue;
     let perDoc = 0;
     pages.forEach((text, i) => {
@@ -573,7 +641,7 @@ function markHref(it) {
 // ── Links between notes, papers and passages ──
 
 function linkIndex() {
-  if (!state.links) state.links = buildLinkIndex(store.all());
+  if (!state.links) state.links = buildLinkIndex(visibleItems());
   return state.links;
 }
 
@@ -610,7 +678,7 @@ async function openLink(el) {
 function titles() {
   return [
     ...store.all('note').filter(n => n.data.title && n.data.title.trim()).map(n => ({ title: n.data.title, kind: 'note' })),
-    ...store.all('doc').map(d => ({ title: d.data.title, kind: 'paper' })),
+    ...store.all('doc').filter(d => !isTrashed(d)).map(d => ({ title: d.data.title, kind: 'paper' })),
   ];
 }
 
@@ -681,7 +749,11 @@ async function importFiles(files) {
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
       const id = await store.addFile(bytes);
-      if (!store.get(id)) {
+      if (isTrashed(store.get(id))) {
+        // Adding a paper that is in the trash brings it back, marks and all.
+        await trackedUpdate(id, { trashedAt: undefined });
+        toast('Restored from Recently deleted, with its marks');
+      } else if (!store.get(id)) {
         const meta = await readPdfInfo(bytes);
         const fallback = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ');
         const title = meta.title && meta.title.length > 3 && !/^untitled|\.(docx?|tex|dvi)$/i.test(meta.title) ? meta.title : fallback;
@@ -869,6 +941,42 @@ async function retitleLinks(oldTitle, newTitle) {
   return changed;
 }
 
+function renderTrash(trashed) {
+  const box = $('#trash');
+  box.classList.toggle('hidden', !trashed.length);
+  if (!trashed.length) return;
+  box.querySelector('summary').textContent = `Recently deleted (${trashed.length})`;
+  const list = box.querySelector('ul');
+  list.innerHTML = '';
+  for (const d of trashed.sort((a, b) => b.data.trashedAt - a.data.trashedAt)) {
+    const days = Math.max(0, Math.ceil((d.data.trashedAt + TRASH_DAYS * DAY_MS - Date.now()) / DAY_MS));
+    const li = document.createElement('li');
+    li.className = 'trash-item';
+    li.dataset.doc = d.id;
+    li.innerHTML = `<div class="trash-title"></div><div class="side-item-meta">Deleted for good in ${days} day${days === 1 ? '' : 's'}</div>
+      <div class="trash-actions"><button class="btn-small" data-act="restore">Restore</button><button class="btn-small danger" data-act="purge">Delete now</button></div>`;
+    li.querySelector('.trash-title').textContent = d.data.title;
+    li.querySelector('[data-act="restore"]').addEventListener('click', async () => {
+      try {
+        await trackedUpdate(d.id, { trashedAt: undefined });
+        toast('Restored ' + snippet(d.data.title, 50));
+      } catch (e) {
+        reportError('Restoring failed', e);
+      }
+    });
+    li.querySelector('[data-act="purge"]').addEventListener('click', async () => {
+      if (!confirm(`Delete "${d.data.title}" for good, with its marks and ink? Cards, tasks and notes are kept. This cannot be undone.`)) return;
+      try {
+        await purgePaper(d.id);
+        toast('Deleted for good');
+      } catch (e) {
+        reportError('Deleting failed', e);
+      }
+    });
+    list.appendChild(li);
+  }
+}
+
 // Rename a paper, or remove it with its marks and ink. Cards, tasks and notes
 // are study material and stay.
 async function paperDialog(docId) {
@@ -889,6 +997,7 @@ async function paperDialog(docId) {
   const title = dlg.querySelector('[name=title]');
   title.value = doc.data.title;
   const marks = store.forDoc(docId, 'anno').length;
+  dlg.querySelector('[value="remove"]').textContent = 'Move to Recently deleted';
   dlg.querySelector('.paper-meta').textContent = `${doc.data.filename} \u00b7 ${doc.data.pages} pages \u00b7 ${marks} marks`;
   const done = new Promise(r => { dlg.onclose = r; });
   dlg.showModal();
@@ -907,14 +1016,9 @@ async function paperDialog(docId) {
       if (state.docId === docId) $('#view-title').textContent = newTitle;
       if (n) toast(`Renamed; updated links in ${n} note${n === 1 ? '' : 's'}`);
     } else if (dlg.returnValue === 'remove') {
-      const ink = store.forDoc(docId, 'ink');
-      if (!confirm(`Remove "${doc.data.title}" with its ${marks} marks and its ink from all your devices? Cards, tasks and notes are kept. This cannot be undone.`)) return;
       if (state.docId === docId) navigate('#');
-      for (const it of [...store.forDoc(docId, 'anno'), ...ink]) await store.remove(it.id);
-      await store.remove(docId);
-      await store.removeFile(docId);
-      localStorage.removeItem('reader.page.' + docId);
-      toast('Paper removed');
+      await trackedUpdate(docId, { trashedAt: Date.now() });
+      toast(`Moved to Recently deleted for ${TRASH_DAYS} days: Undo or restore it from the library`);
     }
   } catch (e) {
     reportError('Updating the paper failed', e);
@@ -950,7 +1054,9 @@ async function ensurePaperNotebook(docId) {
 async function applyNotebook() {
   const pane = $('#doc-notebook');
   pane.classList.toggle('hidden', !state.notebookOpen);
+  $('#split-handle').classList.toggle('hidden', !state.notebookOpen);
   $('#toggle-notebook').classList.toggle('active', state.notebookOpen);
+  $('#toggle-notebook').setAttribute('aria-pressed', String(state.notebookOpen));
   if (!state.docId) return;
   if (state.notebookOpen) {
     const note = await ensurePaperNotebook(state.docId);
@@ -959,6 +1065,64 @@ async function applyNotebook() {
     sideEditor.close();
   }
   // The PDF view re-fits itself when its pane changes size.
+}
+
+// Drag (or arrow keys on) the handle between the PDF and the notebook. The
+// notebook's share is kept per orientation: side by side, or stacked.
+function wireSplitHandle() {
+  const handle = $('#split-handle');
+  const split = $('.doc-split');
+  const key = () => (NARROW.matches ? 'reader.nbSizeV' : 'reader.nbSize');
+  const prop = () => (NARROW.matches ? '--nb-size-v' : '--nb-size');
+  const apply = frac => {
+    const f = Math.min(0.8, Math.max(0.2, frac));
+    split.style.setProperty(prop(), String(f));
+    handle.setAttribute('aria-valuenow', String(Math.round(f * 100)));
+    return f;
+  };
+  const save = f => {
+    try {
+      localStorage.setItem(key(), String(f));
+    } catch (e) {
+      console.warn('Could not remember the notebook size', e);
+    }
+  };
+  for (const [k, p] of [['reader.nbSize', '--nb-size'], ['reader.nbSizeV', '--nb-size-v']]) {
+    const v = parseFloat(localStorage.getItem(k));
+    if (v >= 0.2 && v <= 0.8) split.style.setProperty(p, String(v));
+  }
+  handle.setAttribute('aria-orientation', NARROW.matches ? 'horizontal' : 'vertical');
+  NARROW.addEventListener('change', () => handle.setAttribute('aria-orientation', NARROW.matches ? 'horizontal' : 'vertical'));
+
+  let dragging = false;
+  let frac = 0;
+  handle.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    dragging = true;
+    handle.classList.add('dragging');
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const r = split.getBoundingClientRect();
+    frac = apply(NARROW.matches ? (r.bottom - e.clientY) / r.height : (r.right - e.clientX) / r.width);
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    if (frac) save(frac);
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+  handle.addEventListener('keydown', e => {
+    const grow = NARROW.matches ? 'ArrowUp' : 'ArrowLeft';
+    const shrink = NARROW.matches ? 'ArrowDown' : 'ArrowRight';
+    if (e.key !== grow && e.key !== shrink) return;
+    e.preventDefault();
+    const cur = parseFloat(getComputedStyle(split).getPropertyValue(prop())) || (NARROW.matches ? 0.45 : 0.46);
+    save(apply(cur + (e.key === grow ? 0.05 : -0.05)));
+  });
 }
 
 // The note that "To notebook" writes into: the open side notebook, else the
@@ -993,14 +1157,15 @@ function currentSelectionTarget() {
 }
 
 const ACTIONS = {
-  selection: ['highlight', 'comment', 'notebook', 'card', 'explain', 'unclear', 'todo', 'question', 'link'],
-  region: ['eqcard', 'latex', 'explain', 'unclear', 'comment', 'todo', 'question', 'derive', 'link'],
-  anno: ['readexp', 'comment', 'notebook', 'card', 'explain', 'unclear', 'understood', 'todo', 'question', 'link', 'delete'],
+  selection: ['highlight', 'comment', 'notebook', 'card', 'explain', 'unclear', 'todo', 'question', 'pin', 'link'],
+  region: ['eqcard', 'latex', 'explain', 'unclear', 'comment', 'todo', 'question', 'derive', 'pin', 'link'],
+  anno: ['readexp', 'comment', 'notebook', 'card', 'explain', 'unclear', 'understood', 'todo', 'question', 'pin', 'unpin', 'link', 'delete'],
 };
 const ACTION_LABELS = {
   highlight: 'Highlight', comment: 'Comment', notebook: 'To notebook', card: 'Card', explain: 'Explain',
   todo: 'Follow-up', question: 'Question', link: 'Copy link', eqcard: 'Equation card', latex: 'LaTeX to notebook',
   derive: 'Re-derive', delete: 'Delete', unclear: 'Not clear yet', understood: 'Understood', readexp: 'Read explanation',
+  pin: 'Add to Brief', unpin: 'Remove from Brief',
 };
 
 function showActions(target) {
@@ -1017,6 +1182,8 @@ function showActions(target) {
   for (const act of ACTIONS[target.kind]) {
     if ((act === 'unclear' && status === 'unclear') || (act === 'understood' && status !== 'unclear')) continue;
     if (act === 'readexp' && !explanationFor(target.anno.id)) continue;
+    const pinned = target.kind === 'anno' && target.anno.data.brief;
+    if ((act === 'pin' && pinned) || (act === 'unpin' && !pinned)) continue;
     const b = document.createElement('button');
     b.className = 'action-btn' + (act === 'delete' ? ' danger' : '');
     b.textContent = ACTION_LABELS[act];
@@ -1135,7 +1302,10 @@ async function runActionNow(act) {
   if (act === 'delete') {
     const a = target.anno;
     const linked = store.all().filter(it => (it.kind === 'card' || it.kind === 'task') && it.data.annoId === a.id);
-    if (linked.length && !confirm(`Delete this mark? Its ${linked.length} card(s)/task(s) are kept.`)) return;
+    if (linked.length && !confirm(`Delete this mark? Its ${linked.length} card(s)/task(s) are kept, with the passage's text and page.`)) return;
+    // Cards and tasks keep what they were about.
+    const source = { page: a.data.page, quote: a.data.type === 'region' ? (a.data.latex ? `$${a.data.latex}$` : '') : snippet(a.data.quote, 2000) };
+    for (const it of linked) await trackedUpdate(it.id, { source });
     await trackedRemove(a.id);
     hideActions();
     toast('Mark deleted: Undo brings it back');
@@ -1154,7 +1324,17 @@ async function runActionNow(act) {
   const regionLatex = async () => p.anno.data.latex
     || equationToLatex(await state.pdf.regionImage(page, p.anno.data.rects[0]));
 
-  if (act === 'highlight') {
+  if (act === 'pin' || act === 'unpin') {
+    const pin = act === 'pin';
+    const anno = await commitAnno(p, { brief: pin });
+    toast(pin ? 'Added to the Brief' : 'Removed from the Brief');
+    // An equation in the Brief should read as an equation.
+    if (pin && anno.data.type === 'region' && !anno.data.latex && state.pdf) {
+      equationToLatex(await state.pdf.regionImage(anno.data.page, anno.data.rects[0]))
+        .then(latex => store.get(anno.id) && store.update(anno.id, { latex }))
+        .catch(e => console.warn('No LaTeX for the pinned region', e));
+    }
+  } else if (act === 'highlight') {
     await commitAnno(p);
   } else if (act === 'unclear' || act === 'understood') {
     await commitAnno(p, { status: act });
@@ -1242,7 +1422,7 @@ async function createExplainTask(anno, isRegion) {
     docId,
     annoId: anno.id,
   });
-  toast('Writing an explanation. It will appear in Study.');
+  toast('Writing an explanation: open Study to watch it appear.');
   generateExplanation(task.id);
 }
 
@@ -1263,6 +1443,20 @@ async function withPaper(docId, fn) {
 // reload); Study offers Retry for it.
 const EXPLAIN_STALE_MS = 3 * 60 * 1000;
 const explaining = new Set();
+
+// Explanations stream in: the text so far, shown in Study while it is written.
+const liveText = new Map(); // taskId -> markdown so far
+let liveTimer = null;
+function showLiveText() {
+  if (liveTimer) return;
+  liveTimer = setTimeout(() => {
+    liveTimer = null;
+    for (const el of document.querySelectorAll('[data-live]')) {
+      const text = liveText.get(el.dataset.live);
+      if (text) el.innerHTML = renderMarkdown(text, resolveLink);
+    }
+  }, 200);
+}
 
 function explainState(task) {
   if (explaining.has(task.id)) return 'writing';
@@ -1297,7 +1491,16 @@ async function generateExplanation(taskId) {
       context: await view.contextFor(anno.data.page, anno.data.quote),
       image: anno.data.type === 'region' ? await view.regionImage(anno.data.page, anno.data.rects[0]) : null,
     }));
-    const explanation = await explainPassage({ docTitle: doc ? doc.data.title : '', quote: anno.data.quote || anno.data.latex, context, image });
+    const explanation = await explainPassage({
+      docTitle: doc ? doc.data.title : '',
+      quote: anno.data.quote || anno.data.latex,
+      context,
+      image,
+      onDelta: text => {
+        liveText.set(taskId, text);
+        showLiveText();
+      },
+    });
     // The task may have been undone while the model was writing.
     if (!store.get(taskId)) return;
     await store.update(taskId, { explanation, status: 'ready', pending: undefined, error: undefined });
@@ -1308,6 +1511,7 @@ async function generateExplanation(taskId) {
     toast('Explanation failed: ' + friendlyError(e), true);
   } finally {
     explaining.delete(taskId);
+    liveText.delete(taskId);
     renderSidebar();
     if (state.view === 'study' && !state.review) renderStudy();
   }
@@ -1347,6 +1551,7 @@ async function cardDialog(p, fromEquation) {
   const dlg = $('#dialog');
   dlg.innerHTML = `<form method="dialog" class="dialog-form card-form">
       <h3>New card</h3>
+      <div class="card-source md-view"></div>
       <p class="dialog-status" role="status"></p>
       <label>Front <textarea name="front" rows="3" maxlength="20000" placeholder="A precise question"></textarea></label>
       <div class="card-preview" data-for="front"></div>
@@ -1375,6 +1580,12 @@ async function cardDialog(p, fromEquation) {
   let latex = anno.data.latex || '';
   back.value = latex ? `$$${latex}$$` : anno.data.quote;
   preview();
+  // The source stays in view, to check the draft against.
+  const source = dlg.querySelector('.card-source');
+  const showSource = () => {
+    source.innerHTML = renderMarkdown('**From the paper:** ' + (latex ? `$$${latex}$$` : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+  };
+  showSource();
 
   const draft = async () => {
     status.classList.remove('error');
@@ -1385,6 +1596,7 @@ async function cardDialog(p, fromEquation) {
         latex = await equationToLatex(await withPaper(anno.data.docId, v => v.regionImage(anno.data.page, anno.data.rects[0])));
         if (!back.value.trim()) back.value = `$$${latex}$$`;
         preview();
+        showSource();
         status.textContent = 'Drafting...';
       }
       const context = await withPaper(anno.data.docId, v => v.contextFor(anno.data.page, anno.data.quote, latex ? 1500 : 3000));
@@ -1471,9 +1683,13 @@ function renderPanel() {
   const panel = $('#panel');
   const show = state.panelOpen && (state.view === 'doc' || state.view === 'note');
   panel.classList.toggle('hidden', !show);
-  $('#toggle-panel').classList.toggle('active', state.panelOpen && state.panelMode === 'marks');
-  $('#toggle-contents').classList.toggle('active', state.panelOpen && state.panelMode === 'contents');
-  $('#toggle-note-panel').classList.toggle('active', state.panelOpen);
+  const pressed = (id, on) => {
+    $(id).classList.toggle('active', on);
+    $(id).setAttribute('aria-pressed', String(on));
+  };
+  pressed('#toggle-panel', state.panelOpen && state.panelMode === 'marks');
+  pressed('#toggle-contents', state.panelOpen && state.panelMode === 'contents');
+  pressed('#toggle-note-panel', state.panelOpen);
   if (!show) return;
   // In portrait the panel overlays the page; it starts below the toolbar so
   // every toolbar button stays reachable.
@@ -1495,7 +1711,10 @@ function renderPanel() {
 function renderContentsPanel(panel) {
   panel.innerHTML = `<section>
       <h3>Contents</h3>
-      <input class="find-box" type="search" placeholder="Find in this paper" aria-label="Find in this paper" enterkeyhint="search">
+      <div class="find-row">
+        <input class="find-box" type="search" placeholder="Find in this paper" aria-label="Find in this paper" enterkeyhint="search">
+        <span class="find-count muted" aria-live="polite"></span>
+      </div>
       <ol class="find-results hidden"></ol>
       <p class="muted toc-note">Reading the table of contents...</p>
       <ol class="toc"></ol>
@@ -1535,20 +1754,47 @@ function wireFind(panel, view) {
   const box = panel.querySelector('.find-box');
   const results = panel.querySelector('.find-results');
   const toc = panel.querySelector('.toc');
+  const count = panel.querySelector('.find-count');
+  let hitsNow = [];
+  let at = -1;
+  // Shows hit i: jumps there, highlights it, marks its row, updates "i of n".
+  const show = (i, keepPanel) => {
+    if (!hitsNow.length) return;
+    at = (i + hitsNow.length) % hitsNow.length;
+    const h = hitsNow[at];
+    results.querySelectorAll('.current').forEach(b => b.classList.remove('current'));
+    const btn = results.querySelectorAll('.find-hit-item')[at];
+    if (btn) {
+      btn.classList.add('current');
+      btn.scrollIntoView({ block: 'nearest' });
+    }
+    count.textContent = `${at + 1} of ${hitsNow.length}`;
+    if (!keepPanel && NARROW.matches) setPanel(false);
+    view.goTo(h.page, 0, 'instant');
+    view.markText(h.page, box.value.trim());
+  };
+  const note = panel.querySelector('.toc-note');
   const run = async () => {
+    // The panel may have switched or closed during the debounce.
+    if (!box.isConnected) return;
     const q = box.value.trim();
     lastFind = box.value;
     toc.classList.toggle('hidden', !!q);
-    panel.querySelector('.toc-note').classList.toggle('hidden', !!q || !panel.querySelector('.toc-note').textContent);
+    note.classList.toggle('hidden', !!q || !note.textContent);
     results.classList.toggle('hidden', !q);
     if (!q) {
       view.markText(null);
+      count.textContent = '';
+      hitsNow = [];
       return;
     }
     const hits = await view.find(q);
-    if (box.value.trim() !== q) return;
+    if (!box.isConnected || box.value.trim() !== q) return;
+    hitsNow = hits.slice(0, 200);
+    at = -1;
+    count.textContent = hits.length ? `${hits.length}${hits.length >= 300 ? '+' : ''} found` : '';
     results.innerHTML = hits.length ? '' : '<li class="muted">No matches in this paper.</li>';
-    hits.slice(0, 200).forEach(h => {
+    hits.slice(0, 200).forEach((h, i) => {
       const li = document.createElement('li');
       li.innerHTML = '<button class="find-hit-item"><span class="toc-page"></span><span class="find-snippet"></span></button>';
       li.querySelector('.toc-page').textContent = 'p. ' + h.page;
@@ -1558,13 +1804,7 @@ function wireFind(panel, view) {
       const mark = document.createElement('mark');
       mark.textContent = match;
       snip.append(before, mark, after);
-      li.querySelector('button').addEventListener('click', () => {
-        results.querySelectorAll('.current').forEach(b => b.classList.remove('current'));
-        li.querySelector('button').classList.add('current');
-        if (NARROW.matches) setPanel(false);
-        view.goTo(h.page, 0, 'instant');
-        view.markText(h.page, q);
-      });
+      li.querySelector('button').addEventListener('click', () => show(i, false));
       results.appendChild(li);
     });
     if (hits.length >= 300) results.insertAdjacentHTML('beforeend', '<li class="muted">Showing the first 300 matches.</li>');
@@ -1573,8 +1813,11 @@ function wireFind(panel, view) {
     clearTimeout(findTimer);
     findTimer = setTimeout(run, 250);
   });
+  // Enter / Shift+Enter step through the matches and keep the panel open.
   box.addEventListener('keydown', e => {
-    if (e.key === 'Enter') results.querySelector('.find-hit-item')?.click();
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    show(at < 0 ? 0 : at + (e.shiftKey ? -1 : 1), true);
   });
   if (lastFind) {
     box.value = lastFind;
@@ -1651,6 +1894,7 @@ function renderDocPanel(panel) {
   for (const a of annos) {
     const li = document.createElement('li');
     li.className = 'mark';
+    li.dataset.anno = a.id;
     li.style.setProperty('--anno-color', a.data.color);
     const items = linked.filter(it => it.data.annoId === a.id);
     li.innerHTML = `<div class="mark-page">p. ${a.data.page}</div><div class="mark-quote"></div>
@@ -1673,6 +1917,14 @@ function renderDocPanel(panel) {
     });
     list.appendChild(li);
   }
+}
+
+function pointToMarkRow(annoId) {
+  const row = document.querySelector(`#panel .mark[data-anno="${CSS.escape(annoId)}"]`);
+  if (!row) return;
+  document.querySelectorAll('#panel .mark.current').forEach(r => r.classList.remove('current'));
+  row.classList.add('current');
+  row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function renderNotePanel(panel) {
@@ -1723,7 +1975,8 @@ function renderNotePanel(panel) {
 function sourceLink(it) {
   if (!it.data.annoId || !store.get(it.data.annoId)) {
     const d = it.data.docId && store.get(it.data.docId);
-    return d ? `<a href="#doc=${d.id}" class="source"></a>` : '';
+    const page = it.data.source && it.data.source.page;
+    return d ? `<a href="#doc=${d.id}${page ? '&p=' + page : ''}" class="source"></a>` : '';
   }
   const a = store.get(it.data.annoId);
   return `<a href="#doc=${a.data.docId}&a=${a.id}" class="source"></a>`;
@@ -1734,7 +1987,8 @@ function fillSourceLabels(root, it) {
   if (!el) return;
   const a = it.data.annoId && store.get(it.data.annoId);
   const d = store.get(a ? a.data.docId : it.data.docId);
-  el.textContent = (d ? d.data.title : 'Paper') + (a ? ', p. ' + a.data.page : '');
+  const page = a ? a.data.page : it.data.source && it.data.source.page;
+  el.textContent = (d ? d.data.title : 'Paper') + (page ? ', p. ' + page : '');
 }
 
 function renderStudy() {
@@ -1768,8 +2022,8 @@ function renderStudy() {
     </div>`;
   const allCards = store.all('card');
   const next = allCards.filter(c => c.data.srs.due > now).sort((a, b) => a.data.srs.due - b.data.srs.due)[0];
-  root.querySelector('.cards-line').textContent = `${allCards.length} cards, ${q.dueCards.length} due now` +
-    (next ? `, next one ${new Date(next.data.srs.due).toLocaleString()}` : '');
+  root.querySelector('.cards-line').textContent = `${allCards.length} card${allCards.length === 1 ? '' : 's'}, ${q.dueCards.length} due now` +
+    (next ? `, next one due ${relativeTime(next.data.srs.due)}` : '');
   root.querySelector('#start-review').addEventListener('click', () => {
     state.review = { queue: q.dueCards.map(c => c.id), index: 0, revealed: false };
     renderStudy();
@@ -1792,8 +2046,19 @@ function renderStudy() {
 }
 
 // archived: an explanation already marked understood, kept for rereading.
+function focusStudyItem(taskId) {
+  const el = document.querySelector(`#view-study [data-task="${CSS.escape(taskId)}"]`);
+  if (!el) return;
+  const archive = el.closest('details');
+  if (archive) archive.open = true;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1600);
+}
+
 function explanationCard(t, archived) {
   const el = document.createElement('article');
+  el.dataset.task = t.id;
   el.className = 'explain-card' + (archived ? ' archived' : '');
   const savedNote = t.data.noteId && store.get(t.data.noteId);
   el.innerHTML = `<div class="explain-head"><h3></h3>${sourceLink(t)}</div>
@@ -1818,6 +2083,9 @@ function explanationCard(t, archived) {
     again.disabled = true;
     again.textContent = 'Writing a new one...';
     el.classList.add('is-writing');
+    const body = el.querySelector('.explain-body');
+    body.dataset.live = t.id;
+    if (liveText.has(t.id)) body.innerHTML = renderMarkdown(liveText.get(t.id), resolveLink);
   }
   el.querySelector('.explain-foot').addEventListener('click', async e => {
     const act = e.target.closest('[data-act]')?.dataset.act;
@@ -1855,13 +2123,14 @@ function explanationCard(t, archived) {
 // The passage a task or card is about, for context in lists.
 function quoteOf(it) {
   const a = it.data.annoId && store.get(it.data.annoId);
-  if (!a) return '';
+  if (!a) return (it.data.source && it.data.source.quote) || '';
   if (a.data.type === 'region') return a.data.latex ? `$${a.data.latex}$` : '';
   return a.data.quote;
 }
 
 function taskRow(t) {
   const el = document.createElement('div');
+  el.dataset.task = t.id;
   el.className = 'task-row';
   const quote = quoteOf(t);
   const gen = t.data.type === 'explain' ? explainState(t) : null;
@@ -1872,10 +2141,12 @@ function taskRow(t) {
     ${sourceLink(t)}
     ${gen ? `<button class="btn-small" data-gen ${gen === 'writing' ? 'disabled' : ''}>${genLabel}</button>` : ''}
     ${quote ? '<blockquote class="task-quote md-inline"></blockquote>' : ''}
+    ${gen === 'writing' ? `<div class="md-view live-explain" data-live="${t.id}"><p class="muted">Writing...</p></div>` : ''}
     ${t.data.error || gen === 'interrupted' ? '<span class="task-error"></span>' : ''}`;
   el.querySelector('.task-text').innerHTML = renderMarkdown(t.data.text, resolveLink);
   if (quote) el.querySelector('.task-quote').innerHTML = renderMarkdown(snippet(quote, 400), resolveLink);
   fillSourceLabels(el, t);
+  if (liveText.has(t.id)) el.querySelector('[data-live]').innerHTML = renderMarkdown(liveText.get(t.id), resolveLink);
   const err = el.querySelector('.task-error');
   if (err) err.textContent = t.data.error || 'Interrupted before it finished (the page was closed or reloaded).';
   el.querySelector('input').addEventListener('change', () => store.update(t.id, { status: 'done' }).catch(e => reportError('Update failed', e)));
@@ -1911,8 +2182,8 @@ function renderReview(root) {
     const lastWait = soon.length ? Math.ceil((soon[soon.length - 1].data.srs.due - now) / 60000) : 0;
     root.querySelector('.review-next').textContent = dueNow.length
       ? `${dueNow.length} card${dueNow.length === 1 ? '' : 's'} came due again while you reviewed.`
-      : soon.length === 1 ? `Next card back in ${wait} min.`
-      : soon.length ? `Next card back in ${wait} min; ${soon.length} back within ${lastWait} min.`
+      : soon.length === 1 ? `1 card is due again in ${wait} min.`
+      : soon.length ? `${soon.length} cards are due again within ${lastWait} min (the first in ${wait} min).`
       : 'No more cards due.';
     root.querySelector('#review-back').addEventListener('click', () => {
       state.review = null;
@@ -2024,12 +2295,12 @@ function briefMarkdown(docId) {
     if (gist) out.push(`  **In short:** ${gist}`);
   }
 
-  const equations = annos.filter(a => a.data.type === 'region' && a.data.latex);
+  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief));
   out.push('', `## Key equations (${equations.length})`);
   if (!equations.length) out.push('Use the Region tool on an equation and choose Equation card or LaTeX to notebook.');
   for (const a of equations) {
     const n = cards.filter(c => c.data.annoId === a.id).length;
-    out.push('', `$$${a.data.latex}$$`, `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
+    out.push('', a.data.latex ? `$$${a.data.latex}$$` : '*(equation region; LaTeX not read yet)*', `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
   }
 
   const open = tasks.filter(t => t.data.type !== 'question' && t.data.type !== 'explain' && t.data.status !== 'done');
@@ -2038,6 +2309,21 @@ function briefMarkdown(docId) {
   for (const t of open) {
     const a = t.data.annoId && store.get(t.data.annoId);
     out.push(`- [ ] ${TASK_LABELS[t.data.type]}: ${t.data.text.replace(/^Explain:\s*/, '')}` + (a ? ` ${ref(a)}` : ''));
+  }
+
+  const pinned = annos.filter(a => a.data.brief && a.data.type !== 'region');
+  if (pinned.length) {
+    out.push('', `## Key passages (${pinned.length})`);
+    for (const a of pinned) out.push('', `- ${ref(a)}${a.data.comment ? ' ' + a.data.comment : ''}`, `  > ${snippet(a.data.quote, 400)}`);
+  }
+
+  const explained = tasks.filter(t => t.data.type === 'explain' && t.data.status === 'done' && t.data.explanation);
+  if (explained.length) {
+    out.push('', `## Explained (${explained.length})`);
+    for (const t of explained) {
+      const a = t.data.annoId && store.get(t.data.annoId);
+      out.push('', `- ${a ? ref(a) + ' ' : ''}**${t.data.text.replace(/^Explain:\s*/, '')}**`, `  ${plainGist(t.data.explanation)}`);
+    }
   }
 
   const commented = annos.filter(a => a.data.comment);
@@ -2196,7 +2482,7 @@ function wire() {
       return;
     }
     await inkErased(state.docId, page, ink.data.strokes.map(s => s.id), 'Clear ink');
-    toast(`Cleared the ink on page ${page}: Undo brings it back`);
+    toast(`Cleared ink on page ${page}: Undo brings it back`);
   });
   // Two-finger tap undoes, three-finger tap redoes (as in GoodNotes and
   // Notability). A tap is short and does not move; pinches and scrolls do.
@@ -2227,6 +2513,7 @@ function wire() {
     else if (t.max === 3) redo();
   }, { passive: true });
 
+  wireSplitHandle();
   $('#toggle-panel').addEventListener('click', () => togglePanel('marks'));
   $('#toggle-contents').addEventListener('click', () => togglePanel('contents'));
   $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
@@ -2258,9 +2545,13 @@ function wire() {
   $('#pdf-scroll').addEventListener('pointerdown', e => { lastPointer = e.pointerType; }, true);
   $('#pdf-scroll').addEventListener('click', e => {
     if (!state.pdf || !window.getSelection().isCollapsed) return;
-    if (NARROW.matches && state.panelOpen) setPanel(false);
-    if (lastPointer !== 'touch' && state.tool.tool !== 'select') return;
-    const a = state.pdf.annoAt(e.clientX, e.clientY);
+    const drawing = lastPointer !== 'touch' && state.tool.tool !== 'select';
+    const a = drawing ? null : state.pdf.annoAt(e.clientX, e.clientY);
+    // Working through marks: a tapped mark is found in the open Marks panel;
+    // a tap elsewhere puts a portrait panel away.
+    if (a && state.panelOpen && state.panelMode === 'marks') pointToMarkRow(a.id);
+    else if (NARROW.matches && state.panelOpen) setPanel(false);
+    if (drawing) return;
     if (a) showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: e.clientX, top: e.clientY, bottom: e.clientY, width: 0 } });
     else if (state.target) hideActions();
   });
@@ -2362,6 +2653,7 @@ async function openVaultNow(user) {
   sideEditor.close();
   closeDoc();
   await store.open(accountId);
+  purgeExpiredTrash();
   // Opening the reader with no route resumes where you left off.
   if (!location.hash || location.hash === '#') {
     const last = localStorage.getItem('reader.last');

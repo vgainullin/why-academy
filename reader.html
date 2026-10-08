@@ -53,6 +53,7 @@
           <label class="btn-small">Add PDF<input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden></label>
         </div>
         <ul id="doc-list" class="side-list"></ul>
+        <details id="trash" class="trash hidden"><summary>Recently deleted</summary><ul class="side-list"></ul></details>
       </section>
 
       <section class="side-section">
@@ -110,6 +111,7 @@
         </div>
         <div class="doc-split">
           <div id="pdf-scroll" class="pdf-scroll"></div>
+          <div id="split-handle" class="split-handle hidden" role="separator" tabindex="0" aria-label="Resize the notebook" title="Drag to resize the notebook"></div>
           <div id="doc-notebook" class="doc-notebook hidden"></div>
         </div>
       </section>

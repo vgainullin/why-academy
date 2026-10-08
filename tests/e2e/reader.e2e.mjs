@@ -21,6 +21,7 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 834, height: 1194 }, hasTouch: true, deviceScaleFactor: 2 });
 await ctx.addInitScript(kit);
 let slowDraft = false;
+let streamed = 0;
 let failExplain = true;
 await ctx.route('https://openrouter.ai/**', async route => {
   const body = JSON.parse(route.request().postData());
@@ -37,12 +38,19 @@ await ctx.route('https://openrouter.ai/**', async route => {
     reply = 'FRONT:\nDrafted question?\nBACK:\nDrafted answer.';
   } else if (text.includes('FRONT:')) reply = 'FRONT:\nWhy is $\\operatorname{Var}(q \\cdot k / \\sqrt{d_k}) = 1$ with $\\delta_{ij}$?\nBACK:\nVar scales by $1/d_k$.';
   else if (text.includes('not yet understood')) reply = '1. **In plain terms** - saturation.';
+  if (body.stream) {
+    // Server-sent events, in pieces, like OpenRouter.
+    const pieces = reply.match(/.{1,6}/gs) || [''];
+    const sse = pieces.map(p => `data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`).join('') + 'data: [DONE]\n\n';
+    streamed++;
+    return route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: sse });
+  }
   await route.fulfill({ json: { choices: [{ message: { content: reply } }] } });
 });
 
 const page = await ctx.newPage();
 const errors = [];
-page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+page.on('pageerror', e => errors.push('pageerror: ' + e.message + ' @ ' + ((e.stack || '').split('\n').find(l => /reader\.js|lib\//.test(l)) || '').trim()));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('dialog', d => d.accept());
 const shot = n => page.screenshot({ path: `${OUT}/${n}.png` });
@@ -385,7 +393,7 @@ try {
     await page.click('[data-grade="0"]');
   }
   await page.waitForSelector('.review-next');
-  check('done screen says when cards come back', /back in|came due/.test(await page.textContent('.review-next')), await page.textContent('.review-next'));
+  check('done screen says when cards come back', /due again|came due/.test(await page.textContent('.review-next')), await page.textContent('.review-next'));
 
   // Contents for a PDF without an outline: detected headings
   await page.goto(B + '/reader');
@@ -554,9 +562,9 @@ try {
   let gone = false;
   for (let i = 0; i < 16 && !gone; i++) {
     await wait(500);
-    gone = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plainId && d.deleted);
+    gone = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plainId && d.data.trashedAt);
   }
-  check('remove a paper', (await row().count()) === 0 && gone);
+  check('remove a paper (to Recently deleted)', (await row().count()) === 0 && gone);
 
   // Find in paper (Contents panel), highlighted on the page
   await page.click(`#doc-list a[href="#doc=${docId}"]`).catch(() => {});
@@ -641,6 +649,144 @@ try {
   check('card draft does not overwrite typed text', frontNow === 'MY OWN QUESTION' && offered === 1, `front "${frontNow}", offer buttons ${offered}`);
   slowDraft = false;
   await page.click('dialog button[value="cancel"]');
+
+  check('explanations stream (SSE) and are saved', streamed > 0, streamed + ' streamed request(s)');
+
+  // Find steps through matches with Enter and shows "i of n"
+  await page.goto(B + '/reader#doc=' + docId + '&p=1');
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  if (!(await page.evaluate(() => document.querySelector('#toggle-contents').classList.contains('active')))) await page.click('#toggle-contents');
+  await page.fill('#panel .find-box', 'variance');
+  await page.waitForFunction(() => /found/.test(document.querySelector('#panel .find-count')?.textContent || ''));
+  await page.focus('#panel .find-box');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  const counter = await page.textContent('#panel .find-count');
+  await page.keyboard.press('Shift+Enter');
+  const counterBack = await page.textContent('#panel .find-count');
+  check('Enter and Shift+Enter step through matches', /^2 of \d+/.test(counter) && /^1 of \d+/.test(counterBack) && await page.isVisible('#panel'), `${counter} -> ${counterBack}`);
+  await page.fill('#panel .find-box', '');
+  await page.click('#panel .panel-close');
+
+  // Tapping a mark keeps the Marks panel open and finds its row
+  await page.click('.tool[data-tool="select"]');
+  await page.click('#toggle-panel');
+  await page.waitForSelector('#panel .mark');
+  const tapPt = await page.evaluate(() => {
+    const el = document.querySelector('.pdf-page[data-page="1"] .anno-highlight');
+    const r = el.getBoundingClientRect();
+    return { x: r.left + 6, y: r.top + r.height / 2 };
+  });
+  await page.mouse.click(tapPt.x, tapPt.y);
+  await wait(400);
+  check('tapping a mark keeps the Marks panel open on its row', await page.isVisible('#panel') && (await page.locator('#panel .mark.current').count()) === 1);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+
+  // Pin a passage to the Brief
+  await page.evaluate(() => __wa.selectText(1, 'It is easy to overlook'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Add to Brief")');
+  await wait(400);
+  await page.goto(B + '/reader#brief=' + docId);
+  await page.waitForSelector('.brief-body h2');
+  const briefHeads = await page.locator('.brief-body h2').allTextContents();
+  check('pinned passages and explained points appear in the Brief', briefHeads.some(h => h.startsWith('Key passages')) && (await page.textContent('.brief-body')).includes('It is easy to overlook'), briefHeads.join(' | '));
+
+  // Search hit on an explanation opens it in Study
+  await library();
+  await page.fill('#search', 'In plain terms');
+  await page.waitForSelector('#search-results a[href*="#study&t="]');
+  await page.locator('#search-results a[href*="#study&t="]').first().click();
+  await page.waitForSelector('#view-study [data-task].flash', { timeout: 4000 }).catch(() => {});
+  check('explanation search hit opens it in Study', (await page.evaluate(() => location.hash)).startsWith('#study&t=') && (await page.locator('#view-study [data-task].flash').count()) === 1);
+  // The library closed with the tap (portrait); clear the query directly.
+  await page.evaluate(() => {
+    const box = document.querySelector('#search');
+    box.value = '';
+    box.dispatchEvent(new Event('input'));
+  });
+
+  // Deleting a mark keeps the passage on its follow-up
+  await page.evaluate(id => { location.hash = '#doc=' + id + '&p=1'; }, docId);
+  await page.waitForSelector('#view-doc:not(.hidden) .pdf-page[data-page="1"] .textLayer span');
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(1, 'weighted sum of the values'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Follow-up")');
+  await page.fill('dialog textarea', 'Check the weighting');
+  await page.click('dialog button[value="ok"]');
+  await wait(500);
+  const fuPt = await page.evaluate(() => {
+    const els = [...document.querySelectorAll('.pdf-page[data-page="1"] .anno-highlight')];
+    const el = els.find(e => e.getBoundingClientRect().width > 0 && e.dataset.anno);
+    const all = els.map(e => e.getBoundingClientRect());
+    const r = all.sort((a, b) => b.top - a.top)[0];
+    return { x: r.left + 6, y: r.top + r.height / 2 };
+  });
+  await page.mouse.click(fuPt.x, fuPt.y);
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Delete")');
+  await wait(600);
+  await page.goto(B + '/reader#study');
+  await page.waitForSelector('.task-row');
+  const orphan = page.locator('.task-row', { hasText: 'Check the weighting' });
+  check('a follow-up keeps its passage after the mark is deleted', (await orphan.locator('.task-quote').textContent().catch(() => '')).includes('weighted sum') && (await orphan.locator('.source').textContent()).includes('p. 1'));
+
+  // Resize the notebook with the handle
+  await page.goto(B + '/reader#doc=' + docId);
+  await page.waitForSelector('.pdf-page .textLayer span');
+  if (!(await page.evaluate(() => document.querySelector('#toggle-notebook').classList.contains('active')))) await page.click('#toggle-notebook');
+  await page.waitForSelector('#split-handle:not(.hidden)');
+  const h0 = await page.evaluate(() => document.querySelector('#doc-notebook').getBoundingClientRect().height);
+  const hb = await page.locator('#split-handle').boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y - 200, { steps: 8 });
+  await page.mouse.up();
+  await wait(300);
+  const h1 = await page.evaluate(() => document.querySelector('#doc-notebook').getBoundingClientRect().height);
+  await page.reload();
+  await page.waitForSelector('#doc-notebook:not(.hidden)');
+  await wait(500);
+  const h2 = await page.evaluate(() => document.querySelector('#doc-notebook').getBoundingClientRect().height);
+  check('notebook resizes with the handle and keeps its size', h1 > h0 + 150 && Math.abs(h2 - h1) < 4, `${Math.round(h0)} -> ${Math.round(h1)} -> ${Math.round(h2)}`);
+  await page.click('#toggle-notebook');
+
+  // Recently deleted: remove, restore, delete for good
+  await page.goto(B + '/reader');
+  await page.setInputFiles('#file-input', FIXTURE_PLAIN);
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  let plain2Id;
+  for (let i = 0; i < 16 && !plain2Id; i++) {
+    await wait(500);
+    plain2Id = (await page.evaluate(() => __wa.serverItems('doc'))).find(d => !d.deleted && d.id !== docId)?.id;
+  }
+  const prow = () => page.locator(`#doc-list .side-row:has(a[href="#doc=${plain2Id}"])`);
+  await library();
+  await prow().locator('.side-more').click();
+  await page.click('dialog button[value="remove"]');
+  await wait(600);
+  await library();
+  const inTrash = await page.locator(`#trash li[data-doc="${plain2Id}"]`).count();
+  const inList = await prow().count();
+  await page.click('#trash summary');
+  await page.click('#trash [data-act="restore"]');
+  await wait(600);
+  const restoredRow = await prow().count();
+  check('removed papers go to Recently deleted and can be restored', inTrash === 1 && inList === 0 && restoredRow === 1, `trash ${inTrash}, list ${inList}, restored ${restoredRow}`);
+  await prow().locator('.side-more').click();
+  await page.click('dialog button[value="remove"]');
+  await wait(600);
+  await library();
+  if (!(await page.evaluate(() => document.querySelector('#trash').open))) await page.click('#trash summary');
+  await page.click('#trash [data-act="purge"]');
+  let purged = false;
+  for (let i = 0; i < 16 && !purged; i++) {
+    await wait(500);
+    purged = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plain2Id && d.deleted);
+  }
+  check('Delete now removes a paper for good', purged && !(await page.isVisible('#trash')));
 
   // Tapping the open paper in the library puts the library away
   await library();

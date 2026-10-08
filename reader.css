@@ -824,3 +824,34 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 .swatch[data-size="thick"]::after { width: 10px; height: 10px; }
 
 .pdf-detail { position: absolute; pointer-events: none; }
+
+/* Recently deleted */
+.trash { margin-top: 10px; }
+.trash.hidden { display: none; }
+.trash summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; padding: 4px 8px; }
+.trash-item { padding: 6px 8px; border-radius: 6px; }
+.trash-title { font-size: 0.88rem; color: var(--muted); }
+.trash-actions { display: flex; gap: 6px; margin-top: 4px; }
+.btn-small.danger { color: var(--error); }
+
+/* Notebook beside or under the PDF, resizable with a drag handle. */
+.doc-notebook { width: calc(var(--nb-size, 0.46) * 100%); }
+.split-handle { flex: none; width: 12px; cursor: col-resize; touch-action: none; display: grid; place-items: center; background: var(--paper-bg); }
+.split-handle::after { content: ''; width: 4px; height: 44px; border-radius: 2px; background: #9ca3af; }
+.split-handle:hover::after, .split-handle.dragging::after, .split-handle:focus-visible::after { background: var(--accent); }
+.split-handle.hidden { display: none; }
+@media (max-width: 900px) {
+  .doc-notebook { width: 100%; height: calc(var(--nb-size-v, 0.45) * 100%); }
+  .split-handle { width: auto; height: 14px; cursor: row-resize; }
+  .split-handle::after { width: 44px; height: 4px; }
+}
+
+.live-explain { width: 100%; margin: 6px 0 0 26px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--bg); border-radius: 0 6px 6px 0; font-size: 0.92rem; }
+
+.mark.current { background: var(--accent-light); box-shadow: inset 0 0 0 1px var(--accent); }
+.explain-card.flash, .task-row.flash { animation: flash 1.6s ease-out; }
+
+.find-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.find-row .find-box { margin-bottom: 0; flex: 1; min-width: 0; }
+.find-count { font-size: 0.78rem; white-space: nowrap; }
+.card-source { background: var(--bg); border-radius: 6px; padding: 6px 10px; font-size: 0.9rem; max-height: 140px; overflow-y: auto; }

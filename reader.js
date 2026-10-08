@@ -488,9 +488,11 @@ async function openDoc(docId, page, annoId) {
       }, 4000);
     });
     refreshDocOverlays();
+    // Open the notebook first: it changes the PDF pane's size, and the
+    // scroll position must be set for the final size.
+    await applyNotebook();
     const localPage = +localStorage.getItem('reader.page.' + docId) || 0;
     view.goTo(page || localPage || doc.data.lastPage || 1, 0, 'instant');
-    applyNotebook();
   } else if (page) {
     state.pdf.goTo(page);
   }
@@ -566,7 +568,7 @@ async function applyNotebook() {
   } else {
     sideEditor.close();
   }
-  if (state.pdf) state.pdf.layout();
+  // The PDF view re-fits itself when its pane changes size.
 }
 
 // The note that "To notebook" writes into: the open side notebook, else the
@@ -872,6 +874,18 @@ function explainState(task) {
   return 'idle';
 }
 
+// What a student can act on, instead of "Failed to fetch".
+function friendlyError(e) {
+  const msg = e && e.message ? e.message : String(e);
+  if (e instanceof TypeError || /failed to fetch|network|load failed/i.test(msg)) {
+    return "Couldn't reach the AI service. Check your connection, then Retry.";
+  }
+  if (/HTTP 401|HTTP 403/.test(msg)) return 'The AI service rejected the API key. Check it in Settings.';
+  if (/HTTP 429/.test(msg)) return 'The AI service is rate limiting requests. Wait a minute, then Retry.';
+  if (/HTTP 5\d\d/.test(msg)) return 'The AI service had an error. Retry in a moment.';
+  return msg;
+}
+
 async function generateExplanation(taskId) {
   if (explaining.has(taskId)) return;
   explaining.add(taskId);
@@ -890,8 +904,8 @@ async function generateExplanation(taskId) {
     toast('Explanation ready in Study');
   } catch (e) {
     console.error('Explanation failed', e);
-    if (store.get(taskId)) await store.update(taskId, { error: e.message, pending: undefined });
-    toast('Explanation failed: ' + e.message, true);
+    if (store.get(taskId)) await store.update(taskId, { error: friendlyError(e), pending: undefined });
+    toast('Explanation failed: ' + friendlyError(e), true);
   } finally {
     explaining.delete(taskId);
     renderSidebar();
@@ -978,7 +992,7 @@ async function cardDialog(p, fromEquation) {
       status.textContent = 'Edit the draft, then save.';
     } catch (e) {
       console.error('Card draft failed', e);
-      status.textContent = 'AI draft failed: ' + e.message + '. You can still write the card yourself.';
+      status.textContent = 'AI draft failed: ' + friendlyError(e) + ' You can still write the card yourself.';
       status.classList.add('error');
     }
   };
@@ -1021,8 +1035,6 @@ function setPanel(open) {
     console.warn('Could not remember the panel state', e);
   }
   renderPanel();
-  // On wide screens the panel takes width from the page.
-  if (state.pdf && !NARROW.matches) state.pdf.layout();
 }
 
 function renderPanel() {
@@ -1182,7 +1194,12 @@ function renderStudy() {
   const now = Date.now();
   const q = studyQueue(store.all(), now);
   const questions = q.open.filter(t => t.data.type === 'question');
-  const open = q.open.filter(t => t.data.type !== 'question');
+  // Explanations still being written, or failed, belong with the others.
+  const explaining = q.open.filter(t => t.data.type === 'explain');
+  const open = q.open.filter(t => t.data.type !== 'question' && t.data.type !== 'explain');
+  const understood = store.all('task')
+    .filter(t => t.data.type === 'explain' && t.data.status === 'done' && t.data.explanation)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 
   root.innerHTML = `
     <div class="study">
@@ -1191,7 +1208,10 @@ function renderStudy() {
         <p class="muted cards-line"></p>
         <button class="btn btn-primary" id="start-review" ${q.dueCards.length ? '' : 'disabled'}>Review ${q.dueCards.length} due</button>
       </section>
-      <section class="study-block"><h2>Explanations to read <span class="muted">${q.toReview.length}</span></h2><div class="study-list" id="study-ready"></div></section>
+      <section class="study-block"><h2>Explanations to read <span class="muted">${q.toReview.length + explaining.length}</span></h2>
+        <div class="study-list" id="study-ready"></div>
+        ${understood.length ? `<details class="study-archive"><summary>Understood (${understood.length})</summary><div class="study-list" id="study-understood"></div></details>` : ''}
+      </section>
       <section class="study-block"><h2>Open follow-ups <span class="muted">${open.length}</span></h2><div class="study-list" id="study-open"></div></section>
       <section class="study-block"><h2>Questions for journal club <span class="muted">${questions.length}</span></h2>
         <p class="muted">Each paper's <strong>Brief</strong> (in its toolbar) collects its questions, open points and key equations for presenting.</p>
@@ -1207,8 +1227,11 @@ function renderStudy() {
   });
 
   const readyBox = root.querySelector('#study-ready');
-  if (!q.toReview.length) readyBox.innerHTML = '<p class="muted">Select a passage and choose Explain to get one.</p>';
+  if (!q.toReview.length && !explaining.length) readyBox.innerHTML = '<p class="muted">Select a passage and choose Explain to get one.</p>';
   for (const t of q.toReview) readyBox.appendChild(explanationCard(t));
+  for (const t of explaining) readyBox.appendChild(taskRow(t));
+  const archive = root.querySelector('#study-understood');
+  if (archive) for (const t of understood) archive.appendChild(explanationCard(t, true));
 
   const openBox = root.querySelector('#study-open');
   if (!open.length) openBox.innerHTML = '<p class="muted">Nothing open.</p>';
@@ -1219,9 +1242,10 @@ function renderStudy() {
   for (const t of questions) qBox.appendChild(taskRow(t));
 }
 
-function explanationCard(t) {
+// archived: an explanation already marked understood, kept for rereading.
+function explanationCard(t, archived) {
   const el = document.createElement('article');
-  el.className = 'explain-card';
+  el.className = 'explain-card' + (archived ? ' archived' : '');
   const savedNote = t.data.noteId && store.get(t.data.noteId);
   el.innerHTML = `<div class="explain-head"><h3></h3>${sourceLink(t)}</div>
     <div class="explain-body md-view"></div>
@@ -1234,6 +1258,12 @@ function explanationCard(t) {
   el.querySelector('h3').textContent = t.data.text;
   fillSourceLabels(el, t);
   el.querySelector('.explain-body').innerHTML = renderMarkdown(t.data.explanation || '', resolveLink);
+  if (archived) {
+    const done = el.querySelector('[data-act="done"]');
+    done.dataset.act = 'reopen';
+    done.textContent = 'Not clear after all';
+    done.className = 'btn btn-secondary';
+  }
   if (explainState(t) === 'writing') {
     const again = el.querySelector('[data-act="again"]');
     again.disabled = true;
@@ -1248,6 +1278,9 @@ function explanationCard(t) {
       if (act === 'done') {
         await store.update(t.id, { status: 'done' });
         if (a) await store.update(a.id, { status: 'understood' });
+      } else if (act === 'reopen') {
+        await store.update(t.id, { status: 'ready' });
+        if (a) await store.update(a.id, { status: 'unclear' });
       } else if (act === 'note') {
         const title = await promptDialog('Note title', snippet(t.data.text.replace(/^Explain:\s*/, ''), 60));
         if (!title) return;
@@ -1428,8 +1461,14 @@ function briefMarkdown(docId) {
   if (!unclear.length) out.push('Nothing marked as unclear.');
   for (const a of unclear) {
     const ex = tasks.find(t => t.data.type === 'explain' && t.data.annoId === a.id);
-    const state = ex ? (ex.data.status === 'ready' ? 'explanation ready to read' : ex.data.status === 'done' ? 'explained' : 'explanation pending') : 'no explanation yet';
-    out.push('', `- ${ref(a)} *(${state})*`, `  ${quoteLine(a).replace(/\n/g, ' ')}`);
+    const exState = !ex ? 'no explanation yet'
+      : ex.data.status === 'ready' ? 'explanation ready to read in Study'
+      : ex.data.status === 'done' ? 'explained'
+      : ex.data.error || explainState(ex) === 'interrupted' ? 'explanation failed: retry it in Study'
+      : 'explanation being written';
+    out.push('', `- ${ref(a)} *(${exState})*`, `  ${quoteLine(a).replace(/\n/g, ' ')}`);
+    const gist = ex && ex.data.explanation && plainGist(ex.data.explanation);
+    if (gist) out.push(`  **In short:** ${gist}`);
   }
 
   const equations = annos.filter(a => a.data.type === 'region' && a.data.latex);
@@ -1461,6 +1500,13 @@ function briefMarkdown(docId) {
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   out.push('', `---`, `${plural(cards.length, 'card')}, ${plural(annos.length, 'mark')}.`);
   return out.join('\n');
+}
+
+// The "In plain terms" part of an explanation, as one line of text.
+function plainGist(md) {
+  const m = md.match(/in plain terms\**\s*[-:\u2013\u2014]?\s*([\s\S]*?)(?:\n\s*\n|\n\s*\d+\.|$)/i);
+  const text = (m ? m[1] : md).replace(/\$\$[\s\S]*?\$\$/g, '').replace(/[*_#>`]/g, '').replace(/\s+/g, ' ').trim();
+  return snippet(text, 240);
 }
 
 function plainLinks(md) {

@@ -739,3 +739,8 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 .mark-question { margin-top: 4px; font-size: 0.85rem; color: #9d174d; }
 .explain-card.is-writing .explain-body { opacity: 0.55; }
 .dialog .explain-body { max-height: 60vh; overflow-y: auto; }
+
+.study-archive { margin-top: 12px; }
+.study-archive summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+.study-archive .study-list { margin-top: 10px; }
+.explain-card.archived { opacity: 0.85; }

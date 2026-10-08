@@ -261,7 +261,8 @@ function renderColors() {
     const btn = document.createElement('button');
     btn.className = 'swatch active';
     btn.style.setProperty('--swatch', current);
-    btn.title = (isHl ? 'Highlighter' : 'Ink') + ' color: ' + COLOR_NAMES[current];
+    btn.title = `${isHl ? 'Highlighter' : 'Pen'}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.size} (tap for colors and sizes)`;
+    btn.dataset.size = state.tool.size;
     btn.setAttribute('aria-label', btn.title);
     btn.setAttribute('aria-expanded', 'false');
     const menu = document.createElement('div');
@@ -313,7 +314,7 @@ function renderColors() {
 
 function parseHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.has('doc')) return { view: 'doc', id: h.get('doc'), page: +h.get('p') || null, anno: h.get('a') };
+  if (h.has('doc')) return { view: 'doc', id: h.get('doc'), page: +h.get('p') || null, anno: h.get('a'), q: h.get('q') };
   if (h.has('note')) return { view: 'note', id: h.get('note') };
   if (h.has('brief')) return { view: 'brief', id: h.get('brief') };
   if (h.has('study')) return { view: 'study' };
@@ -346,7 +347,7 @@ async function route() {
   // it (even to the paper already open) puts it away, before slow loading.
   if (NARROW.matches && r.view !== 'empty') setSidebar(false);
   if (r.view === 'doc' && store.get(r.id)) {
-    await openDoc(r.id, r.page, r.anno);
+    await openDoc(r.id, r.page, r.anno, r.q);
   } else if (r.view === 'note' && exists(r.id)) {
     openNoteView(r.id);
   } else if (r.view === 'brief' && store.get(r.id)) {
@@ -462,8 +463,14 @@ function search(q) {
     hits.push({ label, href, title, rank: it.kind === 'doc' || it.kind === 'note' ? 0 : 1 });
   }
   hits.sort((a, b) => a.rank - b.rank);
-  box.innerHTML = hits.length ? '' : '<div class="side-empty">No matches</div>';
-  for (const h of hits.slice(0, 40)) {
+  box.innerHTML = hits.length ? '' : '<div class="side-empty no-matches">No matches</div>';
+  appendSearchHits(box, hits.slice(0, 40));
+  box.classList.remove('hidden');
+  searchPaperText(q, box);
+}
+
+function appendSearchHits(box, hits) {
+  for (const h of hits) {
     const a = document.createElement('a');
     a.className = 'search-hit';
     a.href = h.href;
@@ -472,7 +479,75 @@ function search(q) {
     a.querySelector('.search-title').textContent = h.title;
     box.appendChild(a);
   }
-  box.classList.remove('hidden');
+}
+
+// ── Full-text search of papers ──
+
+// Page texts of papers, extracted once per device when a paper is opened.
+let textIndex = null; // Map docId -> [page text]
+
+async function loadTextIndex() {
+  if (!textIndex) textIndex = new Map((await store.allText()).map(r => [r.id, r.pages]));
+  return textIndex;
+}
+
+// Extracts and stores a paper's text in the background after it opens.
+async function indexPaperText(docId, view) {
+  const index = await loadTextIndex();
+  if (index.has(docId)) return;
+  const pages = [];
+  for (let n = 1; n <= view.numPages; n++) {
+    if (state.pdf !== view) return; // paper closed; next open retries
+    pages.push(await view.pageText(n));
+  }
+  await store.putText(docId, pages);
+  index.set(docId, pages);
+}
+
+// Appends "p. N" hits from the text of every indexed paper.
+async function searchPaperText(q, box) {
+  const query = q;
+  let index;
+  try {
+    index = await loadTextIndex();
+  } catch (e) {
+    console.error('Search index unavailable', e);
+    return;
+  }
+  if (query !== lastQuery.trim().toLowerCase()) return;
+  const hits = [];
+  for (const [docId, pages] of index) {
+    const doc = store.get(docId);
+    if (!doc) continue;
+    let perDoc = 0;
+    pages.forEach((text, i) => {
+      if (perDoc >= 8) return;
+      const at = text.toLowerCase().indexOf(query);
+      if (at < 0) return;
+      perDoc++;
+      hits.push({
+        label: 'p. ' + (i + 1),
+        href: `#doc=${docId}&p=${i + 1}&q=${encodeURIComponent(query)}`,
+        title: snippet(doc.data.title, 40) + ': ' + contextSnippet(text, at, query.length),
+      });
+    });
+  }
+  if (!hits.length) return;
+  box.querySelector('.no-matches')?.remove();
+  const head = document.createElement('div');
+  head.className = 'search-section';
+  head.textContent = 'In the papers';
+  box.appendChild(head);
+  appendSearchHits(box, hits.slice(0, 40));
+}
+
+// "...words around the match..." cut at word boundaries.
+function contextSnippet(text, at, len, radius = 50) {
+  let from = Math.max(0, at - radius);
+  let to = Math.min(text.length, at + len + radius);
+  while (from > 0 && /\S/.test(text[from - 1])) from--;
+  while (to < text.length && /\S/.test(text[to])) to++;
+  return (from > 0 ? '\u2026' : '') + text.slice(from, to).replace(/\s+/g, ' ').trim() + (to < text.length ? '\u2026' : '');
 }
 
 // Link to the passage a card or task came from, if it still exists.
@@ -538,7 +613,18 @@ function renderNoteLinks(box, noteId) {
   }
 }
 
-const editorApp = { store, getTool: getInkTool, resolveLink, openLink, titles, toast, renderNoteLinks, history: undoHistory };
+// A note's title changed: links to the old title follow it.
+async function noteRenamed(oldTitle, newTitle) {
+  if (!oldTitle.trim()) return;
+  try {
+    const n = await retitleLinks(oldTitle, newTitle);
+    if (n) toast(`Updated links in ${n} note${n === 1 ? '' : 's'}`);
+  } catch (e) {
+    reportError('Updating links to the renamed note failed', e);
+  }
+}
+
+const editorApp = { store, getTool: getInkTool, resolveLink, openLink, titles, toast, renderNoteLinks, history: undoHistory, noteRenamed };
 const mainEditor = new NoteEditor($('#note-root'), editorApp);
 const sideEditor = new NoteEditor($('#doc-notebook'), editorApp);
 
@@ -609,7 +695,7 @@ function closeDoc() {
 
 let pageSaveTimer = null;
 
-async function openDoc(docId, page, annoId) {
+async function openDoc(docId, page, annoId, query) {
   const doc = store.get(docId);
   if (state.docId !== docId) {
     showView('doc');
@@ -682,9 +768,12 @@ async function openDoc(docId, page, annoId) {
     if (state.pdf !== view) return;
     const localPage = +localStorage.getItem('reader.page.' + docId) || 0;
     view.goTo(page || localPage || doc.data.lastPage || 1, 0, 'instant');
+    indexPaperText(docId, view).catch(e => console.error('Indexing the paper text failed', e));
   } else if (page) {
     state.pdf.goTo(page);
   }
+  // From a search hit: highlight the words on that page.
+  if (query && page) state.pdf.markText(page, query);
   if (annoId) {
     const a = store.get(annoId);
     if (a) state.pdf.showAnno(a);
@@ -741,6 +830,31 @@ function saveInk(docId, page, mutate) {
   return next;
 }
 
+// Rewrites [[Old title]] links in every note after a rename, keeping any
+// |label, as Obsidian does. Undoable with the rename it belongs to.
+async function retitleLinks(oldTitle, newTitle) {
+  const key = normTitle(oldTitle);
+  if (!key || !newTitle.trim() || key === normTitle(newTitle)) return 0;
+  let changed = 0;
+  for (const note of store.all('note')) {
+    let touched = false;
+    const blocks = note.data.blocks.map(b => {
+      if (b.type !== 'md') return b;
+      const text = b.text.replace(WIKILINK, (m, target, label) => {
+        if (normTitle(target) !== key) return m;
+        touched = true;
+        return `[[${newTitle}${label !== undefined ? '|' + label : ''}]]`;
+      });
+      return text === b.text ? b : { ...b, text };
+    });
+    if (touched) {
+      changed++;
+      await trackedPut('note', note.id, { ...note.data, blocks });
+    }
+  }
+  return changed;
+}
+
 // Rename a paper, or remove it with its marks and ink. Cards, tasks and notes
 // are study material and stay.
 async function paperDialog(docId) {
@@ -767,8 +881,13 @@ async function paperDialog(docId) {
   await done;
   try {
     if (dlg.returnValue === 'ok' && title.value.trim() && title.value.trim() !== doc.data.title) {
-      await trackedUpdate(docId, { title: title.value.trim() });
-      if (state.docId === docId) $('#view-title').textContent = title.value.trim();
+      const newTitle = title.value.trim();
+      const n = await undoHistory.batch('Rename', async () => {
+        await trackedUpdate(docId, { title: newTitle });
+        return retitleLinks(doc.data.title, newTitle);
+      });
+      if (state.docId === docId) $('#view-title').textContent = newTitle;
+      if (n) toast(`Renamed; updated links in ${n} note${n === 1 ? '' : 's'}`);
     } else if (dlg.returnValue === 'remove') {
       const ink = store.forDoc(docId, 'ink');
       if (!confirm(`Remove "${doc.data.title}" with its ${marks} marks and its ink from all your devices? Cards, tasks and notes are kept. This cannot be undone.`)) return;
@@ -1229,8 +1348,10 @@ async function cardDialog(p, fromEquation) {
       dlg.querySelector(`[data-for=${f.name}]`).innerHTML = renderMarkdown(f.value, resolveLink);
     }
   };
-  front.addEventListener('input', preview);
-  back.addEventListener('input', preview);
+  // Text the user typed is never replaced by a draft that arrives later.
+  const typed = { front: false, back: false };
+  front.addEventListener('input', () => { typed.front = true; preview(); });
+  back.addEventListener('input', () => { typed.back = true; preview(); });
 
   let latex = anno.data.latex || '';
   back.value = latex ? `$$${latex}$$` : anno.data.quote;
@@ -1250,10 +1371,28 @@ async function cardDialog(p, fromEquation) {
       const context = await withPaper(anno.data.docId, v => v.contextFor(anno.data.page, anno.data.quote, latex ? 1500 : 3000));
       const doc = store.get(anno.data.docId);
       const card = await draftCard({ docTitle: doc ? doc.data.title : '', quote: anno.data.quote, latex, context });
-      front.value = card.front;
-      back.value = card.back;
-      preview();
-      status.textContent = 'Edit the draft, then save.';
+      if (!dlg.open) return;
+      if (!typed.front && !typed.back) {
+        front.value = card.front;
+        back.value = card.back;
+        preview();
+        status.textContent = 'Edit the draft, then save.';
+        return;
+      }
+      // The user started writing: offer the draft instead of overwriting.
+      status.textContent = 'The AI draft is ready. ';
+      const use = document.createElement('button');
+      use.type = 'button';
+      use.className = 'btn-small';
+      use.textContent = 'Replace my text with it';
+      use.addEventListener('click', () => {
+        front.value = card.front;
+        back.value = card.back;
+        typed.front = typed.back = false;
+        preview();
+        status.textContent = 'Edit the draft, then save.';
+      });
+      status.appendChild(use);
     } catch (e) {
       console.error('Card draft failed', e);
       status.textContent = 'AI draft failed: ' + friendlyError(e) + ' You can still write the card yourself.';
@@ -1331,9 +1470,16 @@ function renderPanel() {
 }
 
 function renderContentsPanel(panel) {
-  panel.innerHTML = '<section><h3>Contents</h3><p class="muted toc-note">Reading the table of contents...</p><ol class="toc"></ol></section>';
+  panel.innerHTML = `<section>
+      <h3>Contents</h3>
+      <input class="find-box" type="search" placeholder="Find in this paper" aria-label="Find in this paper" enterkeyhint="search">
+      <ol class="find-results hidden"></ol>
+      <p class="muted toc-note">Reading the table of contents...</p>
+      <ol class="toc"></ol>
+    </section>`;
   const view = state.pdf;
   if (!view || !view.pdf) return;
+  wireFind(panel, view);
   view.contents().then(({ items, source }) => {
     if (state.pdf !== view || !state.panelOpen || state.panelMode !== 'contents') return;
     const note = panel.querySelector('.toc-note');
@@ -1357,6 +1503,62 @@ function renderContentsPanel(panel) {
     });
     markCurrentSection();
   }).catch(e => reportError('Reading the contents failed', e));
+}
+
+// Find in paper: results replace the contents list while there is a query.
+let findTimer = null;
+let lastFind = '';
+function wireFind(panel, view) {
+  const box = panel.querySelector('.find-box');
+  const results = panel.querySelector('.find-results');
+  const toc = panel.querySelector('.toc');
+  const run = async () => {
+    const q = box.value.trim();
+    lastFind = box.value;
+    toc.classList.toggle('hidden', !!q);
+    panel.querySelector('.toc-note').classList.toggle('hidden', !!q || !panel.querySelector('.toc-note').textContent);
+    results.classList.toggle('hidden', !q);
+    if (!q) {
+      view.markText(null);
+      return;
+    }
+    const hits = await view.find(q);
+    if (box.value.trim() !== q) return;
+    results.innerHTML = hits.length ? '' : '<li class="muted">No matches in this paper.</li>';
+    hits.slice(0, 200).forEach(h => {
+      const li = document.createElement('li');
+      li.innerHTML = '<button class="find-hit-item"><span class="toc-page"></span><span class="find-snippet"></span></button>';
+      li.querySelector('.toc-page').textContent = 'p. ' + h.page;
+      // The match itself is wrapped in <mark>; the text around it is set as text.
+      const snip = li.querySelector('.find-snippet');
+      const before = contextSnippet(h.text.slice(0, h.at), h.at, 0, 45).replace(/\u2026$/, '');
+      const match = h.text.slice(h.at, h.at + q.length);
+      const after = contextSnippet(h.text.slice(h.at + q.length), 0, 0, 45).replace(/^\u2026/, '');
+      const mark = document.createElement('mark');
+      mark.textContent = match;
+      snip.append(before, mark, after);
+      li.querySelector('button').addEventListener('click', () => {
+        results.querySelectorAll('.current').forEach(b => b.classList.remove('current'));
+        li.querySelector('button').classList.add('current');
+        if (NARROW.matches) setPanel(false);
+        view.goTo(h.page, 0, 'instant');
+        view.markText(h.page, q);
+      });
+      results.appendChild(li);
+    });
+    if (hits.length >= 300) results.insertAdjacentHTML('beforeend', '<li class="muted">Showing the first 300 matches.</li>');
+  };
+  box.addEventListener('input', () => {
+    clearTimeout(findTimer);
+    findTimer = setTimeout(run, 250);
+  });
+  box.addEventListener('keydown', e => {
+    if (e.key === 'Enter') results.querySelector('.find-hit-item')?.click();
+  });
+  if (lastFind) {
+    box.value = lastFind;
+    run();
+  }
 }
 
 // Highlights the section being read: the last entry that starts at or
@@ -1823,6 +2025,13 @@ function briefMarkdown(docId) {
     for (const a of commented) out.push('', `- ${ref(a)} ${a.data.comment}`, `  ${quoteLine(a).replace(/\n/g, ' ')}`);
   }
 
+  const linkedNotes = [...notesForDoc(linkIndex(), store.all(), docId)].map(id => store.get(id))
+    .filter(n => n && !n.data.notebookFor);
+  if (linkedNotes.length) {
+    out.push('', `## Linked notes (${linkedNotes.length})`);
+    for (const n of linkedNotes) out.push(`- [[${noteTitle(n)}]]`);
+  }
+
   const nb = paperNotebook(docId);
   const nbText = nb ? nb.data.blocks.filter(b => b.type === 'md')
     .map(b => b.text.trim().replace(/^(#{1,5}) /gm, '#$1 ')).filter(Boolean) : [];
@@ -1836,16 +2045,20 @@ function briefMarkdown(docId) {
 // The "In plain terms" part of an explanation, as one line of text.
 function plainGist(md) {
   const m = md.match(/in plain terms\**\s*[-:\u2013\u2014]?\s*([\s\S]*?)(?:\n\s*\n|\n\s*\d+\.|$)/i);
-  const text = (m ? m[1] : md).replace(/\$\$[\s\S]*?\$\$/g, '').replace(/[*_#>`]/g, '').replace(/\s+/g, ' ').trim();
+  // Underscores stay: they are subscripts inside $...$ math.
+  const text = (m ? m[1] : md).replace(/\$\$[\s\S]*?\$\$/g, '').replace(/[*#>`]/g, '').replace(/\s+/g, ' ').trim();
   return snippet(text, 240);
 }
 
+// Wikilinks for use outside the app: passages become web links that open
+// the reader at the mark; note and paper links become their titles.
 function plainLinks(md) {
+  const base = location.origin + location.pathname;
   return md.replace(WIKILINK, (m, target, label) => {
-    if (label) return label;
-    if (!target.startsWith('@')) return target;
+    if (!target.startsWith('@')) return label || target;
     const a = store.get(target.slice(1));
-    return a ? `p. ${a.data.page}` : '';
+    if (!a) return label || '';
+    return `[${label || 'p. ' + a.data.page}](${base}#doc=${a.data.docId}&a=${a.id})`;
   });
 }
 
@@ -1961,8 +2174,8 @@ function wire() {
       toast(`No ink on page ${page}`);
       return;
     }
-    await inkErased(state.docId, page, ink.data.strokes.map(s => s.id), 'Clear page');
-    toast(`Cleared page ${page}: Undo brings it back`);
+    await inkErased(state.docId, page, ink.data.strokes.map(s => s.id), 'Clear ink');
+    toast(`Cleared the ink on page ${page}: Undo brings it back`);
   });
   // Two-finger tap undoes, three-finger tap redoes (as in GoodNotes and
   // Notability). A tap is short and does not move; pinches and scrolls do.
@@ -2054,6 +2267,12 @@ function wire() {
 
   addEventListener('keydown', e => {
     if (e.target.closest('input, textarea, [contenteditable], dialog')) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f' && state.view === 'doc') {
+      e.preventDefault();
+      setPanel(true, 'contents');
+      setTimeout(() => document.querySelector('#panel .find-box')?.focus(), 50);
+      return;
+    }
     // Text fields keep their own undo; everywhere else Cmd/Ctrl+Z is ours.
     if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y')) {
       e.preventDefault();

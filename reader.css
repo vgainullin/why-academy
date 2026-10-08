@@ -803,3 +803,22 @@ a.wl-missing { color: var(--muted); border-bottom-style: dashed; }
 .side-row:hover .side-more, .side-more:focus { opacity: 1; }
 @media (hover: none) { .side-more { opacity: 1; } }
 .btn.danger { color: var(--error); }
+
+/* Find in paper */
+.pdf-page .textLayer span.find-hit { background: rgba(250, 204, 21, 0.5); border-radius: 2px; }
+.find-box { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.9rem; margin-bottom: 10px; }
+.find-results { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.find-hit-item { display: flex; gap: 8px; width: 100%; text-align: left; border: none; background: none; font: inherit; font-size: 0.86rem; padding: 7px 8px; border-radius: 6px; cursor: pointer; color: var(--fg); line-height: 1.35; }
+.find-hit-item:hover, .find-hit-item.current { background: var(--accent-light); }
+.find-hit-item .toc-page { min-width: 34px; }
+.find-hit-item mark { background: #fde047; color: inherit; border-radius: 2px; padding: 0 1px; }
+
+.search-section { margin: 10px 0 4px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.find-results.hidden, .toc.hidden, .toc-note.hidden { display: none; }
+
+/* The pen style button shows the line size as a white dot. */
+.swatch[data-size] { position: relative; }
+.swatch[data-size]::after { content: ''; position: absolute; inset: 0; margin: auto; border-radius: 50%; background: rgba(255, 255, 255, 0.85); }
+.swatch[data-size="fine"]::after { width: 3px; height: 3px; }
+.swatch[data-size="medium"]::after { width: 6px; height: 6px; }
+.swatch[data-size="thick"]::after { width: 10px; height: 10px; }

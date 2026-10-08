@@ -20,6 +20,7 @@ const kit = `const __WA_CONFIG = ${JSON.stringify({ token, origin: B, openrouter
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 834, height: 1194 }, hasTouch: true, deviceScaleFactor: 2 });
 await ctx.addInitScript(kit);
+let slowDraft = false;
 let failExplain = true;
 await ctx.route('https://openrouter.ai/**', async route => {
   const body = JSON.parse(route.request().postData());
@@ -31,7 +32,10 @@ await ctx.route('https://openrouter.ai/**', async route => {
   }
   let reply = 'UNEXPECTED';
   if (text.startsWith('Transcribe the mathematics')) reply = 'Var( q .k / \\text{sqrt}(d\\_k) ) = d\\_k / d\\_k = 1';
-  else if (text.includes('FRONT:')) reply = 'FRONT:\nWhy is $\\operatorname{Var}(q \\cdot k / \\sqrt{d_k}) = 1$ with $\\delta_{ij}$?\nBACK:\nVar scales by $1/d_k$.';
+  else if (text.includes('FRONT:') && slowDraft) {
+    await new Promise(r => setTimeout(r, 2500));
+    reply = 'FRONT:\nDrafted question?\nBACK:\nDrafted answer.';
+  } else if (text.includes('FRONT:')) reply = 'FRONT:\nWhy is $\\operatorname{Var}(q \\cdot k / \\sqrt{d_k}) = 1$ with $\\delta_{ij}$?\nBACK:\nVar scales by $1/d_k$.';
   else if (text.includes('not yet understood')) reply = '1. **In plain terms** - saturation.';
   await route.fulfill({ json: { choices: [{ message: { content: reply } }] } });
 });
@@ -506,6 +510,80 @@ try {
     gone = (await page.evaluate(() => __wa.serverItems('doc'))).some(d => d.id === plainId && d.deleted);
   }
   check('remove a paper', (await row().count()) === 0 && gone);
+
+  // Find in paper (Contents panel), highlighted on the page
+  await page.click(`#doc-list a[href="#doc=${docId}"]`).catch(() => {});
+  await page.goto(B + '/reader#doc=' + docId + '&p=1');
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  if (!(await page.evaluate(() => document.querySelector('#toggle-contents').classList.contains('active')))) await page.click('#toggle-contents');
+  await page.fill('#panel .find-box', 'Glorot');
+  await page.waitForSelector('#panel .find-hit-item');
+  const findHits = await page.locator('#panel .find-hit-item').count();
+  await page.locator('#panel .find-hit-item').first().click();
+  await page.waitForSelector('.pdf-page[data-page="3"] .textLayer span.find-hit', { timeout: 8000 }).catch(() => {});
+  check('find in paper jumps to and highlights the match', findHits === 1 && (await page.inputValue('#page-input')) === '3'
+    && (await page.locator('.pdf-page[data-page="3"] .textLayer span.find-hit').count()) > 0, `${findHits} hit(s), page ${await page.inputValue('#page-input')}`);
+  await page.click('#panel .panel-close').catch(() => {});
+
+  // Library search finds the paper's own text
+  await library();
+  await page.fill('#search', 'numeric check');
+  await page.waitForSelector('#search-results .search-section', { timeout: 8000 }).catch(() => {});
+  const textHits = await page.locator('#search-results a[href*="&q="]').allTextContents();
+  check('library search finds text inside papers', textHits.some(t => t.startsWith('p. 3')), textHits.join(' | '));
+  await page.fill('#search', '');
+
+  // Renaming a paper rewrites [[links]] to it
+  await page.evaluate(() => { location.hash = ''; });
+  await newNote();
+  await page.fill('#note-root .note-title', 'Rename probe');
+  await page.click('#note-root .md-view');
+  await page.keyboard.type('See [[Scaled Dot-Product Attention: A Short Derivation|the paper]] and [[Scaled Dot-Product Attention: A Short Derivation]].');
+  await page.click('#note-root .note-title');
+  await wait(1200);
+  await library();
+  await page.locator(`#doc-list .side-row:has(a[href="#doc=${docId}"]) .side-more`).click();
+  await page.fill('dialog [name=title]', 'Attention note');
+  await page.click('dialog button[value="ok"]');
+  await wait(1500);
+  const noteText = n => (n ? n.data.blocks.map(b => b.text || '').join(' ') : '');
+  let probe = null;
+  for (let i = 0; i < 24; i++) {
+    probe = (await page.evaluate(() => __wa.serverItems('note'))).find(n => n.data.title === 'Rename probe');
+    if (probe && noteText(probe).includes('[[Attention note')) break;
+    await wait(500);
+  }
+  const probeText = noteText(probe);
+  check('renaming a paper updates links to it', probeText.includes('[[Attention note|the paper]]') && probeText.includes('[[Attention note]]'), probeText);
+  // ...and the rename undoes as one step (title and links)
+  await library();
+  await page.click(`#note-list a[href="#note=${probe.id}"]`);
+  await page.waitForSelector('#note-root .note-title');
+  await page.click('[data-history="undo"] >> nth=1');
+  let undone = '';
+  for (let i = 0; i < 24; i++) {
+    await wait(500);
+    undone = noteText((await page.evaluate(() => __wa.serverItems('note'))).find(n => n.id === probe.id));
+    if (undone.includes('[[Scaled Dot-Product Attention: A Short Derivation|the paper]]')) break;
+  }
+  check('undo restores the paper title and its links', undone.includes('[[Scaled Dot-Product Attention: A Short Derivation|the paper]]'), undone);
+
+  // A card draft that arrives after the user typed does not overwrite it
+  await page.goto(B + '/reader#doc=' + docId + '&p=1');
+  await page.waitForSelector('.pdf-page[data-page="1"] .textLayer span');
+  slowDraft = true;
+  await page.click('.tool[data-tool="select"]');
+  await page.evaluate(() => __wa.selectText(1, 'The factor 1/sqrt(d_k) is the subject'));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  await page.click('#action-bar .action-btn:text-is("Card")');
+  await page.waitForSelector('dialog[open] .card-form');
+  await page.fill('dialog [name=front]', 'MY OWN QUESTION');
+  await wait(3500);
+  const frontNow = await page.inputValue('dialog [name=front]');
+  const offered = await page.locator('dialog .dialog-status button').count();
+  check('card draft does not overwrite typed text', frontNow === 'MY OWN QUESTION' && offered === 1, `front "${frontNow}", offer buttons ${offered}`);
+  slowDraft = false;
+  await page.click('dialog button[value="cancel"]');
 
   // Tapping the open paper in the library puts the library away
   await library();

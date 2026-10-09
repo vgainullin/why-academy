@@ -50,3 +50,7 @@ extract_func.cjs
 fix_derive_type.cjs
 func_dump.js
 test-lesson.html
+
+# LLM feature test runs (scripts/feature_test.sh)
+tests/feature-reports/
+tests/e2e/out/

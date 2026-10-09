@@ -47,6 +47,9 @@ const COLOR_NAMES = {
   '#fde047': 'Yellow', '#86efac': 'Green', '#f9a8d4': 'Pink', '#93c5fd': 'Blue',
 };
 const NARROW = matchMedia('(max-width: 900px)');
+// Up to iPad landscape: the library beside a paper (and its notebook) leaves
+// the page too little room, so opening a paper puts the library away.
+const CRAMPED = matchMedia('(max-width: 1279px)');
 const MAX_PDF_BYTES = 64 * 1024 * 1024; // worker/vault.js MAX_FILE_BYTES
 
 const store = new VaultStore();
@@ -516,7 +519,7 @@ function showView(view) {
   // The library is the way forward from the empty view; elsewhere it covers
   // the content on narrow screens.
   if (view === 'empty') setSidebar(true);
-  else if (NARROW.matches) setSidebar(false);
+  else if (NARROW.matches || (view === 'doc' && CRAMPED.matches)) setSidebar(false);
 }
 
 // ── Sidebar ──
@@ -1510,7 +1513,7 @@ async function runActionNow(act) {
     await trackedCreate('task', { text: `Re-derive: $${latex}$`, type: 'derive', status: 'open', docId: state.docId, annoId: anno.id });
     const ed = await notebookTarget();
     ed.draft.blocks.push(
-      { id: newId(), type: 'md', text: `**Derive** $${latex}$ [[@${anno.id}|p. ${page}]]\nWrite each step below, then *Check with SymPy*.` },
+      { id: newId(), type: 'md', text: `**Derive** [[@${anno.id}|p. ${page}]]\n\n$$${latex}$$\n\nWrite each step below, then *Check with SymPy*.` },
       { id: newId(), type: 'ink', aspect: 0.75, strokes: [] },
     );
     ed.saveSoon();
@@ -1629,7 +1632,9 @@ function explainState(task) {
 // What a student can act on, instead of "Failed to fetch".
 function friendlyError(e) {
   const msg = e && e.message ? e.message : String(e);
-  if (e instanceof TypeError || /failed to fetch|network|load failed/i.test(msg)) {
+  // fetch() rejects with a TypeError whose message names the network
+  // failure; other TypeErrors are bugs and keep their message.
+  if (e instanceof TypeError && /failed to fetch|networkerror|network connection|load failed/i.test(msg)) {
     return "Couldn't reach the AI service. Check your connection, then Retry.";
   }
   if (/HTTP 401|HTTP 403/.test(msg)) return 'The AI service rejected the API key. Check it in Settings.';
@@ -3052,6 +3057,7 @@ function wire() {
   $('#toggle-notebook').addEventListener('click', () => {
     state.notebookOpen = !state.notebookOpen;
     localStorage.setItem('reader.notebook', state.notebookOpen ? '1' : '0');
+    if (state.notebookOpen && CRAMPED.matches) setSidebar(false);
     applyNotebook().catch(e => reportError('Notebook failed', e));
   });
 

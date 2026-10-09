@@ -20,6 +20,9 @@ const kit = `const __WA_CONFIG = ${JSON.stringify({ token, origin: B, openrouter
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 834, height: 1194 }, hasTouch: true, deviceScaleFactor: 2 });
 await ctx.addInitScript(kit);
+// Like iPad Safari (through 26.x): streams are not async-iterable. pdf.js's
+// modern build relies on it for text extraction.
+await ctx.addInitScript(() => { delete ReadableStream.prototype[Symbol.asyncIterator]; });
 let slowDraft = false;
 let streamed = 0;
 let failExplain = true;
@@ -1175,6 +1178,14 @@ try {
   await page.waitForSelector('#action-bar:not(.hidden)');
   const labels = await page.locator('#action-bar .swatch').evaluateAll(els => els.map(e => e.getAttribute('aria-label')));
   check('highlight colors are named', new Set(labels).size === labels.length, labels.join(', '));
+
+  // An equation read from a page spans lines; it still renders as math.
+  const md = await page.evaluate(async () => {
+    const { renderMarkdown } = await import('/lib/vault/markdown.js');
+    const html = renderMarkdown('**Derive** $L[\\phi] = -\\sum_{i=1}^{I} \\log y_i \\\\\n= -\\sum_{i=1}^{I} x_i$ end', () => ({ label: '' }));
+    return { katex: (html.match(/class="katex/g) || []).length, em: /<em>/.test(html), raw: /\\sum/.test(html.replace(/<annotation[\s\S]*?<\/annotation>/g, '')) };
+  });
+  check('multi-line inline math renders with KaTeX', md.katex >= 1 && !md.em && !md.raw, JSON.stringify(md));
 
   // Debug mode on other pages: a failed derivation read is recorded and the
   // shared Report bug button files it with the lesson context.

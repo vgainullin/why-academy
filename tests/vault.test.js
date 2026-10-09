@@ -371,3 +371,24 @@ describe('streamed replies', async () => {
     assert.throws(() => parseSSE('data: {"error":{"message":"rate limited"}}\n'), /rate limited/);
   });
 });
+
+describe('bug reports', async () => {
+  const { validateReport, formatReport } = await import('../worker/bugs.js');
+  const png = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+  test('requires a title, accepts a PNG, rejects other images', () => {
+    assert.ok(validateReport({ description: 'x' }).error);
+    const { report } = validateReport({ title: 'Explain shows nothing', screenshot: png, diagnostics: { a: 1 } });
+    assert.equal(report.screenshot.length, 8);
+    assert.ok(validateReport({ title: 't', screenshot: 'data:image/jpeg;base64,AAAA' }).error);
+    assert.ok(validateReport({ title: 't', screenshot: 'data:image/png;base64,' + Buffer.from('GIF89a').toString('base64') }).error);
+  });
+
+  test('diagnostics cannot break out of their code fence', () => {
+    const { report } = validateReport({ title: 't', diagnostics: { log: 'evil ``` </details> ## heading' } });
+    const md = formatReport(report, { id: 'acct' }, null);
+    const fence = md.match(/(`{3,})json\n/)[1];
+    assert.ok(fence.length > 3);
+    assert.ok(md.includes(fence + '\n\n</details>'));
+  });
+});

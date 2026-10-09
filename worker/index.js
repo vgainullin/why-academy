@@ -16,6 +16,8 @@
 //   GET    /api/settings               - synced settings document
 //   PUT    /api/settings               - replace settings (optimistic concurrency)
 //   POST   /api/feedback               - allowlisted users: feedback -> GitHub issue
+//   POST   /api/bugs                   - allowlisted users: bug report (+ screenshot) -> GitHub issue
+//   GET    /api/bugshots/:id.png       - a bug report screenshot (public, unguessable id)
 //   POST   /api/vault/push             - write vault items (last-write-wins per item)
 //   GET    /api/vault/pull?since=N     - vault items with seq > N
 //   HEAD   /api/vault/files/:sha256    - does this PDF exist for the account
@@ -35,6 +37,7 @@ import {
 import { createSession, getSession, destroySession, deleteExpiredSessions } from './sessions.js';
 import { SettingsSchema, MAX_SETTINGS_BYTES, getSettings, putSettings } from './settings.js';
 import { submitFeedback, isUserAllowed } from './feedback.js';
+import { fileBugReport, MAX_REPORT_BYTES, SHOT_ID, shotKey } from './bugs.js';
 import {
   MAX_PUSH_BYTES,
   MAX_PUSH_ITEMS,
@@ -66,6 +69,9 @@ export default {
     }
 
     try {
+      const shotMatch = url.pathname.match(/^\/api\/bugshots\/([^/]+)\.png$/);
+      if (shotMatch && request.method === 'GET') return await handleBugShot(env, shotMatch[1]);
+
       const fileMatch = url.pathname.match(/^\/api\/vault\/files\/([^/]+)$/);
       if (fileMatch) return await withSession(request, env, (req, e, user) => handleFile(req, e, user, fileMatch[1]));
 
@@ -82,6 +88,7 @@ export default {
         case 'GET /api/settings': return await withSession(request, env, handleGetSettings);
         case 'PUT /api/settings': return await withSession(request, env, handlePutSettings);
         case 'POST /api/feedback': return await withSession(request, env, handleFeedback);
+        case 'POST /api/bugs': return await withSession(request, env, handleBugReport);
         case 'POST /api/vault/push': return await withSession(request, env, handleVaultPush);
         case 'GET /api/vault/pull': return await withSession(request, env, handleVaultPull);
         default: return json({ error: 'Not found' }, 404);
@@ -295,4 +302,22 @@ async function handleFileUpload(request, env, user, fileId, key) {
   await env.VAULT_FILES.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
   await recordFile(env.DB, user.id, fileId, bytes.length);
   return json({ ok: true, existed: false }, 201);
+}
+
+// ── Bug reports ──
+
+async function handleBugReport(request, env, user) {
+  const { body, error } = await readJson(request, MAX_REPORT_BYTES);
+  if (error) return error;
+  const result = await fileBugReport(env, request, user, body);
+  return json(result.body, result.status);
+}
+
+async function handleBugShot(env, id) {
+  if (!SHOT_ID.test(id)) return json({ error: 'Not found' }, 404);
+  const obj = await env.VAULT_FILES.get(shotKey(id));
+  if (!obj) return json({ error: 'Not found' }, 404);
+  return new Response(obj.body, {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=31536000, immutable' },
+  });
 }

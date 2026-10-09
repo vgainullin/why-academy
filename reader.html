@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <script src="lib/debug-recorder.js"></script>
   <script src="lib/pages-redirect.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Why Academy — Reader</title>
@@ -20,6 +21,7 @@
     <a href="index.html" class="reader-home">Why Academy</a>
     <span id="view-title" class="view-title"></span>
     <span id="sync-status" class="sync-status" role="status"></span>
+    <button id="bug-btn" class="btn-settings bug-btn hidden" title="Report a bug (Ctrl+Shift+B)">Report bug <span class="bug-count hidden"></span></button>
     <div id="auth-area">
       <button id="settings-btn" class="btn-settings" title="Settings">Settings</button>
       <button id="signin-btn" class="btn-signin hidden">Sign in</button>
@@ -206,6 +208,12 @@
         </label>
         <p class="settings-hint">Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. The key is stored only in your browser's localStorage and sent directly to OpenRouter.</p>
       </div>
+
+      <p class="settings-section-label">Debugging</p>
+      <label class="settings-radio">
+        <input type="checkbox" id="settings-debug">
+        <span>Debug mode: a "Report bug" button that files an annotated screenshot and diagnostics as a GitHub issue</span>
+      </label>
 
       <div class="settings-actions">
         <button id="settings-cancel" class="btn btn-secondary">Cancel</button>

@@ -298,7 +298,7 @@ body[data-tool="region"] .pdf-page .textLayer span { cursor: crosshair; }
   border-radius: 2px;
 }
 .anno-highlight { background: var(--anno-color); opacity: 0.4; mix-blend-mode: multiply; }
-.anno-region { border: 2px solid var(--anno-color); background: color-mix(in srgb, var(--anno-color) 8%, transparent); border-radius: 4px; }
+.anno-region { border: 2px solid var(--anno-color); background: rgba(37, 99, 235, 0.08); border-radius: 4px; }
 .anno-marker {
   position: absolute;
   right: 3px;
@@ -910,3 +910,19 @@ a.wl-trashed { text-decoration: line-through; }
 .brief-chip { border: 1px solid var(--border); background: var(--block-bg); color: var(--muted); border-radius: 99px; padding: 4px 10px; font: inherit; font-size: 0.8rem; cursor: pointer; text-decoration: line-through; }
 .brief-chip.on { color: var(--fg); border-color: var(--accent); background: var(--accent-light); text-decoration: none; }
 @media print { .brief-sections { display: none; } }
+
+/* Debug mode and bug reports */
+.bug-btn { border-color: #fca5a5 !important; }
+.bug-btn.hidden { display: none; }
+.bug-count { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: #dc2626; color: white; font-size: 0.72rem; line-height: 18px; text-align: center; }
+.bug-count.hidden { display: none; }
+.dialog:has(.bug-form) { width: min(980px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); }
+.bug-tools { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.bug-hint { font-size: 0.8rem; }
+.bug-shot { position: relative; margin: 0 auto; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #fff; }
+.bug-shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; user-select: none; -webkit-user-select: none; pointer-events: none; }
+.bug-ink { position: absolute; inset: 0; touch-action: none; }
+.bug-ink .ink-canvas, .bug-redactions { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.bug-check { flex-direction: row !important; align-items: center; gap: 8px !important; color: var(--fg) !important; }
+.bug-diag pre { max-height: 200px; overflow: auto; font-size: 0.72rem; background: var(--bg); padding: 8px; border-radius: 6px; }
+.bug-public { font-size: 0.8rem; }

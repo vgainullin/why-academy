@@ -21,7 +21,9 @@ start_isolated_server() {
      INSERT INTO account_sessions (id, account_id, created_at, expires_at) VALUES ('$hash', 'feature-tester', $now, $((now + 86400000)));" \
     >> "$dir/setup.log" 2>&1
 
-  "${wrangler[@]}" dev --port "$PORT" --persist-to "$dir/state" > "$dir/server.log" 2>&1 &
+  # The seeded account is a trusted tester (bug reports); no GitHub token, so
+  # filing stops before reaching GitHub.
+  "${wrangler[@]}" dev --port "$PORT" --persist-to "$dir/state" --var ALLOWED_USERS:feature-tester > "$dir/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Ready on" "$dir/server.log" && break

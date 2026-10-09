@@ -1107,6 +1107,43 @@ try {
   check('SymPy flags a false single line', /false/i.test(sym), sym);
   await page.click('#toggle-notebook');
 
+  // Debug mode: report a bug with an annotated screenshot and diagnostics
+  await page.goto(B + '/reader#doc=' + docId);
+  await page.waitForSelector('.pdf-page .textLayer span');
+  await page.evaluate(() => window.WhyDebug.setEnabled(true));
+  await page.waitForSelector('#bug-btn:not(.hidden)');
+  await page.evaluate(() => fetch('/api/vault/files/' + '0'.repeat(64)).catch(() => {}));
+  await wait(300);
+  check('debug mode counts errors on the Report bug button', (await page.textContent('#bug-btn .bug-count')) !== '0');
+  await page.click('#bug-btn');
+  await page.waitForSelector('dialog[open] .bug-form .bug-shot img', { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('.bug-shot img').naturalWidth > 0);
+  const shotBox = await page.locator('.bug-shot').boundingBox();
+  await page.mouse.move(shotBox.x + 40, shotBox.y + 40);
+  await page.mouse.down();
+  await page.mouse.move(shotBox.x + 200, shotBox.y + 120, { steps: 8 });
+  await page.mouse.up();
+  await page.click('[data-btool="redact"]');
+  await page.mouse.move(shotBox.x + 60, shotBox.y + 200);
+  await page.mouse.down();
+  await page.mouse.move(shotBox.x + 260, shotBox.y + 260, { steps: 5 });
+  await page.mouse.up();
+  await page.fill('dialog [name=title]', 'Test report from e2e');
+  const diag = await page.textContent('.bug-diag pre');
+  check('bug report collects diagnostics', /"aiCalls"/.test(diag) && /"failedRequests"/.test(diag) && /"viewport"/.test(diag) && !/sk-or-test/.test(diag));
+  await page.click('[data-bact="file"]');
+  await page.waitForFunction(() => /GitHub|Could not file/.test(document.querySelector('.bug-status')?.textContent || ''));
+  check('filing reaches the server (no GitHub token locally)', /GitHub token not configured/.test(await page.textContent('.bug-status')), await page.textContent('.bug-status'));
+  const dls = [];
+  page.on('download', d => dls.push(d));
+  await page.click('[data-bact="download"]');
+  await wait(1500);
+  const names = dls.map(d => d.suggestedFilename());
+  if (dls.find(d => d.suggestedFilename().endsWith('.png'))) await dls.find(d => d.suggestedFilename().endsWith('.png')).saveAs(`${OUT}/bug-report.png`);
+  check('bug report can be downloaded (markdown and annotated PNG)', names.some(n => n.endsWith('.md')) && names.some(n => n.endsWith('.png')), names.join(', '));
+  await page.click('dialog button[value="cancel"]');
+  await page.evaluate(() => window.WhyDebug.setEnabled(false));
+
   // Deleting a note moves it to Recently deleted
   await newNote();
   await page.fill('#note-root .note-title', 'Note to bin');
@@ -1141,7 +1178,7 @@ try {
   console.log('ERROR', e.message.split('\n')[0], at.trim());
   await shot('error');
 }
-const unexpected = errors.filter(e => !/upstream overloaded|500|Explanation failed|pointer capture/.test(e));
+const unexpected = errors.filter(e => !/upstream overloaded|500|Explanation failed|pointer capture|Filing the bug report failed|status of 502|status of 404/.test(e));
 if (unexpected.length) failures++;
 console.log('console errors:', unexpected.join(' | ') || '(none)');
 await browser.close();

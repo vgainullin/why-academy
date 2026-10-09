@@ -2826,9 +2826,116 @@ store.addEventListener('status', e => {
   el.dataset.state = e.detail.state;
 });
 
+// ── Debug mode and bug reports ──
+
+let buildInfo = null;
+
+async function loadBuildInfo() {
+  if (buildInfo) return buildInfo;
+  try {
+    const resp = await fetch('build.json', { cache: 'no-store' });
+    buildInfo = resp.ok ? await resp.json() : { error: 'HTTP ' + resp.status };
+  } catch (e) {
+    buildInfo = { error: e.message };
+  }
+  return buildInfo;
+}
+
+// What a developer needs to debug this session. No API keys, no note or
+// paper text (the report goes to a public repo); ids and counts only.
+function collectDiagnostics() {
+  const items = [...store.items.values()];
+  const counts = {};
+  for (const it of items) if (!it.deleted) counts[it.kind] = (counts[it.kind] || 0) + 1;
+  const backend = C.handwriteBackend();
+  let endpointHost = null;
+  try {
+    endpointHost = new URL(backend === 'openrouter' ? C.OPENROUTER_URL : C.lmstudioEndpoint()).host;
+  } catch (e) {
+    endpointHost = 'invalid endpoint';
+  }
+  const doc = state.docId && store.get(state.docId);
+  return {
+    build: buildInfo,
+    when: new Date().toISOString(),
+    page: {
+      route: location.hash.replace(/([?&]q=)[^&]*/, '$1...'),
+      view: state.view,
+      doc: doc ? { id: doc.id, pages: doc.data.pages, size: doc.data.size } : null,
+      currentPage: state.pdf ? state.pdf.currentPage : null,
+      zoom: state.pdf ? Math.round(state.pdf.zoom * 100) + '%' : null,
+      tool: state.tool.tool,
+      panel: state.panelOpen ? state.panelMode : null,
+      notebookOpen: state.notebookOpen,
+    },
+    device: {
+      userAgent: navigator.userAgent,
+      viewport: `${innerWidth}x${innerHeight}@${devicePixelRatio}`,
+      touch: matchMedia('(pointer: coarse)').matches,
+      online: navigator.onLine,
+      standalone: matchMedia('(display-mode: standalone)').matches,
+    },
+    account: { id: store.accountId || null },
+    vault: {
+      counts,
+      sync: store.status,
+      dirty: items.filter(it => it.dirty).length,
+      rejected: items.filter(it => it.syncError).map(it => ({ id: it.id, kind: it.kind, issue: it.syncError })).slice(0, 20),
+      fileErrors: store._fileErrors || 0,
+      textIndexed: textIndex ? textIndex.size : null,
+    },
+    ai: {
+      backend,
+      model: backend === 'openrouter' ? C.openrouterModel() : C.lmstudioModel(),
+      endpointHost,
+      keySet: backend === 'openrouter' ? !!C.openrouterApiKey() : null,
+      explanationsInFlight: explaining.size,
+      recentTaskErrors: store.all('task').filter(t => t.data.error).map(t => ({ id: t.id, error: t.data.error })).slice(-10),
+    },
+    recorder: window.WhyDebug ? window.WhyDebug.snapshot() : null,
+  };
+}
+
+function renderDebugMode() {
+  const on = !!(window.WhyDebug && window.WhyDebug.enabled());
+  $('#bug-btn').classList.toggle('hidden', !on);
+  const n = window.WhyDebug ? window.WhyDebug.errorCount() : 0;
+  const badge = $('#bug-btn .bug-count');
+  badge.textContent = String(n);
+  badge.classList.toggle('hidden', !on || !n);
+  $('#bug-btn').title = n ? `Report a bug: ${n} error(s) recorded this session (Ctrl+Shift+B)` : 'Report a bug (Ctrl+Shift+B)';
+}
+
+async function reportBug() {
+  await loadBuildInfo();
+  const { openBugReport } = await import('./lib/vault/bugreport.js');
+  const user = window.WhyAuth && window.WhyAuth.getUser();
+  await openBugReport({
+    dialog: $('#dialog'),
+    diagnostics: collectDiagnostics,
+    toast,
+    accountId: user ? user.id : null,
+    allowlisted: !!(window.WhyAuth && window.WhyAuth.isAllowlisted()),
+  });
+}
+
 // ── Wiring ──
 
 function wire() {
+  // Debug mode
+  renderDebugMode();
+  if (window.WhyDebug) window.WhyDebug.onChange(renderDebugMode);
+  $('#bug-btn').addEventListener('click', () => reportBug().catch(e => reportError('Bug report failed', e)));
+  const debugBox = $('#settings-debug');
+  debugBox.checked = !!(window.WhyDebug && window.WhyDebug.enabled());
+  debugBox.addEventListener('change', () => window.WhyDebug && window.WhyDebug.setEnabled(debugBox.checked));
+  addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'B' || e.key === 'b') && window.WhyDebug && window.WhyDebug.enabled()) {
+      e.preventDefault();
+      reportBug().catch(err => reportError('Bug report failed', err));
+    }
+  });
+
   $('#sidebar-toggle').addEventListener('click', () => setSidebar(document.body.classList.contains('sidebar-closed')));
   // Tapping the item that is already open changes no URL, so no navigation
   // runs: close the library on narrow screens on any link tap.

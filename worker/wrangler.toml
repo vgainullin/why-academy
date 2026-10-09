@@ -60,7 +60,7 @@ GITHUB_REPO = "vgainullin/why-academy"
 RATE_LIMIT_PER_HOUR = "20"
 # Account ids allowed to submit feedback (comma-separated). An account's id
 # is shown by GET /api/me.
-ALLOWED_USERS = ""
+ALLOWED_USERS = "c3ae462a-5ec2-401b-93a9-68bfde2e1343"
 
 # Secrets (set with `wrangler secret put NAME`):
 #   GITHUB_TOKEN     - fine-grained PAT scoped to vgainullin/why-academy

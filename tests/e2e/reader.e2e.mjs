@@ -27,6 +27,9 @@ await ctx.route('https://openrouter.ai/**', async route => {
   const body = JSON.parse(route.request().postData());
   const last = body.messages[body.messages.length - 1].content;
   const text = typeof last === 'string' ? last : last.find(p => p.type === 'text').text;
+  if (text.startsWith('The image contains handwritten mathematics')) {
+    return route.fulfill({ status: 401, json: { error: { message: 'No auth credentials found' } } });
+  }
   if (text.includes('not yet understood') && failExplain) {
     failExplain = false;
     return route.fulfill({ status: 500, body: 'upstream overloaded' });
@@ -1172,6 +1175,43 @@ try {
   await page.waitForSelector('#action-bar:not(.hidden)');
   const labels = await page.locator('#action-bar .swatch').evaluateAll(els => els.map(e => e.getAttribute('aria-label')));
   check('highlight colors are named', new Set(labels).size === labels.length, labels.join(', '));
+
+  // Debug mode on other pages: a failed derivation read is recorded and the
+  // shared Report bug button files it with the lesson context.
+  const lp = await ctx.newPage();
+  const lessonErrors = [];
+  lp.on('console', m => { if (m.type() === 'error') lessonErrors.push(m.text()); });
+  lp.on('pageerror', e => lessonErrors.push('pageerror: ' + e.message));
+  await lp.goto(B + '/lesson.html?lesson=lessons/demo/interactive-derivation-canvas.json&debug=1');
+  await lp.waitForSelector('.whydbg-fab:not([hidden])');
+  const pad = lp.locator('canvas.cderive-pad').first();
+  await pad.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  const pb = await pad.boundingBox();
+  await lp.mouse.move(pb.x + pb.width * 0.2, pb.y + pb.height * 0.4);
+  await lp.mouse.down();
+  await lp.mouse.move(pb.x + pb.width * 0.4, pb.y + pb.height * 0.5, { steps: 8 });
+  await lp.mouse.up();
+  await lp.locator('button', { hasText: 'Read now' }).first().click();
+  await lp.waitForFunction(() => /Read failed/.test(document.querySelector('.cderive-layout').textContent));
+  check('a failed derivation read counts on the Report bug button', Number(await lp.textContent('.whydbg-count')) > 0, await lp.textContent('.whydbg-count'));
+  await lp.click('.whydbg-fab');
+  await lp.waitForSelector('dialog.whydbg-dialog[open] .bug-shot img', { timeout: 20000 });
+  const ldiag = JSON.parse(await lp.textContent('.whydbg-dialog .bug-diag pre'));
+  const derive = ldiag.context.lesson.blocks.find(b => b.lastError);
+  check('lesson bug report has the read error, the AI call and the lesson',
+    !!derive && /401/.test(derive.lastError) && ldiag.recorder.aiCalls.some(c => c.status === 401) &&
+    ldiag.context.lesson.file.endsWith('interactive-derivation-canvas.json') && ldiag.ai.keySet === true &&
+    !JSON.stringify(ldiag).includes('sk-or-test'), derive ? derive.lastError : 'no block error');
+  const screenshotHidesUi = await lp.evaluate(() => document.querySelector('.whydbg-dialog .bug-shot img').naturalWidth > 0);
+  await lp.fill('.whydbg-dialog [name=title]', 'Lesson report from e2e');
+  await lp.click('.whydbg-dialog [data-bact="file"]');
+  await lp.waitForFunction(() => /Could not file/.test(document.querySelector('.whydbg-dialog .bug-status')?.textContent || ''));
+  check('lesson report reaches the server', screenshotHidesUi && /GitHub token not configured/.test(await lp.textContent('.whydbg-dialog .bug-status')));
+  await lp.screenshot({ path: `${OUT}/lesson-bug-dialog.png` });
+  const lessonUnexpected = lessonErrors.filter(e => !/Canvas derivation read failed|status of 401|status of 502|Filing the bug report failed|status of 404/.test(e));
+  check('lesson page has no unexpected console errors', !lessonUnexpected.length, lessonUnexpected.join(' | '));
+  await lp.evaluate(() => window.WhyDebug.setEnabled(false));
+  await lp.close();
 } catch (e) {
   failures++;
   const at = (e.stack || '').split('\n').find(l => l.includes('reader.e2e.mjs')) || '';

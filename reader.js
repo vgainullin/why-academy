@@ -2841,6 +2841,21 @@ async function loadBuildInfo() {
   return buildInfo;
 }
 
+// When each AI setting last changed, on any device (they sync).
+function aiSettingTimes() {
+  let times;
+  try {
+    times = JSON.parse(localStorage.getItem('why-academy.sync.pref-times') || '{}');
+  } catch (e) {
+    return { error: e.message };
+  }
+  const out = {};
+  for (const k of ['handwriteBackend', 'handwriteEndpoint', 'handwriteModel', 'openrouterModel']) {
+    if (times[k]) out[k] = new Date(times[k]).toISOString();
+  }
+  return out;
+}
+
 // What a developer needs to debug this session. No API keys, no note or
 // paper text (the report goes to a public repo); ids and counts only.
 function collectDiagnostics() {
@@ -2889,6 +2904,7 @@ function collectDiagnostics() {
       model: backend === 'openrouter' ? C.openrouterModel() : C.lmstudioModel(),
       endpointHost,
       keySet: backend === 'openrouter' ? !!C.openrouterApiKey() : null,
+      changedAt: aiSettingTimes(),
       explanationsInFlight: explaining.size,
       recentTaskErrors: store.all('task').filter(t => t.data.error).map(t => ({ id: t.id, error: t.data.error })).slice(-10),
     },

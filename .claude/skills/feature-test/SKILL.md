@@ -29,6 +29,7 @@ tools this session has (Playwright MCP or Claude in Chrome).
   - `__wa.penOnPage(page, x0, x1, y)` draws an Apple Pencil stroke across a PDF
     page; positions are fractions of the page.
   - `__wa.dragOnPage(page, x0, y0, x1, y1)` makes a pen drag, for the Region tool.
+  - `__wa.penTap(page, x, y)` makes a quick pen tap.
   - `__wa.penInPad(n)` draws in the n-th notebook ink pad.
   - Passing `'touch'` as the last argument to the pen helpers makes it a finger.
     A finger must never draw.

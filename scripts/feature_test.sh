@@ -10,6 +10,7 @@
 #                                [--model MODEL] [--budget USD] [--keep-state] [--smoke] [--no-ai]
 # --smoke runs a two-item charter to check the setup cheaply.
 # --no-ai hides OPENROUTER_API_KEY from the browser to test the error paths.
+# CHROME_PATH=/path/to/chrome uses that browser instead of Google Chrome.
 # AI features are exercised for real when OPENROUTER_API_KEY is set;
 # otherwise the tester checks their error handling.
 #
@@ -75,12 +76,16 @@ process.stdout.write("const __WA_CONFIG = " + JSON.stringify(cfg) + ";\n");
 ' "$TOKEN" "$ORIGIN" > "$RUN/testkit.js"
 cat "$ROOT/scripts/feature_test/testkit.js" >> "$RUN/testkit.js"
 
+# CHROME_PATH: a Chromium build to use where Google Chrome is not installed.
+BROWSER_ARGS='"--browser", "chrome"'
+[[ -n "${CHROME_PATH:-}" ]] && BROWSER_ARGS="\"--executable-path\", \"$CHROME_PATH\""
+
 cat > "$RUN/mcp.json" <<EOF
 {
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "$PLAYWRIGHT_MCP", "--headless", "--isolated", "--browser", "chrome",
+      "args": ["-y", "$PLAYWRIGHT_MCP", "--headless", "--isolated", $BROWSER_ARGS,
                $DEVICE_ARGS,
                "--init-script", "$RUN/testkit.js",
                "--output-dir", "$RUN/shots",

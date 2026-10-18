@@ -24,7 +24,7 @@ async function clickAction(page, label) {
   await btn.click();
 }
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH, headless: true } : { channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 834, height: 1194 }, hasTouch: true, deviceScaleFactor: 2 });
 await ctx.addInitScript(kit);
 // Like iPad Safari (through 26.x): streams are not async-iterable. pdf.js's
@@ -212,6 +212,16 @@ try {
   await wait(2500);
   const annosAfter = (await page.evaluate(() => __wa.serverItems('anno'))).filter(a => !a.deleted).length;
   check('cancelled actions leave no marks', annosAfter === annosBefore, `${annosBefore} -> ${annosAfter}`);
+
+  // Pencil tap on a saved region opens it with the Pen tool still active (#18)
+  await page.click('.tool[data-tool="pen"]');
+  const inkBefore = (await page.evaluate(() => __wa.serverItems('ink'))).length;
+  await page.evaluate(() => __wa.penTap(2, 0.5, 0.33));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  check('pencil tap opens a saved region', (await page.textContent('#action-bar .action-head')).startsWith('Region'));
+  await wait(1500);
+  check('pencil tap leaves no ink', (await page.evaluate(() => __wa.serverItems('ink'))).length === inkBefore);
+  await page.click('.tool[data-tool="select"]');
 
   // (dialogs) close on navigation
   await page.evaluate(() => __wa.selectText(2, 'little gradient reaches'));

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reader regression suite (tests/e2e/reader.e2e.mjs) against an isolated
-# server with a seeded account. Needs Google Chrome installed.
+# server with a seeded account. Needs Google Chrome, or CHROME_PATH=/path/to/chromium.
 # Screenshots: tests/e2e/out/
 
 set -euo pipefail

@@ -896,6 +896,8 @@ async function openDoc(docId, page, annoId, query) {
       onInkTransform: (p, before, after) => inkReplaced(docId, p, before, after),
       onEraseMark: (a, gesture) => eraseMark(a, gesture),
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
+      // Pencil tap on a mark opens it without switching to Select (#18).
+      onTapMark: (a, x, y) => showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: x, top: y, bottom: y, width: 0 } }),
     });
     state.pdf = view;
     let n;

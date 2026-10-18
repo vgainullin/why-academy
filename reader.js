@@ -592,7 +592,9 @@ function search(q) {
     else if (it.kind === 'task') {
       text = it.data.text + ' ' + (it.data.explanation || '');
       label = TASK_LABELS[it.data.type];
-      href = it.data.type === 'explain' || !markHref(it) ? '#study&t=' + it.id : markHref(it);
+      // Study lists explanations, and open explain tasks; a closed one with nothing to read goes to its passage.
+      const inStudy = it.data.type === 'explain' && (it.data.explanation || it.data.status !== 'done');
+      href = inStudy || !markHref(it) ? '#study&t=' + it.id : markHref(it);
     }
     else continue;
     const at = text.toLowerCase().indexOf(q);
@@ -1690,7 +1692,8 @@ async function generateExplanation(taskId) {
   } catch (e) {
     console.error('Explanation failed', e);
     if (store.get(taskId)) await store.update(taskId, { error: friendlyError(e), pending: undefined });
-    toast('Explanation failed: ' + friendlyError(e), true);
+    const msg = friendlyError(e);
+    toast('Explanation failed: ' + msg, true, /API key/.test(msg) ? { label: 'Settings', run: () => $('#settings-btn').click() } : undefined);
   } finally {
     explaining.delete(taskId);
     liveText.delete(taskId);
@@ -1774,7 +1777,17 @@ async function cardDialog(p, fromEquation) {
   // The source stays in view, to check the draft against.
   const source = dlg.querySelector('.card-source');
   const showSource = () => {
-    source.innerHTML = renderMarkdown('**From the paper:**\n\n' + (latex ? `$$${latex}$$` : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+    source.innerHTML = renderMarkdown('**From the paper:**\n\n' + (latex ? `$$${latex}$$` : anno.data.type === 'region' ? '' : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+    if (latex || anno.data.type !== 'region') return;
+    // No LaTeX (no AI, or not read yet): show the region itself.
+    withPaper(anno.data.docId, v => v.regionImage(anno.data.page, anno.data.rects[0], 600)).then(src => {
+      if (latex || source.querySelector('.card-region')) return;
+      const img = document.createElement('img');
+      img.className = 'card-region';
+      img.alt = 'Region on page ' + anno.data.page;
+      img.src = src;
+      source.appendChild(img);
+    }).catch(e => console.warn('Region preview failed', e));
   };
   showSource();
 
@@ -2644,9 +2657,10 @@ function briefMarkdown(docId) {
     if (gist) out.push(`  **In short:** ${gist}`);
   }
 
-  // Every equation region you worked on: read, pinned, explained or rated.
+  // Every equation region you worked on: read, pinned, explained, rated or carded.
   const explainedIds = new Set(tasks.filter(t => t.data.type === 'explain').map(t => t.data.annoId));
-  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief || a.data.status || explainedIds.has(a.id)));
+  const cardedIds = new Set(cards.map(c => c.data.annoId));
+  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief || a.data.status || explainedIds.has(a.id) || cardedIds.has(a.id)));
   out.push('', `## Key equations (${equations.length})`);
   if (!equations.length) out.push('Use the Region tool on an equation and choose Equation card or LaTeX to notebook.');
   for (const a of equations) {
@@ -3004,8 +3018,9 @@ function wire() {
   $('#zoom-out').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom / 1.2, state.pdf.fitWidth));
   $('#zoom-fit').addEventListener('click', e => {
     if (!state.pdf) return;
-    // Touch screens without the − and + buttons get them from the chip.
-    if (matchMedia('(max-width: 1000px) and (pointer: coarse)').matches) {
+    // Touch screens without the − and + buttons get them from the chip at
+    // fit width; zoomed, the chip fits, as its label says.
+    if (matchMedia('(max-width: 1000px) and (pointer: coarse)').matches && Math.round(state.pdf.zoom * 100) === 100) {
       e.stopPropagation();
       $('#zoom-menu').classList.toggle('hidden');
       return;

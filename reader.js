@@ -1383,11 +1383,41 @@ function showActions(target) {
     }
   }
   bar.classList.remove('hidden');
-  positionBar(target);
+  if (!unzipFor(target)) positionBar(target);
+}
+
+// A region's actions open the page under it like a zipper (#18) instead of
+// floating over the equation. Anything else closes an open zip.
+function unzipFor(target) {
+  const bar = $('#action-bar');
+  const region = target.kind === 'region' || (target.kind === 'anno' && target.anno.data.type === 'region');
+  if (!region || !state.pdf) {
+    if (state.pdf && state.pdf.zipped) state.pdf.closeZip();
+    return false;
+  }
+  bar.home = bar.home || bar.parentNode;
+  const undock = () => {
+    bar.classList.remove('docked');
+    bar.home.appendChild(bar);
+  };
+  const [, y, , h] = target.kind === 'anno' ? target.anno.data.rects[0] : target.rects[0];
+  const page = target.kind === 'anno' ? target.anno.data.page : target.page;
+  const opened = state.pdf.openZip(page, Math.min(1, y + h + 0.005), bar, () => {
+    undock();
+    if (state.target === target) hideActions();
+  });
+  if (!opened) {
+    undock();
+    return false;
+  }
+  bar.classList.add('docked');
+  requestAnimationFrame(() => bar.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  return true;
 }
 
 function positionBar(target) {
   const bar = $('#action-bar');
+  if (bar.classList.contains('docked')) return;
   let anchor = target.anchor;
   if (!anchor && state.pdf) {
     const pageEl = state.pdf.pageElement(target.page || target.anno.data.page);
@@ -1408,6 +1438,7 @@ function positionBar(target) {
 function hideActions() {
   $('#action-bar').classList.add('hidden');
   state.target = null;
+  if (state.pdf && state.pdf.zipped) state.pdf.closeZip();
 }
 
 // The mark an action applies to. Marks from a fresh selection or region are
@@ -3150,7 +3181,8 @@ function wire() {
     else if (state.target) hideActions();
   });
   $('#pdf-scroll').addEventListener('scroll', () => {
-    if (state.target && state.target.kind !== 'selection') hideActions();
+    // An unzipped page stays open while you scroll.
+    if (state.target && state.target.kind !== 'selection' && !$('#action-bar').classList.contains('docked')) hideActions();
   }, { passive: true });
 
   // Drag and drop PDFs anywhere.

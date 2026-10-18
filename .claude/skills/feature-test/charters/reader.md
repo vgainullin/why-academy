@@ -174,6 +174,16 @@ that the flow handles the result sensibly.
 - Judge as the persona: with Pen active and the sidebar hidden, count the
   controls on screen. Which would you never use mid-reading? Name them.
 
+**C21 Unzip a region** (#18: "selecting a region should open a section").
+- A Region drag, or a tap on a saved region, opens the page below the region
+  like a zipper: a band with the region's actions, and the rest of the page
+  slides down. No popup covers the equation.
+- The band stays open while you scroll; More expands inside it.
+- Tapping the lower part, Escape, finishing an action, or tapping elsewhere
+  zips the page closed with no gap left behind.
+- Judge as the persona: does this feel better than a popup? What should the
+  band show besides actions (the explanation, the card, an ink pad)?
+
 **C15 Sync and errors.**
 - Throughout, the sync status ends at "Synced".
 - The console has no uncaught errors.

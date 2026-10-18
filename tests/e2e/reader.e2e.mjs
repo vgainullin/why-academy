@@ -219,10 +219,15 @@ try {
   await page.evaluate(() => __wa.penTap(2, 0.5, 0.33));
   await page.waitForSelector('#action-bar:not(.hidden)');
   check('pencil tap opens a saved region', (await page.textContent('#action-bar .action-head')).startsWith('Region'));
+  check('a region unzips the page under it (#18)', await page.evaluate(() => {
+    const band = document.querySelector('.zip-band'), lower = document.querySelector('.zip-lower');
+    return !!band && band.contains(document.querySelector('#action-bar')) && Math.abs(lower.getBoundingClientRect().top - band.getBoundingClientRect().bottom) <= 1;
+  }));
   await wait(1500);
   check('pencil tap leaves no ink', (await page.evaluate(() => __wa.serverItems('ink'))).length === inkBefore);
   await page.evaluate(() => __wa.penTap(2, 0.5, 0.9));
   check('pencil tap away closes the menu', await page.evaluate(() => document.querySelector('#action-bar').classList.contains('hidden')));
+  check('...and zips the page closed', await page.evaluate(() => !document.querySelector('.zip-band') && !document.querySelector('.pdf-page[data-page="2"]').style.marginBottom && document.querySelector('#action-bar').parentNode === document.body));
   await page.click('.tool[data-tool="select"]');
 
   // (dialogs) close on navigation

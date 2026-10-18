@@ -1075,6 +1075,7 @@ function renderTrash(trashed) {
       try {
         await trackedUpdate(d.id, { trashedAt: undefined });
         toast('Restored ' + snippet(name, 50));
+        navigate((d.kind === 'note' ? '#note=' : '#doc=') + d.id);
       } catch (e) {
         reportError('Restoring failed', e);
       }
@@ -1311,7 +1312,7 @@ const ACTION_LABELS = {
   pin: 'Add to Brief', unpin: 'Remove from Brief',
 };
 // Shown at once; the rest wait behind More (tester feedback #18: too many options).
-const PRIMARY_ACTIONS = new Set(['readexp', 'highlight', 'explain', 'comment', 'card', 'eqcard', 'latex']);
+const PRIMARY_ACTIONS = new Set(['readexp', 'highlight', 'explain', 'comment', 'card', 'eqcard', 'latex', 'understood']);
 
 function showActions(target) {
   state.target = target;
@@ -1330,19 +1331,24 @@ function showActions(target) {
   const actions = isSavedRegion
     ? ['readexp', 'eqcard', 'latex', 'explain', 'derive', 'unclear', 'understood', 'comment', 'todo', 'question', 'pin', 'unpin', 'link', 'delete']
     : ACTIONS[target.kind];
+  const extras = [];
+  let shown = 0;
   for (const act of actions) {
     if ((act === 'unclear' && status === 'unclear') || (act === 'understood' && status !== 'unclear')) continue;
     if (act === 'readexp' && !explanationFor(target.anno.id)) continue;
     const pinned = target.kind === 'anno' && target.anno.data.brief;
     if ((act === 'pin' && pinned) || (act === 'unpin' && !pinned)) continue;
+    const primary = PRIMARY_ACTIONS.has(act) && shown < 5;
+    if (primary) shown++;
     const b = document.createElement('button');
-    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '') + (PRIMARY_ACTIONS.has(act) ? '' : ' more');
+    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '') + (primary ? '' : ' more');
     b.textContent = ACTION_LABELS[act];
     b.addEventListener('pointerdown', e => e.preventDefault()); // keep the text selection
     b.addEventListener('click', () => runAction(act).catch(e => reportError(ACTION_LABELS[act] + ' failed', e)));
-    bar.appendChild(b);
+    if (primary) bar.appendChild(b);
+    else extras.push(b);
   }
-  if (bar.querySelector('.action-btn.more')) {
+  if (extras.length) {
     const more = document.createElement('button');
     more.className = 'action-btn more-toggle';
     more.textContent = 'More';
@@ -1353,6 +1359,7 @@ function showActions(target) {
       positionBar(target);
     });
     bar.appendChild(more);
+    bar.append(...extras);
   }
   const recolor = target.kind === 'anno' && target.anno.data.type === 'highlight';
   if (target.kind === 'selection' || recolor) {
@@ -1783,7 +1790,8 @@ async function cardDialog(p, fromEquation) {
   back.addEventListener('input', () => { typed.back = true; preview(); });
 
   let latex = anno.data.latex || '';
-  back.value = latex ? `$$${latex}$$` : anno.data.quote;
+  // A region's text-layer text is unformatted math; only real LaTeX goes in the back.
+  back.value = latex ? `$$${latex}$$` : anno.data.type === 'region' ? '' : anno.data.quote;
   preview();
   // The source stays in view, to check the draft against.
   const source = dlg.querySelector('.card-source');
@@ -2229,13 +2237,13 @@ function renderDocPanel(panel) {
     li.innerHTML = `<div class="mark-page">p. ${a.data.page}</div><div class="mark-quote"></div>
       ${a.data.comment ? '<div class="mark-comment"></div>' : ''}
       <div class="mark-items">${a.data.status ? `<span class="tag tag-${a.data.status}">${a.data.status === 'unclear' ? 'Not clear yet' : 'Understood'}</span>` : ''}${items.map(it => `<span class="tag tag-${it.kind === 'card' ? 'card' : it.data.type} ${it.data.status === 'done' ? 'done' : ''}">${it.kind === 'card' ? 'Card' : TASK_LABELS[it.data.type]}</span>`).join('')}</div>`;
-    li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : 'Region') : snippet(a.data.quote, 160);
+    li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : snippet(a.data.quote, 160) || 'Region') : snippet(a.data.quote, 160);
     if (a.data.type === 'region' && !a.data.latex && state.pdf) {
       // No LaTeX (yet): show the region itself so it can be recognised.
       state.pdf.regionImage(a.data.page, a.data.rects[0], 260).then(src => {
         const img = document.createElement('img');
         img.className = 'mark-region';
-        img.alt = 'Region on page ' + a.data.page;
+        img.alt = a.data.quote ? 'Region: ' + a.data.quote : 'Region on page ' + a.data.page;
         img.src = src;
         li.querySelector('.mark-quote').replaceChildren(img);
       }).catch(e => console.warn('Region preview failed', e));

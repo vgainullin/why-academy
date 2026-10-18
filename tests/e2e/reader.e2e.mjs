@@ -805,6 +805,8 @@ try {
   await page.click('#trash summary');
   await page.click('#trash [data-act="restore"]');
   await wait(600);
+  check('Restore opens the paper', (await page.evaluate(() => location.hash)) === '#doc=' + plain2Id, await page.evaluate(() => location.hash));
+  await library();
   const restoredRow = await prow().count();
   check('removed papers go to Recently deleted and can be restored', inTrash === 1 && inList === 0 && restoredRow === 1, `trash ${inTrash}, list ${inList}, restored ${restoredRow}`);
   await prow().locator('.side-more').click();

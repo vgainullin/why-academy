@@ -363,6 +363,8 @@ body[data-tool="region"] .pdf-page .textLayer span { cursor: crosshair; }
 }
 .action-btn:hover { background: #374151; }
 .action-btn.danger { color: #fca5a5; }
+.action-bar:not(.expanded) .action-btn.more { display: none; }
+.action-btn.more-toggle { color: #9ca3af; }
 .action-bar .swatch { border-color: #111827; }
 
 /* ── Notes ── */

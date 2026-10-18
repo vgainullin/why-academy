@@ -1295,11 +1295,14 @@ const ACTION_LABELS = {
   derive: 'Re-derive', delete: 'Delete', unclear: 'Not clear yet', understood: 'Understood', readexp: 'Read explanation',
   pin: 'Add to Brief', unpin: 'Remove from Brief',
 };
+// Shown at once; the rest wait behind More (tester feedback #18: too many options).
+const PRIMARY_ACTIONS = new Set(['readexp', 'highlight', 'explain', 'comment', 'card', 'eqcard', 'latex']);
 
 function showActions(target) {
   state.target = target;
   const bar = $('#action-bar');
   bar.innerHTML = '';
+  bar.classList.remove('expanded');
   if (target.kind === 'anno') {
     const head = document.createElement('div');
     head.className = 'action-head';
@@ -1318,11 +1321,23 @@ function showActions(target) {
     const pinned = target.kind === 'anno' && target.anno.data.brief;
     if ((act === 'pin' && pinned) || (act === 'unpin' && !pinned)) continue;
     const b = document.createElement('button');
-    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '');
+    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '') + (PRIMARY_ACTIONS.has(act) ? '' : ' more');
     b.textContent = ACTION_LABELS[act];
     b.addEventListener('pointerdown', e => e.preventDefault()); // keep the text selection
     b.addEventListener('click', () => runAction(act).catch(e => reportError(ACTION_LABELS[act] + ' failed', e)));
     bar.appendChild(b);
+  }
+  if (bar.querySelector('.action-btn.more')) {
+    const more = document.createElement('button');
+    more.className = 'action-btn more-toggle';
+    more.textContent = 'More';
+    more.addEventListener('pointerdown', e => e.preventDefault());
+    more.addEventListener('click', () => {
+      bar.classList.add('expanded');
+      more.remove();
+      positionBar(target);
+    });
+    bar.appendChild(more);
   }
   const recolor = target.kind === 'anno' && target.anno.data.type === 'highlight';
   if (target.kind === 'selection' || recolor) {

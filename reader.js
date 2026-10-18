@@ -485,6 +485,7 @@ async function route() {
     await openDoc(r.id, r.page, r.anno, r.q);
   } else if (r.view === 'note' && exists(r.id)) {
     openNoteView(r.id);
+    if (pendingNotes.has(r.id)) $('#note-root .note-title')?.focus();
   } else if (r.view === 'brief' && liveDoc(r.id)) {
     showView('brief');
     renderBrief(r.id);
@@ -818,7 +819,6 @@ function newNote() {
   const id = newId();
   pendingNotes.set(id, { title: '', blocks: [{ id: newId(), type: 'md', text: '' }] });
   navigate('#note=' + id);
-  setTimeout(() => $('#note-root .note-title')?.focus(), 50);
 }
 
 // ── Documents ──
@@ -897,7 +897,7 @@ async function openDoc(docId, page, annoId, query) {
       onInkErase: (p, ids, gesture) => inkErased(docId, p, ids, 'Erase', gesture),
       onInkTransform: (p, before, after) => inkReplaced(docId, p, before, after),
       onEraseMark: (a, gesture) => eraseMark(a, gesture),
-      onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
+      onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect], quote: view.textIn(p, rect) }),
       // Pencil tap on a mark opens it without switching to Select (#18).
       onTapMark: (a, x, y) => showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: x, top: y, bottom: y, width: 0 } }),
     });
@@ -1544,9 +1544,9 @@ async function runActionNow(act) {
       multiline: true,
       enterSaves: true,
       context: quote || `Region on p. ${page}`,
-      placeholder: act === 'question' ? 'What do you want to ask or discuss?' : 'What to follow up on (empty: just this passage)',
+      placeholder: act === 'question' ? 'What do you want to ask? (empty: discuss this passage)' : 'What to follow up on (empty: just this passage)',
     });
-    const text = entered === '' && act === 'todo' ? 'Follow up: ' + snippet(quote || 'region on p. ' + page, 80) : entered;
+    const text = entered === '' ? (act === 'todo' ? 'Follow up: ' : 'Discuss: ') + snippet(quote || 'region on p. ' + page, 80) : entered;
     if (text) {
       const anno = await commitAnno(p);
       await trackedCreate('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
@@ -2511,6 +2511,13 @@ function taskRow(t) {
   if (liveText.has(t.id)) el.querySelector('[data-live]').innerHTML = renderMarkdown(liveText.get(t.id), resolveLink);
   const err = el.querySelector('.task-error');
   if (err) err.textContent = t.data.error || 'Interrupted before it finished (the page was closed or reloaded).';
+  if (err && /API key/.test(t.data.error || '')) {
+    const b = document.createElement('button');
+    b.className = 'btn-small';
+    b.textContent = 'Settings';
+    b.addEventListener('click', () => $('#settings-btn').click());
+    err.after(b);
+  }
   el.querySelector('input').addEventListener('change', () => store.update(t.id, { status: 'done' }).catch(e => reportError('Update failed', e)));
   const genBtn = el.querySelector('[data-gen]');
   if (genBtn) genBtn.addEventListener('click', () => {
@@ -2665,7 +2672,7 @@ function briefMarkdown(docId) {
   if (!equations.length) out.push('Use the Region tool on an equation and choose Equation card or LaTeX to notebook.');
   for (const a of equations) {
     const n = cards.filter(c => c.data.annoId === a.id).length;
-    out.push('', a.data.latex ? `$$${a.data.latex}$$` : '*(equation region; LaTeX not read yet)*', `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
+    out.push('', a.data.latex ? `$$${a.data.latex}$$` : a.data.quote ? `\`${a.data.quote}\`` : '*(equation region; LaTeX not read yet)*', `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
   }
 
   const open = tasks.filter(t => t.data.type !== 'question' && t.data.type !== 'explain' && t.data.status !== 'done');

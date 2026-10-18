@@ -6,7 +6,7 @@ compatibility_date = "2025-09-01"
 # It runs before every deploy and on file changes during `wrangler dev`.
 [build]
 command = "node scripts/build-site.mjs"
-watch_dir = ["../index.html", "../lesson.html", "../playground.html", "../rootlock.html", "../app.js", "../playground.js", "../rootlock.js", "../style.css", "../rootlock.css", "../lib", "../lessons"]
+watch_dir = ["../index.html", "../lesson.html", "../playground.html", "../rootlock.html", "../reader.html", "../app.js", "../playground.js", "../rootlock.js", "../reader.js", "../style.css", "../rootlock.css", "../reader.css", "../lib", "../lessons"]
 
 # Only /api/* invokes the Worker; everything else is served straight from assets.
 [assets]
@@ -23,6 +23,12 @@ database_name = "why-academy"
 database_id = "c3492fdb-76de-4faa-a4d1-4200ffb44934"
 migrations_dir = "migrations"
 
+# R2 bucket for vault PDFs, keyed pdf/<account_id>/<sha256>.
+# Run: wrangler r2 bucket create why-academy-vault
+[[r2_buckets]]
+binding = "VAULT_FILES"
+bucket_name = "why-academy-vault"
+
 # KV namespace for the feedback rate limit (per-account counter with TTL)
 [[kv_namespaces]]
 binding = "RATE_LIMIT"
@@ -36,7 +42,7 @@ namespace_id = "1001"
   limit = 20
   period = 60
 
-# Settings writes per user
+# Settings writes, vault pushes and PDF uploads per user
 [[ratelimits]]
 name = "API_LIMITER"
 namespace_id = "1002"
@@ -54,7 +60,7 @@ GITHUB_REPO = "vgainullin/why-academy"
 RATE_LIMIT_PER_HOUR = "20"
 # Account ids allowed to submit feedback (comma-separated). An account's id
 # is shown by GET /api/me.
-ALLOWED_USERS = ""
+ALLOWED_USERS = "c3ae462a-5ec2-401b-93a9-68bfde2e1343"
 
 # Secrets (set with `wrangler secret put NAME`):
 #   GITHUB_TOKEN     - fine-grained PAT scoped to vgainullin/why-academy

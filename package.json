@@ -1,7 +1,7 @@
 {
   "name": "why-academy",
   "version": "1.0.0",
-  "description": "A free, open-source interactive learning platform that teaches STEM through a derive-it-yourself methodology. Students perform stepwise algebraic derivations, estimate answers in scientific notation, implement solutions in code, and explain concepts — all verified deterministically. No AI grading, no paywall.",
+  "description": "A free, open-source interactive learning platform that teaches STEM through a derive-it-yourself methodology. Students perform stepwise algebraic derivations, estimate answers in scientific notation, implement solutions in code, and explain concepts \u2014 all verified deterministically. No AI grading, no paywall.",
   "main": "app.js",
   "directories": {
     "lib": "lib"
@@ -11,7 +11,9 @@
     "dev": "wrangler dev -c worker/wrangler.toml",
     "db:migrate:local": "wrangler d1 migrations apply why-academy --local -c worker/wrangler.toml",
     "db:migrate:remote": "wrangler d1 migrations apply why-academy --remote -c worker/wrangler.toml",
-    "deploy": "wrangler deploy -c worker/wrangler.toml"
+    "deploy": "wrangler deploy -c worker/wrangler.toml",
+    "test:e2e": "scripts/e2e_reader.sh",
+    "test:feature": "scripts/feature_test.sh"
   },
   "repository": {
     "type": "git",
@@ -31,6 +33,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "playwright-core": "^1.55.0",
     "wrangler": "^4.147.0"
   }
 }

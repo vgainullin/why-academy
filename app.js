@@ -50,11 +50,29 @@
 
     const params = new URLSearchParams(window.location.search);
     const lessonFile = params.get('lesson') || 'lessons/physics/oscillations/01-single-spring.json';
+    if (window.WhyDebug) {
+      WhyDebug.addContext('lesson', () => ({
+        file: lessonFile,
+        title: lesson ? lesson.title : null,
+        pythonReady: C.pyodideReady,
+        // Block state minus bulky fields (exploration tables and the like).
+        blocks: lesson ? lesson.blocks.map(b => {
+          const out = { id: b.id, type: b.type };
+          for (const [k, v] of Object.entries(blockState[b.id] || {})) {
+            const j = JSON.stringify(v);
+            out[k] = j && j.length > 600 ? '(' + j.length + ' chars)' : v;
+          }
+          return out;
+        }) : [],
+      }));
+    }
     try {
       const resp = await fetch(lessonFile);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' for ' + lessonFile);
       lesson = await resp.json();
       renderLesson();
     } catch (e) {
+      console.error('Failed to load lesson', e);
       document.getElementById('lesson-container').innerHTML =
         '<p style="padding:20px;color:red;">Failed to load lesson: ' + e.message + '</p>';
     }
@@ -2917,6 +2935,7 @@ plt.close('all')
           statusEl.textContent = '';
           showPreview(latex, raw);
         } catch (e) {
+          console.error('Handwriting transcription failed', e);
           const hint = handwriteBackend() === 'openrouter'
             ? 'Check your OpenRouter API key and model in Settings. The key must have credits and the model must support vision.'
             : 'Make sure LM Studio is running on localhost:1234 with a vision model loaded and CORS enabled.';
@@ -2998,6 +3017,7 @@ plt.close('all')
         try {
           await ensureSympy();
         } catch (e) {
+          console.error('Math engine failed to load', e);
           statusEl.innerHTML =
             '<span class="handwrite-error">Math engine failed to load: ' + esc(e.message) + '</span>';
           return;
@@ -3012,6 +3032,7 @@ plt.close('all')
           const out = await C.pyodide.runPythonAsync('equiv(_s, _t)');
           [verdict, detail] = out.toJs();
         } catch (e) {
+          console.error('Derivation verification crashed', e);
           statusEl.innerHTML =
             '<span class="handwrite-error">Verification crashed: ' + esc(e.message) + '</span>';
           return;
@@ -3373,6 +3394,8 @@ plt.close('all')
           }
         }
         renderLinesPanel();
+        blockState[block.id].lastRead = recognizedLines.map(l => ({ latex: l.latex, status: l.status }));
+        blockState[block.id].lastError = null;
 
         const okCount = recognizedLines.filter(l => l.status === 'ok').length;
         if (anyMatchedTarget) {
@@ -3386,6 +3409,8 @@ plt.close('all')
           panelStatus.textContent = 'No valid lines yet. The dots show what passed.';
         }
       } catch (e) {
+        console.error('Canvas derivation read failed', e);
+        blockState[block.id].lastError = e.message;
         panelStatus.innerHTML =
           '<span class="handwrite-error">Read failed: ' + esc(e.message) + '</span><br>' +
           '<span class="handwrite-status-detail">Open Settings to switch backend. LM Studio: needs to be running on localhost:1234 with a vision model loaded and CORS enabled. OpenRouter: needs an API key.</span>';

@@ -58,10 +58,10 @@ export async function submitFeedback(env, user, body) {
   };
 }
 
-// Fixed one-hour window per account, tracked in KV.
-async function checkRateLimit(kv, userId, limit) {
+// Fixed one-hour window per account and scope, tracked in KV.
+export async function checkRateLimit(kv, userId, limit, scope = 'rl') {
   if (!kv) throw new Error('RATE_LIMIT KV binding missing');
-  const key = 'rl:' + userId;
+  const key = scope + ':' + userId;
   const current = await kv.get(key);
   const count = current ? parseInt(current, 10) : 0;
   if (count >= limit) return false;

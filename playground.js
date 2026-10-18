@@ -861,6 +861,7 @@
           panelStatus.textContent = 'No valid lines yet. The dots show what passed. Keep trying!';
         }
       } catch (e) {
+        console.error('Playground read failed', e);
         panelStatus.innerHTML =
           '<span class="handwrite-error">Read failed: ' + esc(e.message) + '</span><br>' +
           '<span class="handwrite-status-detail">Open Settings to switch backend. LM Studio: needs to be running on localhost:1234 with a vision model loaded and CORS enabled. OpenRouter: needs an API key.</span>';

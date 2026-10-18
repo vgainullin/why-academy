@@ -40,8 +40,9 @@ equations (1)-(5)) stands in for the real one.
 
 **C4 Text selection actions.** Select tool active. Select "the square root of
 the key" on page 1.
-- An action bar appears near the selection, with Highlight, Comment, To
-  notebook, Card, Explain, Follow-up, Question and Copy link.
+- An action bar appears near the selection, with Highlight, Comment, Card,
+  Explain, the highlight colors and More. More shows the rest in place: To
+  notebook, Not clear yet, Follow-up, Question, Add to Brief and Copy link.
 - Highlight creates a visible highlight and a mark in the Marks panel.
 - Tapping the highlight later reopens actions for that mark.
 
@@ -160,6 +161,28 @@ that the flow handles the result sensibly.
   highlights drawn in; open it to check that the marks line up.
 - Report anything else a GoodNotes or PDF Expert user would reach for and
   not find.
+
+**C20 Minimal, pen-first UI** (from a real tester: "The UI must be minimal",
+"can't select a box", "too many options", issue #18).
+- Every menu that appears on a selection, region or mark shows at most five
+  actions before More.
+- With the Pen tool active, a quick pen tap (`__wa.penTap(page, x, y)`) on a
+  saved region or highlight opens its actions, and leaves no ink dot.
+- With a mark's actions open, a pen tap away closes them and draws nothing;
+  with nothing open, a pen tap away leaves a dot of ink. A pen stroke across a
+  mark still draws.
+- Judge as the persona: with Pen active and the sidebar hidden, count the
+  controls on screen. Which would you never use mid-reading? Name them.
+
+**C21 Unzip a region** (#18: "selecting a region should open a section").
+- A Region drag, or a tap on a saved region, opens the page below the region
+  like a zipper: a band with the region's actions, and the rest of the page
+  slides down. No popup covers the equation.
+- The band stays open while you scroll; More expands inside it.
+- Tapping the lower part, Escape, finishing an action, or tapping elsewhere
+  zips the page closed with no gap left behind.
+- Judge as the persona: does this feel better than a popup? What should the
+  band show besides actions (the explanation, the card, an ink pad)?
 
 **C15 Sync and errors.**
 - Throughout, the sync status ends at "Synced".

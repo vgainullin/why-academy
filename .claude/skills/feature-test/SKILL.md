@@ -29,12 +29,17 @@ tools this session has (Playwright MCP or Claude in Chrome).
   - `__wa.penOnPage(page, x0, x1, y)` draws an Apple Pencil stroke across a PDF
     page; positions are fractions of the page.
   - `__wa.dragOnPage(page, x0, y0, x1, y1)` makes a pen drag, for the Region tool.
+  - `__wa.penTap(page, x, y)` makes a quick pen tap.
   - `__wa.penInPad(n)` draws in the n-th notebook ink pad.
   - Passing `'touch'` as the last argument to the pen helpers makes it a finger.
     A finger must never draw.
   - `__wa.selectText(page, text)` selects text the way a long-press would.
   - `await __wa.serverItems(kind)` returns what actually synced to the server.
   - `__wa.syncStatus()` returns the sync state shown in the header.
+
+Sharpness at high zoom: the page canvas is capped (about 16 MP, like iPad
+Safari), and a `.pdf-detail` canvas over the visible area renders at full
+resolution after scrolling stops. Measure that canvas, not only the page's.
 
 Native selection and the reader's action bar react to real selection events,
 so after `selectText`, wait about half a second, then snapshot.

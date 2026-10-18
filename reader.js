@@ -363,6 +363,8 @@ function setTool(tool) {
   });
   document.body.dataset.tool = tool;
   $('#clear-page').classList.toggle('hidden', tool !== 'eraser');
+  // Erase and Lasso use no color, on pages or pads.
+  $('#color-group').classList.toggle('hidden', tool === 'eraser' || tool === 'lasso');
   // Switching tools ends a lasso selection.
   window.dispatchEvent(new Event('ink-tool-change'));
   renderColors();
@@ -379,7 +381,9 @@ function renderColors() {
     btn.className = 'swatch active';
     btn.style.setProperty('--swatch', current);
     const kind = isHl ? 'highlighter' : 'pen';
-    btn.title = `${isHl ? 'Highlighter' : 'Pen'}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.sizes[kind]} (tap for colors and sizes)`;
+    // With Select or Region the chip sets the pen that notebook pads use.
+    const label = isHl ? 'Highlighter' : state.tool.tool === 'pen' ? 'Pen' : 'Notebook pen';
+    btn.title = `${label}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.sizes[kind]} (tap for colors and sizes)`;
     btn.dataset.size = state.tool.sizes[kind];
     btn.setAttribute('aria-label', btn.title);
     btn.setAttribute('aria-expanded', 'false');
@@ -485,6 +489,7 @@ async function route() {
     await openDoc(r.id, r.page, r.anno, r.q);
   } else if (r.view === 'note' && exists(r.id)) {
     openNoteView(r.id);
+    if (pendingNotes.has(r.id)) $('#note-root .note-title')?.focus();
   } else if (r.view === 'brief' && liveDoc(r.id)) {
     showView('brief');
     renderBrief(r.id);
@@ -592,7 +597,9 @@ function search(q) {
     else if (it.kind === 'task') {
       text = it.data.text + ' ' + (it.data.explanation || '');
       label = TASK_LABELS[it.data.type];
-      href = it.data.type === 'explain' || !markHref(it) ? '#study&t=' + it.id : markHref(it);
+      // Study lists explanations, and open explain tasks; a closed one with nothing to read goes to its passage.
+      const inStudy = it.data.type === 'explain' && (it.data.explanation || it.data.status !== 'done');
+      href = inStudy || !markHref(it) ? '#study&t=' + it.id : markHref(it);
     }
     else continue;
     const at = text.toLowerCase().indexOf(q);
@@ -816,7 +823,6 @@ function newNote() {
   const id = newId();
   pendingNotes.set(id, { title: '', blocks: [{ id: newId(), type: 'md', text: '' }] });
   navigate('#note=' + id);
-  setTimeout(() => $('#note-root .note-title')?.focus(), 50);
 }
 
 // ── Documents ──
@@ -872,6 +878,8 @@ async function openDoc(docId, page, annoId, query) {
     showView('doc');
     closeDoc();
     state.docId = docId;
+    // A filter left on from another paper made marks look lost (tester U6).
+    state.panelFilter = 'all';
     $('#view-title').textContent = doc.data.title;
     const scroll = $('#pdf-scroll');
     scroll.innerHTML = '<div class="loading">Loading PDF...</div>';
@@ -895,7 +903,14 @@ async function openDoc(docId, page, annoId, query) {
       onInkErase: (p, ids, gesture) => inkErased(docId, p, ids, 'Erase', gesture),
       onInkTransform: (p, before, after) => inkReplaced(docId, p, before, after),
       onEraseMark: (a, gesture) => eraseMark(a, gesture),
-      onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect] }),
+      onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect], quote: view.textIn(p, rect) }),
+      // Pencil tap on a mark opens it without switching to Select (#18).
+      onTapMark: (a, x, y) => showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: x, top: y, bottom: y, width: 0 } }),
+      onTapAway: () => {
+        if (!state.target) return false;
+        hideActions();
+        return true;
+      },
     });
     state.pdf = view;
     let n;
@@ -1060,6 +1075,7 @@ function renderTrash(trashed) {
       try {
         await trackedUpdate(d.id, { trashedAt: undefined });
         toast('Restored ' + snippet(name, 50));
+        navigate((d.kind === 'note' ? '#note=' : '#doc=') + d.id);
       } catch (e) {
         reportError('Restoring failed', e);
       }
@@ -1295,11 +1311,14 @@ const ACTION_LABELS = {
   derive: 'Re-derive', delete: 'Delete', unclear: 'Not clear yet', understood: 'Understood', readexp: 'Read explanation',
   pin: 'Add to Brief', unpin: 'Remove from Brief',
 };
+// Shown at once; the rest wait behind More (tester feedback #18: too many options).
+const PRIMARY_ACTIONS = new Set(['readexp', 'highlight', 'explain', 'comment', 'card', 'eqcard', 'latex', 'understood']);
 
 function showActions(target) {
   state.target = target;
   const bar = $('#action-bar');
   bar.innerHTML = '';
+  bar.classList.remove('expanded');
   if (target.kind === 'anno') {
     const head = document.createElement('div');
     head.className = 'action-head';
@@ -1312,17 +1331,35 @@ function showActions(target) {
   const actions = isSavedRegion
     ? ['readexp', 'eqcard', 'latex', 'explain', 'derive', 'unclear', 'understood', 'comment', 'todo', 'question', 'pin', 'unpin', 'link', 'delete']
     : ACTIONS[target.kind];
+  const extras = [];
+  let shown = 0;
   for (const act of actions) {
     if ((act === 'unclear' && status === 'unclear') || (act === 'understood' && status !== 'unclear')) continue;
     if (act === 'readexp' && !explanationFor(target.anno.id)) continue;
     const pinned = target.kind === 'anno' && target.anno.data.brief;
     if ((act === 'pin' && pinned) || (act === 'unpin' && !pinned)) continue;
+    const primary = PRIMARY_ACTIONS.has(act) && shown < 5;
+    if (primary) shown++;
     const b = document.createElement('button');
-    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '');
+    b.className = 'action-btn' + (act === 'delete' ? ' danger' : '') + (primary ? '' : ' more');
     b.textContent = ACTION_LABELS[act];
     b.addEventListener('pointerdown', e => e.preventDefault()); // keep the text selection
     b.addEventListener('click', () => runAction(act).catch(e => reportError(ACTION_LABELS[act] + ' failed', e)));
-    bar.appendChild(b);
+    if (primary) bar.appendChild(b);
+    else extras.push(b);
+  }
+  if (extras.length) {
+    const more = document.createElement('button');
+    more.className = 'action-btn more-toggle';
+    more.textContent = 'More';
+    more.addEventListener('pointerdown', e => e.preventDefault());
+    more.addEventListener('click', () => {
+      bar.classList.add('expanded');
+      more.remove();
+      positionBar(target);
+    });
+    bar.appendChild(more);
+    bar.append(...extras);
   }
   const recolor = target.kind === 'anno' && target.anno.data.type === 'highlight';
   if (target.kind === 'selection' || recolor) {
@@ -1346,11 +1383,41 @@ function showActions(target) {
     }
   }
   bar.classList.remove('hidden');
-  positionBar(target);
+  if (!unzipFor(target)) positionBar(target);
+}
+
+// A region's actions open the page under it like a zipper (#18) instead of
+// floating over the equation. Anything else closes an open zip.
+function unzipFor(target) {
+  const bar = $('#action-bar');
+  const region = target.kind === 'region' || (target.kind === 'anno' && target.anno.data.type === 'region');
+  if (!region || !state.pdf) {
+    if (state.pdf && state.pdf.zipped) state.pdf.closeZip();
+    return false;
+  }
+  bar.home = bar.home || bar.parentNode;
+  const undock = () => {
+    bar.classList.remove('docked');
+    bar.home.appendChild(bar);
+  };
+  const [, y, , h] = target.kind === 'anno' ? target.anno.data.rects[0] : target.rects[0];
+  const page = target.kind === 'anno' ? target.anno.data.page : target.page;
+  const opened = state.pdf.openZip(page, Math.min(1, y + h + 0.005), bar, () => {
+    undock();
+    if (state.target === target) hideActions();
+  });
+  if (!opened) {
+    undock();
+    return false;
+  }
+  bar.classList.add('docked');
+  requestAnimationFrame(() => bar.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  return true;
 }
 
 function positionBar(target) {
   const bar = $('#action-bar');
+  if (bar.classList.contains('docked')) return;
   let anchor = target.anchor;
   if (!anchor && state.pdf) {
     const pageEl = state.pdf.pageElement(target.page || target.anno.data.page);
@@ -1371,6 +1438,7 @@ function positionBar(target) {
 function hideActions() {
   $('#action-bar').classList.add('hidden');
   state.target = null;
+  if (state.pdf && state.pdf.zipped) state.pdf.closeZip();
 }
 
 // The mark an action applies to. Marks from a fresh selection or region are
@@ -1525,9 +1593,9 @@ async function runActionNow(act) {
       multiline: true,
       enterSaves: true,
       context: quote || `Region on p. ${page}`,
-      placeholder: act === 'question' ? 'What do you want to ask or discuss?' : 'What to follow up on (empty: just this passage)',
+      placeholder: act === 'question' ? 'What do you want to ask? (empty: discuss this passage)' : 'What to follow up on (empty: just this passage)',
     });
-    const text = entered === '' && act === 'todo' ? 'Follow up: ' + snippet(quote || 'region on p. ' + page, 80) : entered;
+    const text = entered === '' ? (act === 'todo' ? 'Follow up: ' : 'Discuss: ') + snippet(quote || 'region on p. ' + page, 80) : entered;
     if (text) {
       const anno = await commitAnno(p);
       await trackedCreate('task', { text, type: act, status: 'open', docId: state.docId, annoId: anno.id });
@@ -1673,7 +1741,8 @@ async function generateExplanation(taskId) {
   } catch (e) {
     console.error('Explanation failed', e);
     if (store.get(taskId)) await store.update(taskId, { error: friendlyError(e), pending: undefined });
-    toast('Explanation failed: ' + friendlyError(e), true);
+    const msg = friendlyError(e);
+    toast('Explanation failed: ' + msg, true, /API key/.test(msg) ? { label: 'Settings', run: () => $('#settings-btn').click() } : undefined);
   } finally {
     explaining.delete(taskId);
     liveText.delete(taskId);
@@ -1752,12 +1821,23 @@ async function cardDialog(p, fromEquation) {
   back.addEventListener('input', () => { typed.back = true; preview(); });
 
   let latex = anno.data.latex || '';
-  back.value = latex ? `$$${latex}$$` : anno.data.quote;
+  // A region's text-layer text is unformatted math; only real LaTeX goes in the back.
+  back.value = latex ? `$$${latex}$$` : anno.data.type === 'region' ? '' : anno.data.quote;
   preview();
   // The source stays in view, to check the draft against.
   const source = dlg.querySelector('.card-source');
   const showSource = () => {
-    source.innerHTML = renderMarkdown('**From the paper:**\n\n' + (latex ? `$$${latex}$$` : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+    source.innerHTML = renderMarkdown('**From the paper:**\n\n' + (latex ? `$$${latex}$$` : anno.data.type === 'region' ? '' : '> ' + snippet(anno.data.quote, 600)), resolveLink);
+    if (latex || anno.data.type !== 'region') return;
+    // No LaTeX (no AI, or not read yet): show the region itself.
+    withPaper(anno.data.docId, v => v.regionImage(anno.data.page, anno.data.rects[0], 600)).then(src => {
+      if (latex || source.querySelector('.card-region')) return;
+      const img = document.createElement('img');
+      img.className = 'card-region';
+      img.alt = 'Region on page ' + anno.data.page;
+      img.src = src;
+      source.appendChild(img);
+    }).catch(e => console.warn('Region preview failed', e));
   };
   showSource();
 
@@ -2188,13 +2268,13 @@ function renderDocPanel(panel) {
     li.innerHTML = `<div class="mark-page">p. ${a.data.page}</div><div class="mark-quote"></div>
       ${a.data.comment ? '<div class="mark-comment"></div>' : ''}
       <div class="mark-items">${a.data.status ? `<span class="tag tag-${a.data.status}">${a.data.status === 'unclear' ? 'Not clear yet' : 'Understood'}</span>` : ''}${items.map(it => `<span class="tag tag-${it.kind === 'card' ? 'card' : it.data.type} ${it.data.status === 'done' ? 'done' : ''}">${it.kind === 'card' ? 'Card' : TASK_LABELS[it.data.type]}</span>`).join('')}</div>`;
-    li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : 'Region') : snippet(a.data.quote, 160);
+    li.querySelector('.mark-quote').textContent = a.data.type === 'region' ? (a.data.latex ? '' : snippet(a.data.quote, 160) || 'Region') : snippet(a.data.quote, 160);
     if (a.data.type === 'region' && !a.data.latex && state.pdf) {
       // No LaTeX (yet): show the region itself so it can be recognised.
       state.pdf.regionImage(a.data.page, a.data.rects[0], 260).then(src => {
         const img = document.createElement('img');
         img.className = 'mark-region';
-        img.alt = 'Region on page ' + a.data.page;
+        img.alt = a.data.quote ? 'Region: ' + a.data.quote : 'Region on page ' + a.data.page;
         img.src = src;
         li.querySelector('.mark-quote').replaceChildren(img);
       }).catch(e => console.warn('Region preview failed', e));
@@ -2481,6 +2561,13 @@ function taskRow(t) {
   if (liveText.has(t.id)) el.querySelector('[data-live]').innerHTML = renderMarkdown(liveText.get(t.id), resolveLink);
   const err = el.querySelector('.task-error');
   if (err) err.textContent = t.data.error || 'Interrupted before it finished (the page was closed or reloaded).';
+  if (err && /API key/.test(t.data.error || '')) {
+    const b = document.createElement('button');
+    b.className = 'btn-small';
+    b.textContent = 'Settings';
+    b.addEventListener('click', () => $('#settings-btn').click());
+    err.after(b);
+  }
   el.querySelector('input').addEventListener('change', () => store.update(t.id, { status: 'done' }).catch(e => reportError('Update failed', e)));
   const genBtn = el.querySelector('[data-gen]');
   if (genBtn) genBtn.addEventListener('click', () => {
@@ -2627,14 +2714,15 @@ function briefMarkdown(docId) {
     if (gist) out.push(`  **In short:** ${gist}`);
   }
 
-  // Every equation region you worked on: read, pinned, explained or rated.
+  // Every equation region you worked on: read, pinned, explained, rated or carded.
   const explainedIds = new Set(tasks.filter(t => t.data.type === 'explain').map(t => t.data.annoId));
-  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief || a.data.status || explainedIds.has(a.id)));
+  const cardedIds = new Set(cards.map(c => c.data.annoId));
+  const equations = annos.filter(a => a.data.type === 'region' && (a.data.latex || a.data.brief || a.data.status || explainedIds.has(a.id) || cardedIds.has(a.id)));
   out.push('', `## Key equations (${equations.length})`);
   if (!equations.length) out.push('Use the Region tool on an equation and choose Equation card or LaTeX to notebook.');
   for (const a of equations) {
     const n = cards.filter(c => c.data.annoId === a.id).length;
-    out.push('', a.data.latex ? `$$${a.data.latex}$$` : '*(equation region; LaTeX not read yet)*', `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
+    out.push('', a.data.latex ? `$$${a.data.latex}$$` : a.data.quote ? `\`${a.data.quote}\`` : '*(equation region; LaTeX not read yet)*', `${ref(a)}${n ? ` - ${n} card${n > 1 ? 's' : ''}` : ''}${a.data.status === 'understood' ? ' - understood' : a.data.status === 'unclear' ? ' - not clear yet' : ''}`);
   }
 
   const open = tasks.filter(t => t.data.type !== 'question' && t.data.type !== 'explain' && t.data.status !== 'done');
@@ -2987,8 +3075,9 @@ function wire() {
   $('#zoom-out').addEventListener('click', () => state.pdf && state.pdf.setZoom(state.pdf.zoom / 1.2, state.pdf.fitWidth));
   $('#zoom-fit').addEventListener('click', e => {
     if (!state.pdf) return;
-    // Touch screens without the − and + buttons get them from the chip.
-    if (matchMedia('(max-width: 1000px) and (pointer: coarse)').matches) {
+    // Touch screens without the − and + buttons get them from the chip at
+    // fit width; zoomed, the chip fits, as its label says.
+    if (matchMedia('(max-width: 1000px) and (pointer: coarse)').matches && Math.round(state.pdf.zoom * 100) === 100) {
       e.stopPropagation();
       $('#zoom-menu').classList.toggle('hidden');
       return;
@@ -3051,8 +3140,11 @@ function wire() {
   $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
   $('#open-brief').addEventListener('click', () => state.docId && navigate('#brief=' + state.docId));
   // Close the color menus on any outside tap.
-  document.addEventListener('click', () => {
+  document.addEventListener('click', e => {
     document.querySelectorAll('.swatch-menu:not(.hidden), #zoom-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    // The account menu closes on a tap outside it or on one of its buttons.
+    const acct = $('#account-menu');
+    if (acct.open && (!acct.contains(e.target) || e.target.closest('.account-pop button'))) acct.open = false;
   });
   $('#toggle-notebook').addEventListener('click', () => {
     state.notebookOpen = !state.notebookOpen;
@@ -3089,7 +3181,8 @@ function wire() {
     else if (state.target) hideActions();
   });
   $('#pdf-scroll').addEventListener('scroll', () => {
-    if (state.target && state.target.kind !== 'selection') hideActions();
+    // An unzipped page stays open while you scroll.
+    if (state.target && state.target.kind !== 'selection' && !$('#action-bar').classList.contains('docked')) hideActions();
   }, { passive: true });
 
   // Drag and drop PDFs anywhere.

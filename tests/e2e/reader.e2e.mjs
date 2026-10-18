@@ -17,7 +17,14 @@ const OUT = process.env.E2E_OUT || '.';
 if (!B || !token || !FIXTURE) throw new Error('Run through scripts/e2e_reader.sh');
 const kit = `const __WA_CONFIG = ${JSON.stringify({ token, origin: B, openrouterKey: 'sk-or-test' })};\n` + readFileSync(ROOT + 'scripts/feature_test/testkit.js', 'utf8');
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+// Secondary actions sit behind More until it is opened.
+async function clickAction(page, label) {
+  const btn = page.locator(`#action-bar .action-btn:text-is("${label}")`);
+  if (!(await btn.isVisible())) await page.click('#action-bar .more-toggle');
+  await btn.click();
+}
+
+const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH, headless: true } : { channel: 'chrome', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 834, height: 1194 }, hasTouch: true, deviceScaleFactor: 2 });
 await ctx.addInitScript(kit);
 // Like iPad Safari (through 26.x): streams are not async-iterable. pdf.js's
@@ -142,7 +149,7 @@ try {
   const sel = await page.evaluate(() => __wa.selectText(1, 'softmax saturates, and gradients vanish'));
   check('kit selects across text runs', sel.includes('gradients vanish'), JSON.stringify(sel));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Explain")');
+  await clickAction(page, 'Explain');
   await page.waitForSelector('#toast.error');
   await wait(300);
   await page.click('#toggle-panel');
@@ -158,7 +165,7 @@ try {
   await wait(800);
   await page.evaluate(() => __wa.selectText(3, 'does the argument still hold when q and k are correlated'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Question")');
+  await clickAction(page, 'Question');
   await page.waitForSelector('dialog[open] .dialog-context');
   check('question dialog shows the passage', (await page.textContent('dialog .dialog-context')).includes('correlated'));
   await page.fill('dialog textarea', 'Does it hold after training?');
@@ -171,7 +178,7 @@ try {
   await wait(600);
   await page.evaluate(() => __wa.dragOnPage(2, 0.12, 0.3, 0.9, 0.36));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Equation card")');
+  await clickAction(page, 'Equation card');
   await page.waitForFunction(() => document.querySelector('dialog [name=front]')?.value.length > 0);
   check('card draft with raw LaTeX parsed', (await page.inputValue('dialog [name=front]')).includes('\\delta_{ij}'), await page.inputValue('dialog [name=front]'));
   // empty front keeps the editor open
@@ -195,21 +202,38 @@ try {
   const annosBefore = (await serverAnnos(3)).length;
   await page.evaluate(() => __wa.dragOnPage(2, 0.12, 0.3, 0.9, 0.36));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Comment")');
+  await clickAction(page, 'Comment');
   await page.click('dialog button[value="cancel"]');
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(2, 'little gradient reaches'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Comment")');
+  await clickAction(page, 'Comment');
   await page.click('dialog button[value="cancel"]');
   await wait(2500);
   const annosAfter = (await page.evaluate(() => __wa.serverItems('anno'))).filter(a => !a.deleted).length;
   check('cancelled actions leave no marks', annosAfter === annosBefore, `${annosBefore} -> ${annosAfter}`);
 
+  // Pencil tap on a saved region opens it with the Pen tool still active (#18)
+  await page.click('.tool[data-tool="pen"]');
+  const inkBefore = (await page.evaluate(() => __wa.serverItems('ink'))).length;
+  await page.evaluate(() => __wa.penTap(2, 0.5, 0.33));
+  await page.waitForSelector('#action-bar:not(.hidden)');
+  check('pencil tap opens a saved region', (await page.textContent('#action-bar .action-head')).startsWith('Region'));
+  check('a region unzips the page under it (#18)', await page.evaluate(() => {
+    const band = document.querySelector('.zip-band'), lower = document.querySelector('.zip-lower');
+    return !!band && band.contains(document.querySelector('#action-bar')) && Math.abs(lower.getBoundingClientRect().top - band.getBoundingClientRect().bottom) <= 1;
+  }));
+  await wait(1500);
+  check('pencil tap leaves no ink', (await page.evaluate(() => __wa.serverItems('ink'))).length === inkBefore);
+  await page.evaluate(() => __wa.penTap(2, 0.5, 0.9));
+  check('pencil tap away closes the menu', await page.evaluate(() => document.querySelector('#action-bar').classList.contains('hidden')));
+  check('...and zips the page closed', await page.evaluate(() => !document.querySelector('.zip-band') && !document.querySelector('.pdf-page[data-page="2"]').style.marginBottom && document.querySelector('#action-bar').parentNode === document.body));
+  await page.click('.tool[data-tool="select"]');
+
   // (dialogs) close on navigation
   await page.evaluate(() => __wa.selectText(2, 'little gradient reaches'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Question")');
+  await clickAction(page, 'Question');
   await page.waitForSelector('dialog[open]');
   await page.evaluate(() => { location.hash = '#study'; });
   await wait(500);
@@ -481,7 +505,7 @@ try {
   await page.waitForSelector('#action-bar:not(.hidden)');
   const marksNow = async () => { await wait(300); return page.locator('.pdf-page[data-page="1"] .anno-highlight').count(); };
   const m0 = await marksNow();
-  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  await clickAction(page, 'Highlight');
   const m1 = await marksNow();
   await page.click('[data-history="undo"] >> nth=0');
   const m2 = await marksNow();
@@ -503,7 +527,7 @@ try {
   // Explain on a passage marked Understood flags it Not clear yet again
   await page.evaluate(() => __wa.selectText(1, 'keys K and values V'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Not clear yet")');
+  await clickAction(page, 'Not clear yet');
   await wait(400);
   const tapMark = async () => {
     const pt = await page.evaluate(() => {
@@ -515,10 +539,10 @@ try {
     await page.waitForSelector('#action-bar:not(.hidden)');
   };
   await tapMark();
-  await page.click('#action-bar .action-btn:text-is("Understood")');
+  await clickAction(page, 'Understood');
   await wait(400);
   await tapMark();
-  await page.click('#action-bar .action-btn:text-is("Explain")');
+  await clickAction(page, 'Explain');
   let reflagged;
   for (let i = 0; i < 20 && reflagged !== 'unclear'; i++) {
     await wait(500);
@@ -653,7 +677,7 @@ try {
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(1, 'The factor 1/sqrt(d_k) is the subject'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Card")');
+  await clickAction(page, 'Card');
   await page.waitForSelector('dialog[open] .card-form');
   await page.fill('dialog [name=front]', 'MY OWN QUESTION');
   await wait(3500);
@@ -699,7 +723,7 @@ try {
   // Pin a passage to the Brief
   await page.evaluate(() => __wa.selectText(1, 'It is easy to overlook'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Add to Brief")');
+  await clickAction(page, 'Add to Brief');
   await wait(400);
   await page.goto(B + '/reader#brief=' + docId);
   await page.waitForSelector('.brief-body h2');
@@ -726,7 +750,7 @@ try {
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(1, 'weighted sum of the values'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Follow-up")');
+  await clickAction(page, 'Follow-up');
   await page.fill('dialog textarea', 'Check the weighting');
   await page.click('dialog button[value="ok"]');
   await wait(500);
@@ -739,7 +763,7 @@ try {
   });
   await page.mouse.click(fuPt.x, fuPt.y);
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Delete")');
+  await clickAction(page, 'Delete');
   await wait(600);
   await page.goto(B + '/reader#study');
   await page.waitForSelector('.task-row');
@@ -786,6 +810,8 @@ try {
   await page.click('#trash summary');
   await page.click('#trash [data-act="restore"]');
   await wait(600);
+  check('Restore opens the paper', (await page.evaluate(() => location.hash)) === '#doc=' + plain2Id, await page.evaluate(() => location.hash));
+  await library();
   const restoredRow = await prow().count();
   check('removed papers go to Recently deleted and can be restored', inTrash === 1 && inList === 0 && restoredRow === 1, `trash ${inTrash}, list ${inList}, restored ${restoredRow}`);
   await prow().locator('.side-more').click();
@@ -903,14 +929,14 @@ try {
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(2, 'Dividing by sqrt(d_k) restores'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Follow-up")');
+  await clickAction(page, 'Follow-up');
   await page.fill('dialog textarea', 'Saved with Enter');
   await page.keyboard.press('Enter');
   await wait(300);
   check('Enter saves a follow-up', !(await page.evaluate(() => document.querySelector('#dialog').open)));
   await page.evaluate(() => __wa.selectText(2, 'Each term q_i k_i has mean 0'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Not clear yet")');
+  await clickAction(page, 'Not clear yet');
   await wait(400);
   await page.goto(B + '/reader#study');
   await page.waitForSelector('.study');
@@ -1012,7 +1038,7 @@ try {
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(2, 'so by independence'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  await clickAction(page, 'Highlight');
   await wait(400);
   const hlPt = await page.evaluate(() => {
     const el = [...document.querySelectorAll('.pdf-page[data-page="2"] .anno-highlight')].pop();
@@ -1030,7 +1056,7 @@ try {
   await page.click('.tool[data-tool="region"]');
   await page.evaluate(() => __wa.dragOnPage(2, 0.12, 0.44, 0.9, 0.5));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Comment")');
+  await clickAction(page, 'Comment');
   await page.fill('dialog textarea', 'Which equation is this?');
   await page.click('dialog button[value="ok"]');
   await page.click('.tool[data-tool="select"]');
@@ -1067,7 +1093,7 @@ try {
   await page.click('.tool[data-tool="select"]');
   await page.evaluate(() => __wa.selectText(3, 'the weights stay spread out'));
   await page.waitForSelector('#action-bar:not(.hidden)');
-  await page.click('#action-bar .action-btn:text-is("Highlight")');
+  await clickAction(page, 'Highlight');
   await wait(300);
   const band = await page.evaluate(() => {
     const el = [...document.querySelectorAll('.pdf-page[data-page="3"] .anno-highlight')].pop();

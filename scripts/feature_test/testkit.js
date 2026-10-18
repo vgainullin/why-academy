@@ -70,6 +70,11 @@
       stroke(onPage(page, pts), pointerType);
       return 'stroke dispatched';
     },
+    // Quick Pencil tap at (x, y) on a PDF page: down and up on the same spot.
+    penTap(page, x, y, pointerType = 'pen') {
+      stroke(onPage(page, [[x, y]]), pointerType);
+      return 'tap dispatched';
+    },
     // Rectangle drag (Region tool) on a PDF page, in page fractions.
     dragOnPage(page, x0, y0, x1, y1, pointerType = 'pen') {
       const pts = [];

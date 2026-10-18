@@ -23,14 +23,20 @@
     <span id="sync-status" class="sync-status" role="status"></span>
     <button id="bug-btn" class="btn-settings bug-btn hidden" title="Report a bug (Ctrl+Shift+B)">Report bug <span class="bug-count hidden"></span></button>
     <div id="auth-area">
-      <button id="settings-btn" class="btn-settings" title="Settings">Settings</button>
       <button id="signin-btn" class="btn-signin hidden">Sign in</button>
       <button id="signup-btn" class="btn-signin hidden">Create account</button>
-      <div id="user-info" class="hidden">
-        <span id="user-name"></span>
-        <button id="add-passkey-btn" class="btn-signout" title="Register a passkey from another device">Add passkey</button>
-        <button id="signout-btn" class="btn-signout">Sign out</button>
-      </div>
+      <!-- Account and settings stay out of the way while reading (tester feedback #18). -->
+      <details id="account-menu" class="account-menu">
+        <summary class="btn-settings" title="Settings and account">&#8943;</summary>
+        <div class="account-pop">
+          <button id="settings-btn" class="btn-small" title="Settings">Settings</button>
+          <div id="user-info" class="hidden">
+            <span id="user-name"></span>
+            <button id="add-passkey-btn" class="btn-small" title="Register a passkey from another device">Add passkey</button>
+            <button id="signout-btn" class="btn-small">Sign out</button>
+          </div>
+        </div>
+      </details>
     </div>
   </header>
 

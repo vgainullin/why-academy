@@ -874,6 +874,8 @@ async function openDoc(docId, page, annoId, query) {
     showView('doc');
     closeDoc();
     state.docId = docId;
+    // A filter left on from another paper made marks look lost (tester U6).
+    state.panelFilter = 'all';
     $('#view-title').textContent = doc.data.title;
     const scroll = $('#pdf-scroll');
     scroll.innerHTML = '<div class="loading">Loading PDF...</div>';
@@ -3090,8 +3092,11 @@ function wire() {
   $('#toggle-note-panel').addEventListener('click', () => setPanel(!state.panelOpen));
   $('#open-brief').addEventListener('click', () => state.docId && navigate('#brief=' + state.docId));
   // Close the color menus on any outside tap.
-  document.addEventListener('click', () => {
+  document.addEventListener('click', e => {
     document.querySelectorAll('.swatch-menu:not(.hidden), #zoom-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    // The account menu closes on a tap outside it or on one of its buttons.
+    const acct = $('#account-menu');
+    if (acct.open && (!acct.contains(e.target) || e.target.closest('.account-pop button'))) acct.open = false;
   });
   $('#toggle-notebook').addEventListener('click', () => {
     state.notebookOpen = !state.notebookOpen;

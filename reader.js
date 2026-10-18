@@ -363,6 +363,8 @@ function setTool(tool) {
   });
   document.body.dataset.tool = tool;
   $('#clear-page').classList.toggle('hidden', tool !== 'eraser');
+  // Erase and Lasso use no color, on pages or pads.
+  $('#color-group').classList.toggle('hidden', tool === 'eraser' || tool === 'lasso');
   // Switching tools ends a lasso selection.
   window.dispatchEvent(new Event('ink-tool-change'));
   renderColors();
@@ -379,7 +381,9 @@ function renderColors() {
     btn.className = 'swatch active';
     btn.style.setProperty('--swatch', current);
     const kind = isHl ? 'highlighter' : 'pen';
-    btn.title = `${isHl ? 'Highlighter' : 'Pen'}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.sizes[kind]} (tap for colors and sizes)`;
+    // With Select or Region the chip sets the pen that notebook pads use.
+    const label = isHl ? 'Highlighter' : state.tool.tool === 'pen' ? 'Pen' : 'Notebook pen';
+    btn.title = `${label}: ${COLOR_NAMES[current].toLowerCase()}, ${state.tool.sizes[kind]} (tap for colors and sizes)`;
     btn.dataset.size = state.tool.sizes[kind];
     btn.setAttribute('aria-label', btn.title);
     btn.setAttribute('aria-expanded', 'false');
@@ -902,6 +906,11 @@ async function openDoc(docId, page, annoId, query) {
       onRegion: (p, rect) => showActions({ kind: 'region', page: p, rects: [rect], quote: view.textIn(p, rect) }),
       // Pencil tap on a mark opens it without switching to Select (#18).
       onTapMark: (a, x, y) => showActions({ kind: 'anno', anno: store.get(a.id), anchor: { left: x, top: y, bottom: y, width: 0 } }),
+      onTapAway: () => {
+        if (!state.target) return false;
+        hideActions();
+        return true;
+      },
     });
     state.pdf = view;
     let n;

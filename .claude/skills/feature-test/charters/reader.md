@@ -168,8 +168,9 @@ that the flow handles the result sensibly.
   actions before More.
 - With the Pen tool active, a quick pen tap (`__wa.penTap(page, x, y)`) on a
   saved region or highlight opens its actions, and leaves no ink dot.
-- A pen tap away from any mark still leaves a dot of ink, and a pen stroke
-  across a mark still draws.
+- With a mark's actions open, a pen tap away closes them and draws nothing;
+  with nothing open, a pen tap away leaves a dot of ink. A pen stroke across a
+  mark still draws.
 - Judge as the persona: with Pen active and the sidebar hidden, count the
   controls on screen. Which would you never use mid-reading? Name them.
 

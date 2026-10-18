@@ -37,6 +37,10 @@ tools this session has (Playwright MCP or Claude in Chrome).
   - `await __wa.serverItems(kind)` returns what actually synced to the server.
   - `__wa.syncStatus()` returns the sync state shown in the header.
 
+Sharpness at high zoom: the page canvas is capped (about 16 MP, like iPad
+Safari), and a `.pdf-detail` canvas over the visible area renders at full
+resolution after scrolling stops. Measure that canvas, not only the page's.
+
 Native selection and the reader's action bar react to real selection events,
 so after `selectText`, wait about half a second, then snapshot.
 
